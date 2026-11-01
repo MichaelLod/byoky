@@ -341,6 +341,23 @@ describe('background: usage counted while the wallet is locked', () => {
     expect((await restarted.internal('getAllowances')).usage).toEqual({ [APP]: { openai: 12 } });
   });
 
+  // R3-01: storage gives back an Infinity count as null, which used to throw
+  // away every app's held usage on a worker restart.
+  it('keeps every other app\'s held usage when one held count is unreadable', async () => {
+    const OTHER = 'https://other.example';
+    const local = await walletStorage(KEYS, { tokenAllowances: [{ origin: OTHER, totalLimit: 1000 }] });
+    const restarted = await unlocked(local, { _pendingUsage: { [APP]: { openai: null }, [OTHER]: { openai: 1000 } } });
+    await restarted.until(() => (restarted.local.data.usageTotals as any)?.[OTHER]?.openai === 1000, 5_000, 'usage counted');
+    expect(restarted.local.data.usageTotals).toEqual({ [OTHER]: { openai: 1000 } });
+    expect(await hold(restarted)).toBeNull();
+    // OTHER's allowance still counts what it used.
+    okUpstream(restarted);
+    const { payload } = await connectApproved(restarted, OTHER, { providers: [{ id: 'openai', required: true }] });
+    const refused = await restarted.proxy(OTHER, openaiChat(payload.sessionKey)).result;
+    expect(refused.error.error.code).toBe('QUOTA_EXCEEDED');
+    expect(restarted.fetch).not.toHaveBeenCalled();
+  });
+
   it('writes one HMAC per request, and verifies none it wrote itself', async () => {
     const h = await unlocked(await walletStorage(KEYS, ROUTED));
     okUpstream(h);

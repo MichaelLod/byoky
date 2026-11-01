@@ -10,6 +10,7 @@ import {
   USAGE_EPOCH_KEY,
   USAGE_KEY,
   USAGE_MAC_KEY,
+  MAX_TOKEN_COUNT,
   addUsageTotals,
   adoptLegacyRoutingState,
   defaultGroup,
@@ -17,10 +18,13 @@ import {
   isEmptyWallet,
   parseAllowance,
   readRoutingState,
+  parseUsageTotals,
   readUsageState,
+  salvageUsageTotals,
   signRoutingState,
   signUsageState,
   usageFromLog,
+  withUsage,
   type RoutingState,
   type UsageTotals,
 } from '../lib/routing-state';
@@ -174,6 +178,33 @@ describe('usage totals integrity', () => {
     expect(read).toEqual({ totals: {}, intact: false, epoch: 0 });
   });
 
+  // R3-01: a count of Infinity (an estimate from max_tokens 1e400) made
+  // every usage write throw, for every app, and storage turned it into null,
+  // which threw away every app's held usage on the next worker restart.
+  it('counts only whole, finite tokens, so the totals always sign', async () => {
+    let totals: UsageTotals = withUsage(TOTALS, OTHER, 'anthropic', Infinity);
+    totals = withUsage(totals, OTHER, 'anthropic', Number.NaN);
+    totals = withUsage(totals, OTHER, 'anthropic', -5);
+    totals = addUsageTotals(totals, { [OTHER]: { groq: Infinity, mistral: null as unknown as number } });
+    expect(totals).toEqual(TOTALS);
+    // A fraction is rounded up, never down.
+    expect(withUsage(TOTALS, APP, 'openai', 0.25)[APP].openai).toBe(401);
+    // A sum stops at MAX_TOKEN_COUNT instead of overflowing.
+    const huge = withUsage(withUsage({}, APP, 'openai', 1e308), APP, 'openai', 1e308);
+    expect(huge).toEqual({ [APP]: { openai: MAX_TOKEN_COUNT } });
+    const stored = structuredClone(await signUsageState(addUsageTotals(totals, huge), key, 3));
+    expect(await readUsageState(stored, key)).toMatchObject({ intact: true, totals: { [APP]: { openai: MAX_TOKEN_COUNT, anthropic: 10 } } });
+  });
+
+  it('reads only whole counts as signed totals, and salvages the rest app by app', () => {
+    expect(parseUsageTotals({ [APP]: { openai: 1.5 } })).toBeNull();
+    expect(parseUsageTotals({ [APP]: { openai: null } })).toBeNull();
+    expect(parseUsageTotals({ [APP]: { openai: 2 ** 60 } })).toBeNull();
+    // A refused state keeps every other app's counts, and rounds fractions up.
+    expect(salvageUsageTotals({ [USAGE_KEY]: { [APP]: { openai: null, anthropic: 2.5 }, [OTHER]: { groq: 5 } } }))
+      .toEqual({ [APP]: { anthropic: 3 }, [OTHER]: { groq: 5 } });
+  });
+
   it('refuses totals older than the newest seen', async () => {
     const before = await signUsageState(TOTALS, key, 7);
     expect((await readUsageState(before, key, 8)).intact).toBe(false);
@@ -220,6 +251,18 @@ describe('adopting unsigned state', () => {
     expect(bad.routing).toEqual({ groups: [expect.objectContaining({ id: 'default', providerId: '' })], appGroups: {}, allowances: [], hold: 'settings' });
     const badUsage = adoptLegacyRoutingState({ [GROUPS_KEY]: GROUPS, [USAGE_KEY]: { [APP]: 3 } });
     expect(badUsage).toEqual({ routing: { groups: GROUPS, appGroups: {}, allowances: [], hold: 'usage' }, usage: {} });
+  });
+
+  it('keeps the usage of every other app when one 1.1.1 count doesn\'t parse, and pauses apps', () => {
+    // 1.1.1 stored a count that had become Infinity as null, and could store a fraction.
+    const legacy = { [GROUPS_KEY]: GROUPS, [USAGE_KEY]: { [APP]: { anthropic: null, openai: 7 }, [OTHER]: { groq: 5 } } };
+    expect(adoptLegacyRoutingState(legacy)).toEqual({
+      routing: { groups: GROUPS, appGroups: {}, allowances: [], hold: 'usage' },
+      usage: { [APP]: { openai: 7 }, [OTHER]: { groq: 5 } },
+    });
+    // A fraction is rounded up: nothing was lost, so nothing is paused.
+    expect(adoptLegacyRoutingState({ [USAGE_KEY]: { [APP]: { openai: 100.5 } } }))
+      .toEqual({ routing: { groups: [], appGroups: {}, allowances: [] }, usage: { [APP]: { openai: 101 } } });
   });
 
   it('keeps origins from storage as keys, never as prototype access', () => {

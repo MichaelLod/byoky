@@ -122,6 +122,27 @@ function isCount(raw: unknown): raw is number {
   return typeof raw === 'number' && Number.isFinite(raw) && raw >= 0;
 }
 
+/**
+ * The most tokens a usage count holds. Counts stop growing here rather than
+ * overflow to Infinity, which storage would give back as null; this many is
+ * past any limit anyone sets.
+ */
+export const MAX_TOKEN_COUNT = Number.MAX_SAFE_INTEGER;
+
+/** A usage count as the wallet stores it: a whole number from 0 to MAX_TOKEN_COUNT. */
+function isTokenCount(raw: unknown): raw is number {
+  return Number.isSafeInteger(raw) && (raw as number) >= 0;
+}
+
+/**
+ * `raw` as a usage count: a finite number of 0 or more, rounded up and
+ * capped at MAX_TOKEN_COUNT. Undefined for anything else (NaN, Infinity,
+ * a negative number, not a number).
+ */
+export function toTokenCount(raw: unknown): number | undefined {
+  return isCount(raw) ? Math.min(Math.ceil(raw), MAX_TOKEN_COUNT) : undefined;
+}
+
 /** A string field that may be absent (undefined or null), or null if it is something else. */
 function optionalString(raw: unknown): string | undefined | null {
   if (raw === undefined || raw === null) return undefined;
@@ -195,7 +216,11 @@ export function parseAllowances(raw: unknown): TokenAllowance[] | null {
   return allowances;
 }
 
-/** The stored usage totals, or null if they aren't origin → provider → token count. */
+/**
+ * The stored usage totals, or null if they aren't origin → provider → token
+ * count, every count a whole number (isTokenCount). What the wallet signs
+ * always is (UsageCounter).
+ */
 export function parseUsageTotals(raw: unknown): UsageTotals | null {
   if (raw === undefined) return {};
   if (!isRecord(raw)) return null;
@@ -203,10 +228,34 @@ export function parseUsageTotals(raw: unknown): UsageTotals | null {
   for (const [origin, byProvider] of Object.entries(raw)) {
     if (!isRecord(byProvider)) return null;
     const entries = Object.entries(byProvider);
-    if (!entries.every(([, tokens]) => isCount(tokens))) return null;
+    if (!entries.every(([, tokens]) => isTokenCount(tokens))) return null;
     apps.push([origin, Object.fromEntries(entries) as Record<string, number>]);
   }
   return Object.fromEntries(apps);
+}
+
+/**
+ * Usage totals read as far as they go: every count toTokenCount takes, the
+ * rest left out, so one app's malformed count (a null, say: Infinity after a
+ * trip through storage) costs no other app its usage. `complete` is false
+ * when a count or an app was left out; a fraction rounded up isn't.
+ */
+export function salvageUsage(raw: unknown): { totals: UsageTotals; complete: boolean } {
+  const totals = new UsageCounter();
+  if (raw === undefined) return { totals: {}, complete: true };
+  if (!isRecord(raw)) return { totals: {}, complete: false };
+  let complete = true;
+  for (const [origin, byProvider] of Object.entries(raw)) {
+    if (!isRecord(byProvider)) {
+      complete = false;
+      continue;
+    }
+    for (const [providerId, tokens] of Object.entries(byProvider)) {
+      if (isCount(tokens)) totals.add(origin, providerId, tokens);
+      else complete = false;
+    }
+  }
+  return { totals: totals.toTotals(), complete };
 }
 
 function parseHold(raw: unknown): LimitsHold | undefined | null {
@@ -326,9 +375,9 @@ export function droppedRoutingState(stored: Record<string, unknown>): RoutingSta
   };
 }
 
-/** What a refused usage state keeps: the stored totals as far as they parse. */
+/** What a refused usage state keeps: the stored totals as far as they parse (salvageUsage). */
 export function salvageUsageTotals(stored: Record<string, unknown>): UsageTotals {
-  return parseUsageTotals(stored[USAGE_KEY]) ?? {};
+  return salvageUsage(stored[USAGE_KEY]).totals;
 }
 
 /** `state` with apps paused for `reason`; 'settings' outranks 'usage'. */
@@ -386,15 +435,20 @@ export function isEmptyWallet(stored: Record<string, unknown>): boolean {
 
 /**
  * Token counts keyed in Maps, so an origin or provider id read from storage
- * (say "__proto__") is only ever a key.
+ * (say "__proto__") is only ever a key. Every count it gives back is one
+ * parseUsageTotals accepts: what toTokenCount doesn't take is left out, and
+ * a sum stops at MAX_TOKEN_COUNT. So totals built here always sign, and a
+ * bad count from one app can't keep the others' from being written.
  */
 class UsageCounter {
   private readonly apps = new Map<string, Map<string, number>>();
 
   add(origin: string, providerId: string, tokens: number) {
+    const count = toTokenCount(tokens);
+    if (count === undefined) return;
     let app = this.apps.get(origin);
     if (!app) this.apps.set(origin, (app = new Map()));
-    app.set(providerId, (app.get(providerId) ?? 0) + tokens);
+    app.set(providerId, Math.min((app.get(providerId) ?? 0) + count, MAX_TOKEN_COUNT));
   }
 
   addTotals(totals: UsageTotals) {
@@ -424,17 +478,22 @@ export function usageFromLog(log: unknown): UsageTotals {
 /**
  * Unsigned routing and usage state, as a wallet adopts it (see the module
  * comment): kept as it is where it parses. If it doesn't, it is replaced
- * as a refused signed state is (droppedRoutingState, apps paused). Missing
- * usage totals are seeded from the request log (`stored.requestLog`).
+ * as a refused signed state is (droppedRoutingState, apps paused). Usage
+ * totals keep what parses (salvageUsage: 1.1.1 could store a fraction, or
+ * null for a count that had become Infinity), and apps are paused if any
+ * count was left out. Missing totals are seeded from the request log
+ * (`stored.requestLog`).
  */
 export function adoptLegacyRoutingState(stored: Record<string, unknown>): { routing: RoutingState; usage: UsageTotals } {
   const groups = parseGroups(stored[GROUPS_KEY]);
   const appGroups = parseAppGroups(stored[APP_GROUPS_KEY]);
   const allowances = parseAllowances(stored[ALLOWANCES_KEY]);
-  const usage = stored[USAGE_KEY] === undefined ? usageFromLog(stored.requestLog) : parseUsageTotals(stored[USAGE_KEY]);
+  const usage = stored[USAGE_KEY] === undefined
+    ? { totals: usageFromLog(stored.requestLog), complete: true }
+    : salvageUsage(stored[USAGE_KEY]);
   let routing: RoutingState = groups && appGroups && allowances ? { groups, appGroups, allowances } : droppedRoutingState(stored);
-  if (!usage) routing = withHold(routing, 'usage');
-  return { routing, usage: usage ?? {} };
+  if (!usage.complete) routing = withHold(routing, 'usage');
+  return { routing, usage: usage.totals };
 }
 
 /** The sum of `totals`, as a new object. */
