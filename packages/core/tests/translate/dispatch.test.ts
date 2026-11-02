@@ -788,3 +788,47 @@ describe('cross-family dispatch — errors in the middle of a Gemini stream', ()
     expect(out).not.toContain('data: {"error"');
   });
 });
+
+describe('cross-family dispatch — Gemini OpenAPI schemas (Type.OBJECT) reach the other families as JSON Schema', () => {
+  // What @google/genai sends for a tool built with Type.OBJECT / Type.STRING.
+  const params = {
+    type: 'OBJECT',
+    properties: { city: { type: 'STRING', nullable: true }, days: { type: 'ARRAY', items: { type: 'INTEGER' }, minItems: '1' } },
+    required: ['city'],
+  };
+  const expected = {
+    type: 'object',
+    properties: {
+      city: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+      days: { type: 'array', items: { type: 'integer' }, minItems: 1 },
+    },
+    required: ['city'],
+  };
+  const toolBody = JSON.stringify({
+    contents: [{ role: 'user', parts: [{ text: 'weather in Paris?' }] }],
+    tools: [{ functionDeclarations: [{ name: 'get_weather', description: 'w', parameters: params }] }],
+  });
+  const schemaBody = JSON.stringify({
+    contents: [{ role: 'user', parts: [{ text: 'x' }] }],
+    generationConfig: { responseMimeType: 'application/json', responseSchema: { type: 'OBJECT', properties: { n: { type: 'STRING' } } } },
+  });
+
+  it('gemini → anthropic: input_schema.type is object', () => {
+    const out = JSON.parse(translateRequest(ctx('gemini', 'anthropic'), toolBody));
+    expect(out.tools[0].input_schema).toEqual(expected);
+  });
+
+  it('gemini → openai: function parameters and response_format', () => {
+    const tools = JSON.parse(translateRequest(ctx('gemini', 'openai'), toolBody));
+    expect(tools.tools[0].function.parameters).toEqual(expected);
+    const rf = JSON.parse(translateRequest(ctx('gemini', 'openai'), schemaBody));
+    expect(rf.response_format.json_schema.schema).toEqual({ type: 'object', properties: { n: { type: 'string' } } });
+  });
+
+  it('gemini → cohere: function parameters and json_schema', () => {
+    const tools = JSON.parse(translateRequest(ctx('gemini', 'cohere'), toolBody));
+    expect(tools.tools[0].function.parameters).toEqual(expected);
+    const rf = JSON.parse(translateRequest(ctx('gemini', 'cohere'), schemaBody));
+    expect(rf.response_format.json_schema).toEqual({ type: 'object', properties: { n: { type: 'string' } } });
+  });
+});

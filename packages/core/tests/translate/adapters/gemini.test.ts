@@ -440,7 +440,7 @@ describe('geminiAdapter — JSON Schema fields', () => {
     expect(ir.responseFormat).toEqual({ type: 'json_schema', schema: { type: 'object' } });
   });
 
-  it('still parses the OpenAPI parameters and responseSchema fields', () => {
+  it('parses the OpenAPI parameters and responseSchema fields into JSON Schema', () => {
     const ir = geminiAdapter.parseRequest(
       JSON.stringify({
         contents: [{ role: 'user', parts: [{ text: 'x' }] }],
@@ -448,8 +448,73 @@ describe('geminiAdapter — JSON Schema fields', () => {
         generationConfig: { responseMimeType: 'application/json', responseSchema: { type: 'STRING' } },
       }),
     );
-    expect(ir.tools?.[0].parameters).toEqual({ type: 'OBJECT' });
-    expect(ir.responseFormat).toEqual({ type: 'json_schema', schema: { type: 'STRING' } });
+    expect(ir.tools?.[0].parameters).toEqual({ type: 'object' });
+    expect(ir.responseFormat).toEqual({ type: 'json_schema', schema: { type: 'string' } });
+  });
+
+  // The body @google/genai sends for Type.* schemas (captured from 1.46).
+  const sdkSchema = {
+    type: 'OBJECT',
+    properties: {
+      city: { type: 'STRING', description: 'City name' },
+      unit: { type: 'STRING', format: 'enum', enum: ['C', 'F'], nullable: true, description: 'Unit' },
+      days: { type: 'ARRAY', items: { type: 'INTEGER', example: 3 }, minItems: '1', maxItems: '7' },
+      when: { anyOf: [{ type: 'STRING' }, { type: 'INTEGER' }], nullable: true },
+      extra: { type: 'TYPE_UNSPECIFIED', description: 'anything' },
+    },
+    required: ['city'],
+    propertyOrdering: ['city', 'unit', 'days', 'when', 'extra'],
+  };
+  const jsonSchema = {
+    type: 'object',
+    properties: {
+      city: { type: 'string', description: 'City name' },
+      unit: { description: 'Unit', anyOf: [{ type: 'string', enum: ['C', 'F'] }, { type: 'null' }] },
+      days: { type: 'array', items: { type: 'integer' }, minItems: 1, maxItems: 7 },
+      when: { anyOf: [{ type: 'string' }, { type: 'integer' }, { type: 'null' }] },
+      extra: { description: 'anything' },
+    },
+    required: ['city'],
+  };
+
+  it('turns nested Type.* values, nullable, int64 strings, propertyOrdering and format:enum into JSON Schema', () => {
+    const body = {
+      contents: [{ role: 'user', parts: [{ text: 'x' }] }],
+      tools: [{ functionDeclarations: [{ name: 'get_weather', parameters: sdkSchema }] }],
+    };
+    const before = JSON.stringify(body);
+    const ir = geminiAdapter.parseRequest(before);
+    expect(ir.tools?.[0].parameters).toEqual(jsonSchema);
+    const rf = geminiAdapter.parseRequest(
+      JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: 'x' }] }],
+        generationConfig: { responseMimeType: 'application/json', responseSchema: sdkSchema },
+      }),
+    ).responseFormat;
+    expect(rf).toEqual({ type: 'json_schema', schema: jsonSchema });
+  });
+
+  it('keeps a nullable root an object schema', () => {
+    const ir = geminiAdapter.parseRequest(
+      JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: 'x' }] }],
+        tools: [{ functionDeclarations: [{ name: 'f', parameters: { type: 'OBJECT', nullable: true, properties: {} } }] }],
+      }),
+    );
+    expect(ir.tools?.[0].parameters).toEqual({ type: 'object', properties: {} });
+  });
+
+  it('leaves parametersJsonSchema and responseJsonSchema as they are', () => {
+    const odd = { type: 'object', properties: { a: { type: 'string', example: 'x', format: 'enum' } } };
+    const ir = geminiAdapter.parseRequest(
+      JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: 'x' }] }],
+        tools: [{ functionDeclarations: [{ name: 'f', parametersJsonSchema: odd, parameters: { type: 'OBJECT' } }] }],
+        generationConfig: { responseMimeType: 'application/json', responseJsonSchema: odd, responseSchema: { type: 'STRING' } },
+      }),
+    );
+    expect(ir.tools?.[0].parameters).toEqual(odd);
+    expect(ir.responseFormat).toEqual({ type: 'json_schema', schema: odd });
   });
 });
 
