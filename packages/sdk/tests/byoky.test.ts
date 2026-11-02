@@ -624,6 +624,77 @@ describe('Byoky', () => {
     expect(disconnectCb).toHaveBeenCalledTimes(1);
   });
 
+  describe('abort while the session is renewed', () => {
+    const tick = () => new Promise((r) => setTimeout(r, 10));
+    const ofType = (type: string) => postedMessages.filter((m) => m.data.type === type);
+    const answer = (entry: { data: Record<string, unknown>; port?: MessagePort }, msg: Record<string, unknown>) =>
+      entry.port!.postMessage({ ...msg, requestId: entry.data.requestId });
+
+    /** A request whose session the wallet dropped (locked); the wallet now waits for the user. */
+    async function waitingForUser(signal: AbortSignal, options?: { timeout?: number }) {
+      const connectPromise = new Byoky(options).connect({ providers: [{ id: 'anthropic' }] });
+      await tick();
+      answer(ofType('BYOKY_CONNECT_REQUEST')[0], {
+        type: 'BYOKY_CONNECT_RESPONSE',
+        payload: { sessionKey: 'byk_locked', proxyUrl: 'extension-proxy', providers: { anthropic: { available: true, authMethod: 'api_key' } } },
+      });
+      const session = await connectPromise;
+
+      let settled: string | null = null;
+      const fetchPromise = session.createFetch('anthropic')('https://api.anthropic.com/v1/messages', { method: 'POST', body: '{}', signal });
+      fetchPromise.then((r) => { settled = `resolved:${r.status}`; }, (e: unknown) => { settled = `rejected:${(e as Error)?.name}`; });
+      await tick();
+      answer(ofType('BYOKY_PROXY_REQUEST')[0], {
+        type: 'BYOKY_PROXY_RESPONSE_ERROR', status: 401,
+        error: { code: 'SESSION_EXPIRED', message: 'Invalid or expired session' },
+      });
+      await tick();
+      answer(ofType('BYOKY_CONNECT_REQUEST')[1], { type: 'BYOKY_ERROR', payload: { code: 'NO_SESSION', message: 'No active session' } });
+      await tick();
+      expect(ofType('BYOKY_CONNECT_REQUEST').length).toBe(3);
+      expect(settled).toBeNull();
+      return { session, fetchPromise, settled: () => settled };
+    }
+
+    it('rejects with an AbortError at once, and sends nothing once the user approves', async () => {
+      const controller = new AbortController();
+      const { session, fetchPromise, settled } = await waitingForUser(controller.signal);
+
+      controller.abort();
+      await tick();
+      expect(settled()).toBe('rejected:AbortError');
+      await expect(fetchPromise).rejects.toMatchObject({ name: 'AbortError' });
+
+      // The renewal still finishes, for the session's other requests.
+      answer(ofType('BYOKY_CONNECT_REQUEST')[2], {
+        type: 'BYOKY_CONNECT_RESPONSE',
+        payload: { sessionKey: 'byk_renewed', proxyUrl: 'extension-proxy', providers: { anthropic: { available: true, authMethod: 'api_key' } } },
+      });
+      await tick();
+      expect(session.sessionKey).toBe('byk_renewed');
+      expect(ofType('BYOKY_PROXY_REQUEST').length).toBe(1);
+    });
+
+    it('rejects with an AbortError, not the 401, when the renewal then fails', async () => {
+      const controller = new AbortController();
+      const { fetchPromise } = await waitingForUser(controller.signal, { timeout: 200 });
+
+      controller.abort();
+      // The connect times out after the abort.
+      await new Promise((r) => setTimeout(r, 250));
+      await expect(fetchPromise).rejects.toMatchObject({ name: 'AbortError' });
+    });
+
+    it('rejects with the reason the signal was aborted with', async () => {
+      const controller = new AbortController();
+      const { fetchPromise } = await waitingForUser(controller.signal);
+
+      const reason = new Error('user pressed stop');
+      controller.abort(reason);
+      await expect(fetchPromise).rejects.toBe(reason);
+    });
+  });
+
   it('passes requestTimeout to the session fetch', async () => {
     const connectPromise = new Byoky({ requestTimeout: 50 }).connect();
     await new Promise((r) => setTimeout(r, 10));

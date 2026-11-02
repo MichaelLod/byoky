@@ -3,7 +3,7 @@ import { ByokyError, ByokyErrorCode } from '@byoky/core';
 import { replayableArgs } from './body.js';
 import { fetchModelsList } from './list-models-fetch.js';
 import { isExtensionInstalled, getStoreUrl, resolveMessageTarget } from './detect.js';
-import { createProxyFetch } from './proxy-fetch.js';
+import { abortReason, createProxyFetch } from './proxy-fetch.js';
 import { createRelayClient, type RelayConnection } from './relay-client.js';
 import { ConnectModal, type ModalOptions } from './modal/connect-modal.js';
 import { createMockSession, type MockConnectOptions } from './mock.js';
@@ -350,13 +350,20 @@ export class Byoky {
           // The retry below sends the request again, so a stream body or a
           // Request input's body is read into bytes once, up front.
           const [safeInput, safeInit] = await replayableArgs(input, init);
+          // replayableArgs moves a Request input's signal into init.
+          const signal = safeInit?.signal ?? undefined;
 
           const resp = await proxyFetch(safeInput, safeInit);
 
           if (resp.status === 401 && await walletErrorCode(resp) === ByokyErrorCode.SESSION_EXPIRED) {
-            if (await attemptReconnect()) {
+            // The renewal may wait up to `timeout` for the user to unlock or
+            // approve; an abort ends this request's wait, like fetch, and
+            // leaves the renewal to finish for the session's other requests.
+            if (signal?.aborted) throw abortReason(signal);
+            if (await raceAbort(attemptReconnect(), signal)) {
               return proxyFetch(safeInput, safeInit);
             }
+            if (signal?.aborted) throw abortReason(signal);
           } else if (resp.status === 503 && await walletErrorCode(resp) === ByokyErrorCode.WALLET_RELOADED) {
             onWalletReloaded();
           }
@@ -580,6 +587,16 @@ export class Byoky {
       });
     });
   }
+}
+
+/** `promise`, or a rejection with the abort reason as soon as `signal` aborts. */
+function raceAbort<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (!signal) return promise;
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(abortReason(signal));
+    signal.addEventListener('abort', onAbort, { once: true });
+    promise.then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort));
+  });
 }
 
 function isWalletReloaded(err: unknown): boolean {

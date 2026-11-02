@@ -135,7 +135,9 @@ wallet can't serve reads `{ available: false }`.
 The `fetch` from `createFetch` takes an `AbortSignal` like the real one:
 aborting before the response headers rejects with the signal's reason (an
 `AbortError` by default), aborting later errors the body, and either way the
-wallet stops the upstream call. With or without a signal, a request that
+wallet stops the upstream call. An abort also ends the wait while an expired
+session is renewed (the wallet asking the user to unlock or approve). With
+or without a signal, a request that
 gets no response headers within `requestTimeout` is stopped the same way and
 rejects with a `PROXY_ERROR`.
 

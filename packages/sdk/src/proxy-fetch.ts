@@ -184,6 +184,6 @@ export function createProxyFetch(
 }
 
 /** What fetch rejects with on abort: the signal's reason, an AbortError by default. */
-function abortReason(signal: AbortSignal): unknown {
+export function abortReason(signal: AbortSignal): unknown {
   return signal.reason ?? new DOMException('The operation was aborted.', 'AbortError');
 }
