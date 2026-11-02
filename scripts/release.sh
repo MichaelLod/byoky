@@ -1036,11 +1036,14 @@ fi
 # Source for AMO, whose reviewers rebuild the add-on from it: the workspace
 # files the build reads (all three packages extend tsconfig.base.json) and
 # BUILD-FIREFOX.md. The add-on goes to AMO only if the zip rebuilds it.
+# The zip is public (AMO, and the GitHub release), so it takes the files git
+# would, as they are on disk with the bump: what .gitignore leaves out (.env
+# files, build output, node_modules) stays out, and so does a secret in it.
 SOURCE_ZIP="dist/byoky-source-v${NEW_VERSION}.zip"
-zip -r "$SOURCE_ZIP" \
+git ls-files -z --cached --others --exclude-standard -- \
   package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json README.md \
   packages/core packages/sdk packages/extension \
-  -x "*/node_modules/*" "*/dist/*" "*/.output/*" "*/.wxt/*" "*.DS_Store"
+  | xargs -0 zip -q "$SOURCE_ZIP"
 NOTE_DIR=$(mktemp -d)
 amo_build_note > "$NOTE_DIR/BUILD-FIREFOX.md"
 zip -j "$SOURCE_ZIP" "$NOTE_DIR/BUILD-FIREFOX.md"

@@ -72,7 +72,7 @@ function sandbox({ version = '1.1.1', versionCode = 30, android = false, real = 
     write(join(work, 'packages/extension/.output', out, 'manifest.json'), JSON.stringify({ version }) + '\n')
   }
   for (const f of ['pnpm-lock.yaml', 'pnpm-workspace.yaml', 'tsconfig.base.json', 'README.md']) write(join(work, f), '\n')
-  write(join(work, '.gitignore'), 'dist/\nbuild/\n.output/\n')
+  write(join(work, '.gitignore'), 'node_modules/\ndist/\n.output/\nbuild/\n.env\n.env.local\n')
   mkdirSync(join(work, 'scripts/tests'), { recursive: true })
   copyFileSync(join(SCRIPTS, 'release.sh'), join(work, 'scripts/release.sh'))
   chmodSync(join(work, 'scripts/release.sh'), 0o755)
@@ -400,6 +400,11 @@ test('a release from main bumps, commits, pushes main and the tag together, and 
   mkdirSync(join(s.work, 'dist'))
   execFileSync('zip', ['-qj', join(s.work, 'dist/byoky-chrome-v1.1.2.zip'), join(s.base, 'stale/old-chunk.js')])
 
+  // Files .gitignore leaves out never reach the public source zip.
+  write(join(s.work, 'packages/extension/.env.local'), 'SECRET=from-env-local\n')
+  write(join(s.work, 'packages/core/node_modules/dep/index.js'), 'dep')
+  write(join(s.work, 'packages/sdk/dist/index.js'), 'built')
+
   const r = s.run(['1.1.2', '--yes', '--skip-mobile'], { STUB_GH_RELEASE_MISSING: '1' })
   assert.equal(r.code, 0, r.out)
   assert.equal(s.origin('log', '-1', '--format=%s', 'main').trim(), 'Bump to v1.1.2 (native 1.1.2/31)')
@@ -409,7 +414,10 @@ test('a release from main bumps, commits, pushes main and the tag together, and 
   assert.match(r.out, /Chrome Web Store: uploaded, publishes after review/)
   assert.match(r.out, /Firefox Add-ons: skipped \(credentials not configured\)/)
   assert.doesNotMatch(unzipList(join(s.work, 'dist/byoky-chrome-v1.1.2.zip')), /old-chunk\.js/)
-  assert.match(unzipList(join(s.work, 'dist/byoky-source-v1.1.2.zip')), /tsconfig\.base\.json[\s\S]*BUILD-FIREFOX\.md/)
+  const source = unzipList(join(s.work, 'dist/byoky-source-v1.1.2.zip'))
+  assert.match(source, /tsconfig\.base\.json[\s\S]*BUILD-FIREFOX\.md/)
+  assert.match(source, /packages\/core\/package\.json/)
+  assert.doesNotMatch(source, /\.env\.local|node_modules|packages\/sdk\/dist|\.output/)
   const note = execFileSync('unzip', ['-p', join(s.work, 'dist/byoky-source-v1.1.2.zip'), 'BUILD-FIREFOX.md'], { encoding: 'utf8' })
   assert.ok(note.includes(`built with Node.js ${process.versions.node}.`), note)
 })
