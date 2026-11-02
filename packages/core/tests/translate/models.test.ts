@@ -34,6 +34,11 @@ describe('MODELS', () => {
     expect(getModel('gemini-3.8-flash')?.family).toBe('gemini');
   });
 
+  it('defaults Gemini to 3.6 Flash, which answers (3.8 Flash failed every call on 2 Nov 2026)', () => {
+    expect(DEFAULT_MODELS.gemini).toBe('gemini-3.6-flash');
+    expect(getModel('gemini-3.6-flash')).toMatchObject({ family: 'gemini', maxOutput: 65_536, contextWindow: 1_048_576 });
+  });
+
   it('has no shut-down models', () => {
     // Requests to these fail at the provider (checked 2026-11-01).
     const shutDown = [

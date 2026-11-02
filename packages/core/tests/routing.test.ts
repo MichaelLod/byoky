@@ -75,7 +75,7 @@ describe('resolveRoute', () => {
       const decision = resolveRoute('anthropic', group('gemini'), credentials);
 
       expect(decision!.credential.id).toBe('c2');
-      expect(decision!.translation?.dstModel).toBe('gemini-3.8-flash');
+      expect(decision!.translation?.dstModel).toBe('gemini-3.6-flash');
     });
 
     it('skips cross-family when neither the group nor the provider names a model', () => {
@@ -437,7 +437,7 @@ describe('autoRouteModelFor (F015)', () => {
   it('names only models each provider serves', () => {
     expect(autoRouteModelFor('anthropic')).toBe('claude-sonnet-4-6');
     expect(autoRouteModelFor('openai')).toBe('gpt-5.5');
-    expect(autoRouteModelFor('gemini')).toBe('gemini-3.8-flash');
+    expect(autoRouteModelFor('gemini')).toBe('gemini-3.6-flash');
     expect(autoRouteModelFor('cohere')).toBe('command-a-03-2025');
     expect(autoRouteModelFor('openrouter')).toBe('openai/gpt-5.5');
     for (const id of ['deepseek', 'groq', 'mistral', 'xai', 'together', 'fireworks', 'perplexity', 'azure_openai', 'ollama', 'lm_studio', 'not-real', 'constructor', '__proto__']) {
