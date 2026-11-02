@@ -119,7 +119,8 @@ struct CredentialEntryView: View {
                 } header: {
                     ListHeader("Endpoint")
                 } footer: {
-                    ListFooter("Your Azure OpenAI resource endpoint, from Keys and Endpoint in the Azure portal. This key is only ever sent to this endpoint.")
+                    // Where the key is sent is said once, under the key.
+                    ListFooter("Your Azure OpenAI resource endpoint, from Keys and Endpoint in the Azure portal.")
                 }
                 .retroRow()
             }
@@ -188,7 +189,8 @@ struct CredentialEntryView: View {
                     } else if isLocalProvider {
                         Text("Leave blank if your local server has no auth. Any key you enter is stored encrypted in the iOS Keychain and forwarded as a Bearer token.")
                     } else {
-                        Text("Your key will be encrypted with AES-256-GCM and stored in the iOS Keychain. It never leaves this device.")
+                        // The key does leave the phone: in the request to the provider.
+                        Text("Your key is encrypted with AES-256-GCM, stored in the iOS Keychain on this device and only sent to \(isAzure ? "the endpoint above" : provider.name).")
                     }
                 }
             }

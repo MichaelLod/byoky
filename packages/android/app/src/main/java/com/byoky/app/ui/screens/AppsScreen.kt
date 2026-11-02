@@ -63,8 +63,8 @@ import kotlinx.coroutines.withContext
  * (assign an app to a group → its requests use that group's credential and,
  * when the group's destination is in a different family, get translated on
  * the fly). Mirrors the extension's `ConnectedApps.tsx` page; the mobile
- * gesture is long-press → "Move to group" sheet rather than drag-and-drop
- * since touch drag is awkward for small targets.
+ * gesture is tap → "Move to group" sheet rather than drag-and-drop since
+ * touch drag is awkward for small targets.
  */
 /**
  * Pending capability-gap confirmation. Set when the user has tapped a target
@@ -363,7 +363,7 @@ private fun ConfirmDestructiveDialog(
 /**
  * One group with its assigned apps. Header shows the group name + provider/model
  * pin, body lists the connected apps, footer is empty placeholder when nothing's
- * assigned. Long-press an app to move it.
+ * assigned. Tap an app to move it.
  */
 @Composable
 private fun GroupBucket(
@@ -471,7 +471,7 @@ private fun GroupBucket(
         if (sessions.isEmpty()) {
             Text(
                 if (isDefault) "Apps without an assigned group land here."
-                else "Long-press an app and pick this group to move it here.",
+                else "Tap an app and pick this group to move it here.",
                 color = Dim,
                 fontSize = 12.sp,
                 modifier = Modifier

@@ -85,7 +85,7 @@ internal fun AddAppDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Text(
-                    "Enter the address of a web app that supports Byoky. It opens inside the wallet, and your keys never leave this device.",
+                    "Enter the address of a web app that supports Byoky. It opens inside the wallet, and the app never sees your keys.",
                     fontSize = 13.sp,
                 )
                 RetroTextField(

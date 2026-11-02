@@ -160,8 +160,11 @@ fun WalletScreen(
                     )
                 }
                 items(credentials, key = { it.id }) { credential ->
+                    // The key is stored before the credential is listed, and never replaced.
+                    val hasKey = remember(credential.id) { wallet.hasSecret(credential.id) }
                     CredentialCard(
                         credential = credential,
+                        hasKey = hasKey,
                         usage = usageByProvider[credential.providerId],
                         onOpenStats = { statsCredentialId = credential.id },
                         onRename = { renameTarget = credential },
@@ -414,7 +417,7 @@ private fun EmptyWallet(modifier: Modifier, onAdd: () -> Unit) {
         CapsText("No credentials yet", style = HeadingStyle, color = Bone)
         Spacer(Modifier.height(8.dp))
         Text(
-            "Add your first API key to get started. Keys are encrypted with your master password and never leave this device.",
+            "Add your first API key to get started. Keys are encrypted with your master password, stored on this device and only sent to the provider you add them for.",
             color = Fog,
             textAlign = TextAlign.Center,
             fontSize = 14.sp,
@@ -428,6 +431,7 @@ private fun EmptyWallet(modifier: Modifier, onAdd: () -> Unit) {
 @Composable
 private fun CredentialCard(
     credential: Credential,
+    hasKey: Boolean,
     usage: CredentialUsageStats?,
     onOpenStats: () -> Unit,
     onRename: () -> Unit,
@@ -460,8 +464,7 @@ private fun CredentialCard(
                 )
                 Spacer(Modifier.height(2.dp))
                 val providerName = provider?.name ?: credential.providerId
-                // OAuth on Android is always an Anthropic setup token; say so, as the add sheet does.
-                val typeLabel = if (credential.authMethod == AuthMethod.API_KEY) "API Key" else "Setup Token"
+                val typeLabel = credentialTypeLabel(credential.providerId, credential.authMethod, hasKey)
                 // One text, so at large font sizes it wraps between words
                 // instead of cutting the provider name down to an ellipsis.
                 Text(
@@ -511,6 +514,17 @@ private fun CredentialCard(
             )
         }
     }
+}
+
+/**
+ * What a credential card calls its credential. OAuth on Android is always an
+ * Anthropic setup token; say so, as the add sheet does. An Ollama or LM
+ * Studio server added without a key (it has no auth) has no API key.
+ */
+internal fun credentialTypeLabel(providerId: String, authMethod: AuthMethod, hasKey: Boolean): String = when {
+    authMethod != AuthMethod.API_KEY -> "Setup Token"
+    !hasKey && (providerId == "ollama" || providerId == "lm_studio") -> "No auth"
+    else -> "API Key"
 }
 
 /**
