@@ -31,7 +31,7 @@ const PASSWORD = 'correct horse battery staple 42';
 // Well past the 30 s an idle worker gets.
 const UPSTREAM_DELAY_S = 45;
 
-interface Report { role: string; event: string; status?: number; code?: string; body?: string }
+interface Report { role: string; event: string; status?: number; code?: string; body?: string; at?: number }
 
 const PAGE = `<!DOCTYPE html>
 <html><head><title>worker lifetime</title>
@@ -56,6 +56,7 @@ const PAGE = `<!DOCTYPE html>
       const session = await byoky.connect({ providers: [{ id: 'ollama' }] });
       await report('connected');
       await waitGo();
+      await report('fetch-start');
       try {
         const f = session.createFetch('ollama');
         const resp = await f(params.get('upstream') + '/v1/chat/completions', {
@@ -119,12 +120,15 @@ async function walletPage(browser: Browser, id: string) {
 }
 
 test.describe('the extension background outlives a long request and a pending connect (F001)', () => {
-  test.setTimeout(150_000);
+  test.setTimeout(180_000);
 
   test('a request slower than 30 s completes and is counted, and a connect left 45 s can still be approved', async () => {
     test.skip(!fs.existsSync(path.join(EXTENSION_PATH, 'manifest.json')), 'build the extension first (pnpm build:e2e)');
 
     const reports: Report[] = [];
+    // What the fake upstream saw, for the failure message.
+    const upstreamEvents: Array<{ event: string; at: number }> = [];
+    let startedAt = Date.now();
     let go = false;
     let upstreamClosedEarly = false;
 
@@ -152,7 +156,7 @@ test.describe('the extension background outlives a long request and a pending co
         let body = '';
         req.on('data', (c) => (body += c));
         req.on('end', () => {
-          reports.push(JSON.parse(body));
+          reports.push({ ...JSON.parse(body), at: Date.now() - startedAt });
           res.writeHead(204);
           res.end();
         });
@@ -167,9 +171,15 @@ test.describe('the extension background outlives a long request and a pending co
       req.resume();
       req.on('end', () => {
         let answered = false;
-        res.on('close', () => { if (!answered) upstreamClosedEarly = true; });
+        upstreamEvents.push({ event: 'request', at: Date.now() - startedAt });
+        res.on('close', () => {
+          if (answered) return;
+          upstreamClosedEarly = true;
+          upstreamEvents.push({ event: 'closed early', at: Date.now() - startedAt });
+        });
         setTimeout(() => {
           answered = true;
+          upstreamEvents.push({ event: 'answered', at: Date.now() - startedAt });
           if (res.destroyed) return;
           res.writeHead(200, { 'content-type': 'application/json', 'access-control-allow-origin': '*' });
           res.end(JSON.stringify({
@@ -225,14 +235,19 @@ test.describe('the extension background outlives a long request and a pending co
       // itself: close the wallet page and detach DevTools.
       await wallet.page.close();
       await setup.close();
+      startedAt = Date.now();
       go = true;
-      await new Promise((r) => setTimeout(r, (UPSTREAM_DELAY_S + 5) * 1000));
+      const fetchResult = () => reports.find((r) => r.role === 'fetch' && (r.event === 'fetch-done' || r.event === 'fetch-error'));
+      const deadline = Date.now() + (UPSTREAM_DELAY_S + 30) * 1000;
+      while (!fetchResult() && !upstreamClosedEarly && Date.now() < deadline) await new Promise((r) => setTimeout(r, 500));
+      // Out of the 30 s an idle worker gets: the connect has waited as long.
+      while (Date.now() - startedAt < UPSTREAM_DELAY_S * 1000) await new Promise((r) => setTimeout(r, 500));
 
-      const fetchResult = reports.find((r) => r.role === 'fetch' && (r.event === 'fetch-done' || r.event === 'fetch-error'));
-      expect(upstreamClosedEarly).toBe(false);
-      expect(fetchResult).toMatchObject({ event: 'fetch-done', status: 200 });
+      const seen = JSON.stringify({ reports, upstreamEvents });
+      expect(upstreamClosedEarly, seen).toBe(false);
+      expect(fetchResult(), seen).toMatchObject({ event: 'fetch-done', status: 200 });
       // The connect is still waiting for the user.
-      expect(reports.filter((r) => r.role === 'connect').map((r) => r.event)).toEqual(['connect-start']);
+      expect(reports.filter((r) => r.role === 'connect').map((r) => r.event), seen).toEqual(['connect-start']);
 
       const after = await chromium.connectOverCDP(`http://127.0.0.1:${cdpPort}`);
       const wallet2 = await walletPage(after, id);
