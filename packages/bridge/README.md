@@ -71,7 +71,7 @@ To rotate it, run `rm ~/.byoky-bridge/token && byoky-bridge connect`, then updat
 
 The bridge is a native messaging host — Chrome spawns it as a subprocess when the extension needs it. When `byoky-bridge connect` runs, the extension sends a `start-proxy` message telling the bridge to listen on `127.0.0.1:<port>`. Requests hit the proxy, get relayed to the extension over native messaging, and the extension injects the real API key before calling the provider API.
 
-The bridge never sees your API keys. The exception is a Claude Pro/Max setup token: Anthropic accepts it only from a non-browser TLS client, so for those requests the extension hands the token to the bridge process, which makes the call from Node. The bridge runs as your user, keeps the token in memory for that request only, and never writes it to disk or logs it.
+The bridge never sees your API keys. The exception is a Claude Pro/Max setup token: Anthropic accepts it only from a non-browser TLS client, so for those requests the extension hands the token to the bridge process, which makes the call from Node. The bridge runs as your user, keeps the token in memory for that request only, and never writes it to disk or logs it. Such a request goes to the bridge as one native message of at most 20 MB; a web app's bigger request (large files) is refused with a 413, and needs an Anthropic API key instead.
 
 Everything stays on your machine: the proxy only listens on `127.0.0.1` and talks to no Byoky-hosted service. It refuses requests that carry an `Origin` header, so web pages and other browser extensions can't call it; the Byoky extension itself talks to the bridge over native messaging only.
 

@@ -21,6 +21,7 @@ import {
   type ProxyResponseMessage,
 } from './proxy-server.js';
 import { createToolNameSSERewriter, isTextContentType, parseUsage, rewriteToolNamesInJSONBody } from '@byoky/core';
+import type { OversizedMessage } from './native-messaging.js';
 
 interface BridgeRequest {
   type: 'proxy';
@@ -134,6 +135,11 @@ export interface HostOptions {
 
 export interface Host {
   handleMessage(msg: unknown): Promise<void>;
+  /**
+   * A message too large to read: answers the request it carried, which
+   * would otherwise wait for a reply that never comes.
+   */
+  handleOversized(msg: OversizedMessage): void;
   /** Stops the HTTP proxy, if one is running. */
   close(): void;
 }
@@ -405,10 +411,25 @@ export function createHost(opts: HostOptions): Host {
     }
   }
 
+  function handleOversized({ type, requestId, bytes }: OversizedMessage): void {
+    if (!requestId) return;
+    const error = `Request too large for Byoky Bridge (${Math.round(bytes / (1024 * 1024))} MB)`;
+    if (type === 'proxy') {
+      writeMessage({ type: 'proxy_error', requestId, error });
+    } else if (type === 'proxy_direct_fetch') {
+      // The client is waiting on this bridge's own HTTP server, and the
+      // extension for the report that releases what it held.
+      handleProxyResponse({ type: 'proxy_http_error', requestId, status: 413, error });
+      writeMessage({
+        type: 'proxy_direct_done', requestId, status: 413, complete: false, responseChars: 0,
+      } satisfies DirectFetchDone);
+    }
+  }
+
   function close(): void {
     runningProxy?.server.close();
     runningProxy = null;
   }
 
-  return { handleMessage, close };
+  return { handleMessage, handleOversized, close };
 }

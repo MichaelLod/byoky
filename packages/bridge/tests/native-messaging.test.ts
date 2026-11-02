@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { createMessageReader } from '../src/native-messaging.js';
+import { createMessageReader, type OversizedMessage } from '../src/native-messaging.js';
 
 function frame(msg: unknown): Buffer {
   const body = Buffer.from(JSON.stringify(msg));
@@ -39,6 +39,28 @@ describe('native messaging reader', () => {
     read(Buffer.concat([oversized.subarray(0, 2000)]));
     read(Buffer.concat([oversized.subarray(2000), frame({ type: 'ping' })]));
     expect(got).toEqual([{ type: 'ping' }]);
+  });
+
+  // F038: an oversized request was dropped with a line on stderr only, so
+  // the extension waited for its reply until the app gave up.
+  it('reports an oversized message\'s type and request id, its start split across reads', () => {
+    const got: unknown[] = [];
+    const oversized: OversizedMessage[] = [];
+    const read = createMessageReader((m) => got.push(m), 1000, (m) => oversized.push(m));
+    const big = frame({ type: 'proxy', requestId: 'req-1', url: 'https://api.anthropic.com/v1/messages', body: 'x'.repeat(5000) });
+    read(big.subarray(0, 20));
+    expect(oversized).toEqual([]);
+    read(big.subarray(20, 3000));
+    read(Buffer.concat([big.subarray(3000), frame({ type: 'ping' })]));
+    expect(oversized).toEqual([{ bytes: big.length - 4, type: 'proxy', requestId: 'req-1' }]);
+    expect(got).toEqual([{ type: 'ping' }]);
+  });
+
+  it('reports an oversized message that arrived whole', () => {
+    const oversized: OversizedMessage[] = [];
+    const read = createMessageReader(() => {}, 1000, (m) => oversized.push(m));
+    read(frame({ type: 'proxy_direct_fetch', requestId: 'req-2', body: 'x'.repeat(5000) }));
+    expect(oversized).toMatchObject([{ type: 'proxy_direct_fetch', requestId: 'req-2' }]);
   });
 
   it('ignores a message that is not JSON', () => {

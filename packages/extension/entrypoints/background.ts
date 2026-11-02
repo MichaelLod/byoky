@@ -2016,6 +2016,19 @@ export default defineBackground(() => {
   const BRIDGE_HOST = 'com.byoky.bridge';
   let bridgeAvailable: boolean | null = null;
 
+  // The bridge host drops a message bigger than this (its
+  // MAX_INCOMING_MESSAGE_BYTES), and bridges before 1.1.2 without a word.
+  const BRIDGE_MAX_MESSAGE_BYTES = 20 * 1024 * 1024;
+
+  /** The size of a native message too big for the bridge, or 0 when it fits. */
+  function oversizedForBridge(message: Record<string, unknown>): number {
+    const json = JSON.stringify(message);
+    // UTF-8 takes 1 to 3 bytes per UTF-16 unit.
+    if (json.length * 3 <= BRIDGE_MAX_MESSAGE_BYTES) return 0;
+    const bytes = new TextEncoder().encode(json).length;
+    return bytes > BRIDGE_MAX_MESSAGE_BYTES ? bytes : 0;
+  }
+
   async function checkBridgeAvailable(): Promise<boolean> {
     try {
       const port = browser.runtime.connectNative(BRIDGE_HOST);
@@ -2084,6 +2097,32 @@ export default defineBackground(() => {
       if (!appConnected) return;
       try { responsePort.postMessage(message); } catch { appConnected = false; }
     };
+
+    const request = {
+      type: 'proxy',
+      requestId: msg.requestId,
+      url: msg.url,
+      method: msg.method,
+      headers,
+      body: msg.body,
+      toolNameMap,
+    };
+    // Too big for the bridge: it would drop the request, and the app would
+    // wait for an answer that never comes. Nothing went out, so nothing is
+    // charged.
+    const oversized = oversizedForBridge(request);
+    if (oversized) {
+      send({
+        type: 'BYOKY_PROXY_RESPONSE_ERROR',
+        requestId: msg.requestId,
+        status: 413,
+        error: {
+          code: 'BRIDGE_ERROR',
+          message: `This request is ${Math.round(oversized / (1024 * 1024))} MB. Claude setup tokens go through Byoky Bridge, which takes requests up to 20 MB. Use an Anthropic API key for larger files.`,
+        },
+      });
+      return;
+    }
 
     // The probe starts a native host and waits up to 2 s for it.
     const available = await checkBridgeAvailable();
@@ -2268,15 +2307,7 @@ export default defineBackground(() => {
         return;
       }
       signal.addEventListener('abort', onAbort, { once: true });
-      nativePort.postMessage({
-        type: 'proxy',
-        requestId: msg.requestId,
-        url: msg.url,
-        method: msg.method,
-        headers,
-        body: msg.body,
-        toolNameMap,
-      });
+      nativePort.postMessage(request);
     });
 
     // The log entry is written when the response headers arrive; waiting for

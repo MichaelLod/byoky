@@ -13,7 +13,7 @@ import { createMessageReader } from './native-messaging.js';
 // --- Native messaging I/O ---
 
 // The browser allows up to 64 MiB per message; past this one is dropped
-// rather than buffered.
+// rather than buffered, and the request it carried answered with an error.
 const MAX_INCOMING_MESSAGE_BYTES = 20_971_520; // 20 MiB
 
 function writeMessage(msg: unknown): void {
@@ -41,6 +41,6 @@ process.stdin.on('data', createMessageReader((msg) => {
   void host.handleMessage(msg).catch((e: unknown) => {
     process.stderr.write(`byoky-bridge: ${e instanceof Error ? e.message : 'message failed'}\n`);
   });
-}, MAX_INCOMING_MESSAGE_BYTES));
+}, MAX_INCOMING_MESSAGE_BYTES, (msg) => host.handleOversized(msg)));
 // stdin closed = extension disconnected
 process.stdin.on('end', () => process.exit(0));

@@ -361,3 +361,38 @@ describe('background: bridges of different apps', () => {
     expect(await answerOn(h, claudeBridge, claude, ANTHROPIC_CHAT)).toBe('Unauthorized session key');
   });
 });
+
+// --- Setup-token page requests, which the bridge makes for the extension ---
+
+// F038: the bridge host drops a message over 20 MiB without a word, so the
+// app waited ten minutes, and its cancel then charged the request's whole
+// estimate (bytes / 4 plus max_tokens) for a call that never went out.
+describe('background: a setup-token page request too big for the bridge', () => {
+  it('is refused with a 413 at once, unsent and uncharged', async () => {
+    const h = await startBackground({
+      local: await walletStorage(SETUP_TOKEN, { tokenAllowances: [{ origin: APP, totalLimit: 10_000_000 }] }),
+    });
+    await h.unlock();
+    const { payload } = await connectApproved(h, APP, { providers: [{ id: 'anthropic' }] });
+    h.nativeHost = (msg, conn) => {
+      if (msg.type === 'ping') conn.reply({ type: 'pong' });
+      if (msg.type === 'proxy') {
+        conn.reply({ type: 'proxy_response_meta', requestId: msg.requestId, status: 200, headers: { 'content-type': 'application/json' } });
+        conn.reply({ type: 'proxy_response_chunk', requestId: msg.requestId, chunk: '{"usage":{"input_tokens":1,"output_tokens":1}}' });
+        conn.reply({ type: 'proxy_response_done', requestId: msg.requestId });
+      }
+    };
+    const huge = JSON.stringify({ model: 'claude-x', max_tokens: 10, messages: [{ role: 'user', content: 'x'.repeat(21 * 1024 * 1024) }] });
+
+    const r = await h.proxy(APP, { sessionKey: payload.sessionKey, providerId: 'anthropic', url: ANTHROPIC_URL, body: huge }).result;
+    expect(r.error).toMatchObject({ status: 413, error: { code: 'BRIDGE_ERROR', message: expect.stringContaining('up to 20 MB') } });
+    expect(h.nativeConnections).toEqual([]);
+    await h.settle(20);
+    expect(requestLog(h)).toEqual([]);
+    expect(usage(h, 'anthropic')).toBe(0);
+
+    // Nothing is held: a request that fits goes through.
+    const ok = await h.proxy(APP, { sessionKey: payload.sessionKey, providerId: 'anthropic', url: ANTHROPIC_URL, body: SMALL }).result;
+    expect(ok.done).toBe(true);
+  });
+});
