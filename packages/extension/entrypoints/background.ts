@@ -1785,7 +1785,12 @@ export default defineBackground(() => {
         return { success: true };
 
       case 'isUnlocked':
-        return { unlocked: masterPassword !== null };
+        // A running password lockout too, so a wallet view opened during it
+        // shows it rather than a form that will be refused.
+        return {
+          unlocked: masterPassword !== null,
+          ...(passwordLockoutError() ? { lockedUntil: unlockLockedUntil } : {}),
+        };
 
       case 'isInitialized': {
         const data = await browser.storage.local.get('passwordHash');

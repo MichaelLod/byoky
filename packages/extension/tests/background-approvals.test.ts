@@ -165,6 +165,23 @@ describe('background: what the popup is told about the wallet', () => {
     expect(locked).toMatchObject({ success: false, attemptsLeft: 0, lockedUntil: fifth.lockedUntil });
   });
 
+  // F052: a wallet view opened during a lockout learned of it only from
+  // its next, refused, try.
+  it('reports a running lockout to a view that asks whether the wallet is unlocked', async () => {
+    const h = await startBackground({ local: await walletStorage([]) });
+    expect(await h.internal('isUnlocked')).toEqual({ unlocked: false });
+    for (let i = 0; i < 5; i++) await h.unlock('wrong');
+    const { lockedUntil } = await h.unlock('wrong');
+    expect(await h.internal('isUnlocked')).toEqual({ unlocked: false, lockedUntil });
+    // Over once it ends, and gone after the right password.
+    const now = vi.spyOn(Date, 'now');
+    now.mockReturnValue(lockedUntil + 1);
+    expect(await h.internal('isUnlocked')).toEqual({ unlocked: false });
+    expect((await h.unlock()).success).toBe(true);
+    expect(await h.internal('isUnlocked')).toEqual({ unlocked: true });
+    now.mockRestore();
+  });
+
   it('reports the lockout on the export re-authentication too', async () => {
     const h = await startBackground({ local: await walletStorage([]) });
     await h.unlock();

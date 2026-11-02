@@ -160,6 +160,10 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       isUnlocked: unlocked,
       currentPage: page,
       showRetiredFeaturesNotice: noticeResult.show === true,
+      // A lockout still running (the unlock form and the export form share
+      // it): the toolbar popup closes on every blur, so reopening it during
+      // one is the usual case.
+      lockedUntil: lockedUntilFrom(unlockResult),
       loading: false,
     });
 
