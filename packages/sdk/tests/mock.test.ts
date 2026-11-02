@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
 import vm from 'node:vm';
@@ -68,5 +68,24 @@ describe('connectMock production guard', () => {
     expect(() => createMockSession({ keys: { openai: 'sk-test' } })).toThrow('must not be used in production');
     process.env.NODE_ENV = 'test';
     expect(createMockSession({ keys: { openai: 'sk-test' } }).providers.openai.available).toBe(true);
+  });
+});
+
+describe('connectMock session', () => {
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  it('is done after disconnect(), like a real session', async () => {
+    const upstream = vi.fn(async () => new Response('{}'));
+    vi.stubGlobal('fetch', upstream);
+    const session = createMockSession({ keys: { openai: 'sk-test' } });
+    const fetchFn = session.createFetch('openai');
+    await fetchFn('https://api.openai.com/v1/models');
+    expect(upstream).toHaveBeenCalledTimes(1);
+
+    session.disconnect();
+    await expect(fetchFn('https://api.openai.com/v1/models')).rejects.toMatchObject({ code: 'NO_SESSION' });
+    await expect(session.createFetch('openai')('https://api.openai.com/v1/models')).rejects.toMatchObject({ code: 'NO_SESSION' });
+    expect(upstream).toHaveBeenCalledTimes(1);
+    expect(await session.isConnected()).toBe(false);
   });
 });

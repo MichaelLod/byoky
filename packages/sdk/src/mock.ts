@@ -142,6 +142,8 @@ export function createMockSession(options: MockConnectOptions = {}): ByokySessio
   }
 
   const noop: () => () => void = () => () => {};
+  // As with a real session, disconnect() ends it for good.
+  let ended = false;
 
   const session: ByokySession = {
     sessionKey,
@@ -155,7 +157,13 @@ export function createMockSession(options: MockConnectOptions = {}): ByokySessio
           `No mock key configured for "${providerId}". Add it to BYOKY_DEV_KEYS or the keys option.`,
         );
       }
-      return makeMockFetch(providerId, key, options.baseUrls?.[providerId]);
+      const mockFetch = makeMockFetch(providerId, key, options.baseUrls?.[providerId]);
+      return async (input, init) => {
+        if (ended) {
+          throw new ByokyError(ByokyErrorCode.NO_SESSION, 'This session was disconnected; call connect() for a new one');
+        }
+        return mockFetch(input, init);
+      };
     },
     listModels: (providerId) => fetchModelsList(session.createFetch(providerId), providerId),
     createRelay: () => {
@@ -164,8 +172,8 @@ export function createMockSession(options: MockConnectOptions = {}): ByokySessio
         'createRelay() is not supported in mock mode — relays go through a real wallet.',
       );
     },
-    disconnect: () => {},
-    isConnected: async () => true,
+    disconnect: () => { ended = true; },
+    isConnected: async () => !ended,
     getUsage: async () => ({ requests: 0, inputTokens: 0, outputTokens: 0, byProvider: {} }),
     onDisconnect: noop,
     onProvidersUpdated: noop,

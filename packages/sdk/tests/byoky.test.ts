@@ -796,6 +796,108 @@ describe('Byoky', () => {
       expect(connectRequests().length).toBe(2);
       relay.close();
     });
+
+    it('is closed by session.disconnect(), and a disconnected session opens none', async () => {
+      const connectPromise = new Byoky().connect({ providers: [{ id: 'openai', required: true }] });
+      await tick();
+      simulateResponse({
+        type: 'BYOKY_CONNECT_RESPONSE',
+        requestId: connectRequests()[0].data.requestId,
+        payload: { sessionKey: 'byk_relay', proxyUrl: 'extension-proxy', providers: { openai: { available: true, authMethod: 'api_key' } } },
+      });
+      const session = await connectPromise;
+      const relay = session.createRelay('ws://localhost:3001/ws/relay');
+      const ws = MockWebSocket.last;
+      ws.open();
+      const onClose = vi.fn();
+      relay.onClose(onClose);
+
+      session.disconnect();
+      expect(ws.readyState).toBe(3);
+      expect(relay.status).toBe('disconnected');
+      expect(onClose).toHaveBeenCalledTimes(1);
+
+      // A request the backend still sends goes nowhere.
+      relayRequest(ws, 'relay-late');
+      await tick();
+      expect(proxyRequests().length).toBe(0);
+      expect(connectRequests().length).toBe(1);
+
+      expect(() => session.createRelay('ws://localhost:3001/ws/relay'))
+        .toThrow(expect.objectContaining({ code: ByokyErrorCode.NO_SESSION }));
+    });
+  });
+
+  describe('after session.disconnect()', () => {
+    const tick = () => new Promise((r) => setTimeout(r, 10));
+    const ofType = (type: string) => postedMessages.filter((m) => m.data.type === type);
+    const answer = (entry: { data: Record<string, unknown>; port?: MessagePort }, msg: Record<string, unknown>) =>
+      entry.port!.postMessage({ ...msg, requestId: entry.data.requestId });
+    const expired = { type: 'BYOKY_PROXY_RESPONSE_ERROR', status: 401, error: { code: 'SESSION_EXPIRED', message: 'Invalid or expired session' } };
+    const granted = (sessionKey: string) => ({
+      type: 'BYOKY_CONNECT_RESPONSE',
+      payload: { sessionKey, proxyUrl: 'extension-proxy', providers: { anthropic: { available: true, authMethod: 'api_key' } } },
+    });
+
+    async function connected() {
+      const connectPromise = new Byoky().connect({ providers: [{ id: 'anthropic' }] });
+      await tick();
+      answer(ofType('BYOKY_CONNECT_REQUEST')[0], granted('byk_ended'));
+      return connectPromise;
+    }
+
+    it('rejects its fetches with NO_SESSION and sends nothing to the wallet', async () => {
+      const session = await connected();
+      const fetchFn = session.createFetch('anthropic');
+      session.disconnect();
+
+      await expect(fetchFn('https://api.anthropic.com/v1/messages', { method: 'POST', body: '{}' }))
+        .rejects.toMatchObject({ name: 'ByokyError', code: ByokyErrorCode.NO_SESSION });
+      await expect(session.createFetch('anthropic')('https://api.anthropic.com/v1/models'))
+        .rejects.toMatchObject({ code: ByokyErrorCode.NO_SESSION });
+      await tick();
+      expect(ofType('BYOKY_PROXY_REQUEST').length).toBe(0);
+      expect(ofType('BYOKY_CONNECT_REQUEST').length).toBe(1);
+      expect(ofType('BYOKY_DISCONNECT').length).toBe(1);
+
+      // A second disconnect() sends nothing more.
+      session.disconnect();
+      await tick();
+      expect(ofType('BYOKY_DISCONNECT').length).toBe(1);
+    });
+
+    it('does not renew it for a request that was already on its way', async () => {
+      const session = await connected();
+      const fetchPromise = session.createFetch('anthropic')('https://api.anthropic.com/v1/messages', { method: 'POST', body: '{}' });
+      await tick();
+      session.disconnect();
+      answer(ofType('BYOKY_PROXY_REQUEST')[0], expired);
+
+      expect((await fetchPromise).status).toBe(401);
+      await tick();
+      expect(ofType('BYOKY_CONNECT_REQUEST').length).toBe(1);
+    });
+
+    it('drops a renewal the wallet answers after it', async () => {
+      const session = await connected();
+      const onUpdate = vi.fn();
+      session.onProvidersUpdated(onUpdate);
+      const fetchPromise = session.createFetch('anthropic')('https://api.anthropic.com/v1/messages', { method: 'POST', body: '{}' });
+      await tick();
+      answer(ofType('BYOKY_PROXY_REQUEST')[0], expired);
+      await tick();
+      answer(ofType('BYOKY_CONNECT_REQUEST')[1], { type: 'BYOKY_ERROR', payload: { code: 'NO_SESSION', message: 'No active session' } });
+      await tick();
+      // The wallet now asks the user; the app disconnects meanwhile, and the user approves.
+      session.disconnect();
+      answer(ofType('BYOKY_CONNECT_REQUEST')[2], granted('byk_revived'));
+
+      expect((await fetchPromise).status).toBe(401);
+      expect(session.sessionKey).toBe('byk_ended');
+      expect(onUpdate).not.toHaveBeenCalled();
+      expect(sessionStorage.getItem('byoky:session')).toBeNull();
+      expect(ofType('BYOKY_PROXY_REQUEST').length).toBe(1);
+    });
   });
 
   describe('createFetch bodies', () => {

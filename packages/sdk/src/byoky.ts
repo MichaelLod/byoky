@@ -86,7 +86,11 @@ export interface ByokySession extends ConnectResponse {
   listModels(providerId: string): Promise<ModelInfo[]>;
   /** Open a relay channel so a backend server can make LLM calls through this session. */
   createRelay(wsUrl: string): RelayConnection;
-  /** Disconnect this session from the wallet. */
+  /**
+   * Disconnect this session from the wallet and close its relays. The
+   * session is done after that: its fetches reject with NO_SESSION instead
+   * of renewing it. Call connect() for a new one.
+   */
   disconnect(): void;
   /** Check if this session is still connected and valid. */
   isConnected(): Promise<boolean>;
@@ -272,6 +276,13 @@ export class Byoky {
     const providersUpdatedCallbacks = new Set<(providers: ConnectResponse['providers']) => void>();
 
     let reconnectPromise: Promise<boolean> | null = null;
+    // Set by disconnect(). The app ended this session: nothing may renew
+    // it, or a later call (a relay still open, say) would quietly open a new
+    // one, or have the wallet ask the user again.
+    let ended = false;
+    const relays = new Set<RelayConnection>();
+    const disconnected = () =>
+      new ByokyError(ByokyErrorCode.NO_SESSION, 'This session was disconnected; call connect() for a new one');
 
     const fireDisconnect = () => {
       for (const cb of disconnectCallbacks) cb();
@@ -304,14 +315,19 @@ export class Byoky {
       for (const cb of providersUpdatedCallbacks) cb(session.providers);
     };
 
+    // Every await below checks `ended` after it: what sessionStorage holds
+    // by then may be a newer session's.
     const attemptReconnect = (): Promise<boolean> => {
+      if (ended) return Promise.resolve(false);
       if (reconnectPromise) return reconnectPromise;
       reconnectPromise = (async () => {
         try {
           const newResponse = await this.sendConnectRequest({ reconnectOnly: true });
+          if (ended) return false;
           applyNewResponse(newResponse);
           return true;
         } catch (err) {
+          if (ended) return false;
           if (isWalletReloaded(err)) {
             onWalletReloaded();
             return false;
@@ -324,12 +340,14 @@ export class Byoky {
           if (this.lastConnectRequest && err instanceof ByokyError && err.code === ByokyErrorCode.NO_SESSION) {
             try {
               const newResponse = await this.sendConnectRequest(this.lastConnectRequest);
+              if (ended) return false;
               applyNewResponse(newResponse);
               return true;
             } catch {
               // Fall through to disconnect
             }
           }
+          if (ended) return false;
           clearExtSession();
           fireDisconnect();
           releaseNotify();
@@ -352,6 +370,7 @@ export class Byoky {
           const [safeInput, safeInit] = await replayableArgs(input, init);
           // replayableArgs moves a Request input's signal into init.
           const signal = safeInit?.signal ?? undefined;
+          if (ended) throw disconnected();
 
           const resp = await proxyFetch(safeInput, safeInit);
 
@@ -376,14 +395,24 @@ export class Byoky {
       // The relay calls through session.createFetch, not a fetch bound to
       // today's key: that one would answer 401 forever once the wallet
       // locked or restarted, with nothing to trigger a reconnect.
-      createRelay: (wsUrl: string) =>
-        createRelayClient(
+      createRelay: (wsUrl: string) => {
+        if (ended) throw disconnected();
+        const relay = createRelayClient(
           wsUrl,
           (providerId) => session.createFetch(providerId),
           () => session.providers,
           (callback) => session.onProvidersUpdated(callback),
-        ),
+        );
+        relays.add(relay);
+        relay.onClose(() => { relays.delete(relay); });
+        return relay;
+      },
       disconnect: () => {
+        if (ended) return;
+        ended = true;
+        // Its relays end with it: every request they relay would fail now.
+        for (const relay of relays) relay.close();
+        relays.clear();
         clearExtSession();
         releaseNotify();
         this.sendDisconnect(sessionKeyRef.current);
