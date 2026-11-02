@@ -154,4 +154,20 @@ describe('docs snippets', () => {
     }
     expect(hits).toEqual([]);
   });
+
+  it('show streamed text in the page, not on process.stdout, in browser samples', () => {
+    // A browser has no `process`, so the first text delta would throw. Only
+    // Node samples (connectMock(), @byoky/sdk/server) may write to stdout.
+    const hits: string[] = [];
+    for (const file of SNIPPET_FILES) {
+      const text = read(file);
+      for (let at = text.indexOf('process.stdout'); at !== -1; at = text.indexOf('process.stdout', at + 1)) {
+        // The snippet runs from its opening fence or template literal to here.
+        const start = Math.max(text.lastIndexOf('```', at), text.lastIndexOf('{`', at), text.lastIndexOf('code: `', at));
+        if (/connectMock\(|@byoky\/sdk\/server/.test(text.slice(start, at))) continue;
+        hits.push(`${file}:${text.slice(0, at).split('\n').length}`);
+      }
+    }
+    expect(hits).toEqual([]);
+  });
 });

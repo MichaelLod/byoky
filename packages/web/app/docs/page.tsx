@@ -865,10 +865,11 @@ const stream = client.messages.stream({
   messages: [{ role: 'user', content: 'Write a haiku.' }],
 });
 
+const output = document.querySelector('#output')!;
 for await (const event of stream) {
   if (event.type === 'content_block_delta'
     && event.delta.type === 'text_delta') {
-    process.stdout.write(event.delta.text);
+    output.textContent += event.delta.text;
   }
 }`}</Code>
 
@@ -892,10 +893,11 @@ const res = await fetch('https://api.anthropic.com/v1/messages', {
   }),
 });
 
+const output = document.querySelector('#output')!;
 const reader = res.body!.getReader();
 const decoder = new TextDecoder();
 let buf = '';
-while (true) {
+read: while (true) {
   const { done, value } = await reader.read();
   if (done) break;
   buf += decoder.decode(value, { stream: true });
@@ -903,11 +905,11 @@ while (true) {
   buf = lines.pop() || '';
   for (const line of lines) {
     if (!line.startsWith('data: ')) continue;
-    const data = line.slice(6);
-    if (data === '[DONE]') return;
-    const event = JSON.parse(data);
-    if (event.type === 'content_block_delta') {
-      process.stdout.write(event.delta.text);
+    const event = JSON.parse(line.slice(6));
+    if (event.type === 'message_stop') break read;
+    if (event.type === 'content_block_delta'
+      && event.delta.type === 'text_delta') {
+      output.textContent += event.delta.text;
     }
   }
 }`}</Code>

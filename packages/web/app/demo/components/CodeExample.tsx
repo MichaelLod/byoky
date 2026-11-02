@@ -72,7 +72,9 @@ const extraction = await client.chat.completions.create({
   }],
 });
 
-const contact = JSON.parse(extraction.choices[0].message.content);
+const { content, refusal } = extraction.choices[0].message;
+if (!content) throw new Error(refusal ?? 'No content in the reply');
+const contact = JSON.parse(content);
 // { name: "Jane", email: "jane@acme.co", company: "Acme Inc" }`,
   },
   {
@@ -101,10 +103,11 @@ const stream = client.messages.stream({
   messages: [{ role: 'user', content: 'Write a haiku about security.' }],
 });
 
+const output = document.querySelector('#output')!;
 for await (const event of stream) {
   if (event.type === 'content_block_delta'
     && event.delta.type === 'text_delta') {
-    process.stdout.write(event.delta.text);
+    output.textContent += event.delta.text;
   }
 }`,
   },
