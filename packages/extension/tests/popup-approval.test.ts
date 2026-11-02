@@ -210,6 +210,32 @@ describe('approval says which key will serve each provider (F092)', () => {
   });
 });
 
+describe('approval lists each provider once (F069)', () => {
+  const rows = (container: HTMLElement) => [...container.querySelectorAll('.approval-provider-row')].map((row) => [
+    row.querySelector('span')?.textContent,
+    row.querySelector('.result-tag')?.textContent,
+  ]);
+
+  it('an app that names no providers sees one row per provider, not per key', async () => {
+    bg.state.credentials = [
+      { id: 'a1', providerId: 'anthropic', label: 'Personal', authMethod: 'api_key', createdAt: 1 },
+      { id: 'a2', providerId: 'anthropic', label: 'Work', authMethod: 'api_key', createdAt: 2 },
+      { id: 'o1', providerId: 'openai', label: 'Work', authMethod: 'api_key', createdAt: 3 },
+    ];
+    bg.state.approvals = [approval('a1', 'https://app.example', [])];
+    view = await mount(App);
+    expect(rows(view.container)).toEqual([['Anthropic', 'Key ready'], ['OpenAI', 'Key ready']]);
+  });
+
+  it('a provider the app names twice is one row, required if either says so', async () => {
+    bg.state.approvals = [approval('a1', 'https://app.example', [
+      { id: 'anthropic' }, { id: 'openai' }, { id: 'anthropic', required: true },
+    ])];
+    view = await mount(App);
+    expect(rows(view.container)).toEqual([['Anthropic', 'Key ready · required'], ['OpenAI', 'Uses your Anthropic key (translated)']]);
+  });
+});
+
 describe('approval page never dead-ends (F051)', () => {
   it.each(['sessionChanged', 'approvalsChanged', 'usageUpdated'])(
     'goes back to the dashboard when the queue empties elsewhere (%s)',

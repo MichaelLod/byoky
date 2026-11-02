@@ -13,14 +13,23 @@ import { Raven } from '../components/Raven';
 import { describeOrigin } from '../utils/origin';
 
 /**
- * The providers a request lists, as far as they can be shown. The list comes
- * from the web page as sent, so it may not be an array of { id } objects.
+ * The providers a request lists, as far as they can be shown, once each (the
+ * session the background approves has one entry per provider). The list
+ * comes from the web page as sent, so it may not be an array of { id }
+ * objects, and may name a provider twice: it is required if either says so.
  */
 function requestedProviderList(providers: unknown): { id: string; required: boolean }[] {
   if (!Array.isArray(providers)) return [];
-  return providers
-    .filter((p): p is { id?: unknown; required?: unknown } => typeof p === 'object' && p !== null)
-    .map((p) => ({ id: String(p.id), required: p.required === true }));
+  const byId = new Map<string, { id: string; required: boolean }>();
+  for (const p of providers) {
+    if (typeof p !== 'object' || p === null) continue;
+    const { id: rawId, required } = p as { id?: unknown; required?: unknown };
+    const id = String(rawId);
+    const seen = byId.get(id);
+    if (seen) seen.required ||= required === true;
+    else byId.set(id, { id, required: required === true });
+  }
+  return [...byId.values()];
 }
 
 function providerName(id: string): string {
@@ -95,12 +104,13 @@ function ApprovalCard({ approval, queued }: { approval: PendingApproval; queued:
   // Host and port, since trust is granted per full origin.
   const origin = describeOrigin(approval.appOrigin);
 
-  // Show which providers the app is requesting
+  // Show which providers the app is requesting. An app that names none gets
+  // every provider the wallet holds a key for, once each however many keys.
   const listed = requestedProviderList(approval.providers);
   const requestedProviders =
     listed.length > 0
       ? listed
-      : credentials.map((c) => ({ id: c.providerId, required: false }));
+      : [...new Set(credentials.map((c) => c.providerId))].map((id) => ({ id, required: false }));
   // A new origin joins the default group; a stale binding falls back to it.
   const group =
     groups.find((g) => g.id === (appGroups[approval.appOrigin] ?? DEFAULT_GROUP_ID)) ??
