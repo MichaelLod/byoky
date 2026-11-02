@@ -201,6 +201,12 @@ jobs:
         run: pnpm exec playwright install --with-deps chromium
       - name: Build and run e2e
         run: pnpm test:e2e
+      # The specs delete the wallet profiles they create (a live run's hold
+      # the real keys); one left over means that cleanup broke.
+      - name: No wallet profile left behind
+        run: |
+          left=$(find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'byoky-e2e-*')
+          if [ -n "$left" ]; then echo "::error::e2e left behind: $left"; exit 1; fi
       - name: Upload traces
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

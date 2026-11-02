@@ -37,6 +37,8 @@ export interface Wallet {
   extensionId: string;
   /** The fake providers' request log; null in live mode. */
   fakes: FakeProviders | null;
+  /** The Chromium profile; cleanupWallet removes it. */
+  userDataDir: string;
 }
 
 export interface ApiKeys {
@@ -50,14 +52,53 @@ interface TestFixtures {
   apiKeys: ApiKeys;
 }
 
+interface WorkerFixtures {
+  sharedWalletCleanup: void;
+}
+
 let sharedA: Wallet | null = null;
 let sharedApiKeys: ApiKeys | null = null;
-let server: http.Server | null = null;
-let serverPort = 0;
+let sharedServer: http.Server | null = null;
+// The spec file the shared wallet was set up for: each file gets a new one.
+let sharedFile: string | null = null;
 
 // Exported so a spec (openclaw-flow.spec.ts) can stand up its own fresh
 // wallet without touching the shared fixture state.
-export { launchWallet, loadApiKeys, loadSetupToken, startServer, bridgeBin };
+export { launchWallet, cleanupWallet, loadApiKeys, loadSetupToken, startServer, bridgeBin };
+
+/**
+ * Temp dirs the e2e runs create: the wallet profiles (launchWallet) and,
+ * from openclaw-flow, OpenClaw's HOME and the packed plugin. A live run's
+ * profile holds the real keys, encrypted under a password in these specs.
+ */
+const TEMP_PREFIXES = ['byoky-e2e-', 'byoky-openclaw-e2e-', 'byoky-openclaw-plugin-'];
+const STALE_AFTER_MS = 60 * 60 * 1000;
+
+/**
+ * Remove what an earlier run left behind when it died before its cleanup
+ * (a crash, Ctrl-C). Only dirs older than an hour, so a run in progress in
+ * another checkout keeps its own.
+ */
+function sweepStaleTempDirs(): void {
+  const tmp = os.tmpdir();
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(tmp);
+  } catch {
+    return;
+  }
+  for (const name of entries) {
+    if (!TEMP_PREFIXES.some((prefix) => name.startsWith(prefix))) continue;
+    const dir = path.join(tmp, name);
+    try {
+      const stat = fs.lstatSync(dir);
+      if (stat.isDirectory() && Date.now() - stat.mtimeMs > STALE_AFTER_MS) {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    } catch { /* gone already, or not ours to remove */ }
+  }
+}
+sweepStaleTempDirs();
 
 function parseEnvFile(filePath: string): Record<string, string> {
   const out: Record<string, string> = {};
@@ -108,9 +149,9 @@ function loadSetupToken(): string {
   return token;
 }
 
-function startServer(): Promise<number> {
+function servePage(): Promise<http.Server> {
   return new Promise((resolve) => {
-    server = http.createServer((req, res) => {
+    const server = http.createServer((req, res) => {
       if (req.url === '/' || req.url === '/index.html') {
         res.writeHead(200, { 'Content-Type': 'text/html' });
         res.end(fs.readFileSync(path.join(TEST_PAGE_DIR, 'index.html'), 'utf-8'));
@@ -137,12 +178,15 @@ function startServer(): Promise<number> {
       res.writeHead(404);
       res.end('Not found');
     });
-    server.listen(0, () => {
-      const addr = server!.address() as { port: number };
-      serverPort = addr.port;
-      resolve(serverPort);
-    });
+    server.listen(0, () => resolve(server));
   });
+}
+
+const portOf = (server: http.Server) => (server.address() as { port: number }).port;
+
+/** Serves the test page on a free port, for as long as the worker runs. */
+async function startServer(): Promise<number> {
+  return portOf(await servePage());
 }
 
 /**
@@ -268,31 +312,57 @@ async function launchWallet(label: string, port: number): Promise<Wallet> {
   await popup.evaluate((l) => { document.title = `[${l}] popup`; }, label);
   await page.evaluate((l) => { document.title = `[${l}] page`; }, label);
 
-  return { ctx, popup, page, extensionId, fakes };
+  return { ctx, popup, page, extensionId, fakes, userDataDir };
 }
 
-async function ensureWallet() {
-  if (sharedA) return;
+/**
+ * Close the wallet's browser, then delete its profile. Close first:
+ * Chromium writes to the profile until it exits.
+ */
+async function cleanupWallet(w: Wallet | null | undefined): Promise<void> {
+  if (!w) return;
+  try {
+    await w.ctx.close();
+  } catch { /* already closed */ }
+  fs.rmSync(w.userDataDir, { recursive: true, force: true });
+}
+
+async function ensureWallet(file: string) {
+  if (sharedA && sharedFile === file) return;
+  await releaseSharedWallet();
   sharedApiKeys = loadApiKeys();
-  const port = await startServer();
-  sharedA = await launchWallet('A', port);
+  sharedServer = await servePage();
+  sharedA = await launchWallet('A', portOf(sharedServer));
+  sharedFile = file;
 }
 
-export const test = base.extend<TestFixtures>({
-  walletA: async ({}, use) => {
-    await ensureWallet();
+async function releaseSharedWallet(): Promise<void> {
+  const wallet = sharedA;
+  sharedA = null;
+  sharedFile = null;
+  sharedApiKeys = null;
+  await cleanupWallet(wallet);
+  sharedServer?.close();
+  sharedServer = null;
+}
+
+export const test = base.extend<TestFixtures, WorkerFixtures>({
+  walletA: async ({}, use, testInfo) => {
+    await ensureWallet(testInfo.file);
     await use(sharedA!);
   },
-  apiKeys: async ({}, use) => {
-    await ensureWallet();
+  apiKeys: async ({}, use, testInfo) => {
+    await ensureWallet(testInfo.file);
     await use(sharedApiKeys!);
   },
+  // Not a test.afterAll here: a module loads once per worker, so a hook in
+  // it would only run for the first spec file that imports it. The next
+  // file's wallet replaces the shared one (ensureWallet); the last one goes
+  // when the worker stops.
+  sharedWalletCleanup: [async ({}, use) => {
+    await use();
+    await releaseSharedWallet();
+  }, { scope: 'worker', auto: true }],
 });
 
 export { expect } from '@playwright/test';
-
-test.afterAll(async () => {
-  if (sharedA) { await sharedA.ctx.close(); sharedA = null; }
-  if (server) { server.close(); server = null; }
-  sharedApiKeys = null;
-});
