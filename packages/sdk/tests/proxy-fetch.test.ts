@@ -605,6 +605,84 @@ describe('createProxyFetch', () => {
     });
   });
 
+  // As with fetch, an app that stops reading the body stops the request.
+  describe('body cancel', () => {
+    const tick = () => new Promise((r) => setTimeout(r, 10));
+    const cancelMessages = () => postedMessages.filter((m) => m.data.type === 'BYOKY_PROXY_CANCEL');
+
+    async function streaming(signal?: AbortSignal) {
+      const proxyFetch = createProxyFetch('anthropic', { current: 'byk_session' });
+      const fetchPromise = proxyFetch('https://api.anthropic.com/v1/messages', { method: 'POST', body: '{"stream":true}', signal });
+      await tick();
+      const requestId = postedMessages[0].data.requestId as string;
+      simulateResponse({
+        type: 'BYOKY_PROXY_RESPONSE_META', requestId, status: 200, statusText: 'OK',
+        headers: { 'content-type': 'text/event-stream' },
+      });
+      const chunk = (n: number) => simulateResponse({ type: 'BYOKY_PROXY_RESPONSE_CHUNK', requestId, chunk: `data: ${n}\n\n` });
+      return { response: await fetchPromise, requestId, chunk };
+    }
+
+    it('cancels the request once when the app cancels the body', async () => {
+      const controller = new AbortController();
+      const { response, requestId } = await streaming(controller.signal);
+
+      await response.body!.cancel();
+      await tick();
+      expect(cancelMessages().map((m) => m.data)).toEqual([{ type: 'BYOKY_PROXY_CANCEL', requestId }]);
+
+      // The abort listener is gone: a later abort sends nothing more.
+      controller.abort();
+      await tick();
+      expect(cancelMessages().length).toBe(1);
+    });
+
+    it('cancels the request when the reader is cancelled mid-stream, and ignores later chunks', async () => {
+      const { response, requestId, chunk } = await streaming();
+      const reader = response.body!.getReader();
+      chunk(1);
+      expect(new TextDecoder().decode((await reader.read()).value)).toBe('data: 1\n\n');
+
+      await reader.cancel();
+      await tick();
+      expect(cancelMessages().map((m) => m.data)).toEqual([{ type: 'BYOKY_PROXY_CANCEL', requestId }]);
+      expect(() => chunk(2)).not.toThrow();
+      simulateResponse({ type: 'BYOKY_PROXY_RESPONSE_DONE', requestId });
+      await tick();
+      expect(cancelMessages().length).toBe(1);
+    });
+
+    it('cancels the request when a for-await loop over the body ends early', async () => {
+      const { response, requestId, chunk } = await streaming();
+      chunk(1);
+      chunk(2);
+      for await (const value of response.body as unknown as AsyncIterable<Uint8Array>) {
+        expect(new TextDecoder().decode(value)).toBe('data: 1\n\n');
+        break;
+      }
+      await tick();
+      expect(cancelMessages().map((m) => m.data)).toEqual([{ type: 'BYOKY_PROXY_CANCEL', requestId }]);
+    });
+
+    it('sends nothing for a body cancelled after the response finished', async () => {
+      const { response, requestId, chunk } = await streaming();
+      chunk(1);
+      simulateResponse({ type: 'BYOKY_PROXY_RESPONSE_DONE', requestId });
+      await tick();
+      await response.body!.cancel();
+      await tick();
+      expect(cancelMessages().length).toBe(0);
+    });
+
+    it('sends nothing when the wallet fails the request after the headers', async () => {
+      const { response, requestId } = await streaming();
+      simulateResponse({ type: 'BYOKY_PROXY_RESPONSE_ERROR', requestId, status: 500, error: { code: 'PROXY_ERROR', message: 'upstream died' } });
+      await expect(response.text()).rejects.toMatchObject({ code: 'PROXY_ERROR' });
+      await tick();
+      expect(cancelMessages().length).toBe(0);
+    });
+  });
+
   function simulateResponse(data: Record<string, unknown>) {
     const entry = postedMessages.find(
       (m) => m.data.requestId === data.requestId,

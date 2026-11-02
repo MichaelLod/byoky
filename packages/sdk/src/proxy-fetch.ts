@@ -45,6 +45,19 @@ export function createProxyFetch(
       const writer = writable.getWriter();
       const encoder = new TextEncoder();
       let resolved = false;
+      // The request is over: done, failed, or given up on.
+      let finished = false;
+
+      // The app cancelled the body (reader.cancel(), leaving a for-await
+      // loop over it early), which errors the writable side. As with fetch,
+      // that stops the request; the wallet would otherwise generate (and
+      // bill) the rest. Our own close and aborts set `finished` first.
+      writer.closed.catch(() => {
+        if (finished) return;
+        finished = true;
+        cleanup();
+        cancel();
+      });
 
       // A backstop for a wallet that never answers. It used to be a fixed
       // 120 s, which cut off slow non-streaming generations; the official
@@ -100,11 +113,13 @@ export function createProxyFetch(
           }
 
           case 'BYOKY_PROXY_RESPONSE_DONE':
+            finished = true;
             writer.close().catch(() => {});
             cleanup();
             break;
 
           case 'BYOKY_PROXY_RESPONSE_ERROR': {
+            finished = true;
             const errResponse = new Response(
               JSON.stringify({ error: data.error }),
               {
@@ -133,6 +148,8 @@ export function createProxyFetch(
       // Stops the request, wallet side included. Like fetch: rejects while
       // waiting for headers, errors the body after.
       function fail(reason: unknown) {
+        if (finished) return;
+        finished = true;
         cleanup();
         cancel();
         if (resolved) {
