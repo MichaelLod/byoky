@@ -298,6 +298,12 @@ export class ByokyServer {
                 try { controller.enqueue(bytes); } catch {}
               },
               done: () => {
+                // Done without the headers: there is no response to give,
+                // and nothing else would ever settle the fetch.
+                if (!metaResolved) {
+                  giveUp(new ByokyError(ByokyErrorCode.PROXY_ERROR, 'Invalid relay response'));
+                  return;
+                }
                 clearTimeout(idleTimer);
                 signal?.removeEventListener('abort', onAbort);
                 try { controller.close(); } catch {}

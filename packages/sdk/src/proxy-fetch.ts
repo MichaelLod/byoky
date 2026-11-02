@@ -113,6 +113,12 @@ export function createProxyFetch(
           }
 
           case 'BYOKY_PROXY_RESPONSE_DONE':
+            // Every wallet sends the headers first; without them there is
+            // no response, and the fetch would never settle.
+            if (!resolved) {
+              fail(new ByokyError(ByokyErrorCode.PROXY_ERROR, 'Invalid response from the wallet'));
+              break;
+            }
             finished = true;
             writer.close().catch(() => {});
             cleanup();

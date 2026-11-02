@@ -400,6 +400,20 @@ describe('createProxyFetch', () => {
       expect(postedMessages.filter((m) => m.data.type === 'BYOKY_PROXY_CANCEL').length).toBe(1);
     });
 
+    it('rejects instead of hanging on a done before the headers', async () => {
+      const proxyFetch = createProxyFetch('openai', { current: 'byk_session' });
+      let state = 'pending';
+      const fetchPromise = proxyFetch('https://api.openai.com/v1/chat/completions', { method: 'POST', body: '{}' });
+      fetchPromise.catch(() => {}).finally(() => { state = 'settled'; });
+      await new Promise((r) => setTimeout(r, 10));
+      const requestId = postedMessages[0].data.requestId as string;
+
+      simulateResponse({ type: 'BYOKY_PROXY_RESPONSE_DONE', requestId });
+      await new Promise((r) => setTimeout(r, 10));
+      expect(state).toBe('settled');
+      await expect(fetchPromise).rejects.toMatchObject({ code: 'PROXY_ERROR', message: 'Invalid response from the wallet' });
+    });
+
     it('errors the body on a chunk that is not base64', async () => {
       const proxyFetch = createProxyFetch('openai', { current: 'byk_session' });
       const fetchPromise = proxyFetch('https://api.openai.com/v1/audio/speech', { method: 'POST', body: '{}' });

@@ -519,6 +519,24 @@ describe('ByokyServer', () => {
       await expect(responsePromise).rejects.toMatchObject({ code: 'PROXY_ERROR', message: 'Invalid relay response' });
     });
 
+    it('rejects at once on a done that comes before the headers', async () => {
+      const server = new ByokyServer({ pingInterval: 0, requestTimeout: 1000 });
+      const clientPromise = server.handleConnection(ws);
+      ws.simulateMessage({ type: 'relay:hello', sessionId: 'sess-1', providers: {} });
+      const client = await clientPromise;
+      let state = 'pending';
+      const responsePromise = client.createFetch('anthropic')('https://api.anthropic.com/v1/messages');
+      responsePromise.catch(() => {}).finally(() => { state = 'settled'; });
+      await new Promise((r) => setTimeout(r, 10));
+      const { requestId } = JSON.parse(ws.sentMessages[ws.sentMessages.length - 1]);
+
+      expect(() => ws.simulateMessage({ type: 'relay:response:done', requestId })).not.toThrow();
+      await new Promise((r) => setTimeout(r, 10));
+      expect(state).toBe('settled');
+      await expect(responsePromise).rejects.toMatchObject({ code: 'PROXY_ERROR', message: 'Invalid relay response' });
+      expect(ws.sentMessages.map((m) => JSON.parse(m)).filter((m) => m.type === 'relay:cancel')).toEqual([{ type: 'relay:cancel', requestId }]);
+    });
+
     it('skips an invalid header name instead of failing', async () => {
       const { responsePromise, requestId } = await connectAndRequest();
 
