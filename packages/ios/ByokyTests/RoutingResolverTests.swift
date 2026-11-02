@@ -324,6 +324,74 @@ final class RoutingResolverTests: XCTestCase {
         XCTAssertEqual(routed.translation?.dstProviderId, "anthropic")
     }
 
+    // MARK: - Shared routing vectors (F092)
+
+    /// packages/core/tests/vectors/routing.json, written from core by
+    /// scripts/gen-routing-vectors.mjs: the routing decisions every wallet
+    /// makes the same way, run against the bundled core's family answers.
+    func testSharedRoutingVectors() throws {
+        let vectors = try SharedVectors.load("routing")
+        let engine = TranslationEngine.shared
+
+        // The bundled core answers as the tables say (a stale mobile.js fails here).
+        let providers = try XCTUnwrap(vectors["providers"] as? [String: [String: Any]])
+        XCTAssertEqual(Set(providers.keys), Set(Provider.all.map(\.id)))
+        for (src, row) in providers {
+            XCTAssertEqual(engine.autoRouteModel(for: src), row["autoRouteModel"] as? String, src)
+            let srcFamily = row["family"] as? String
+            for (dst, other) in providers {
+                let dstFamily = other["family"] as? String
+                XCTAssertEqual(engine.shouldTranslate(srcProviderId: src, dstProviderId: dst),
+                               srcFamily != nil && dstFamily != nil && srcFamily != dstFamily, "\(src) to \(dst)")
+                XCTAssertEqual(engine.sameFamily(srcProviderId: src, dstProviderId: dst),
+                               srcFamily != nil && srcFamily == dstFamily, "\(src) and \(dst)")
+            }
+        }
+
+        let cases = try XCTUnwrap(vectors["cases"] as? [[String: Any]])
+        XCTAssertGreaterThan(cases.count, 40)
+        for c in cases {
+            let name = c["name"] as? String ?? "?"
+            let requested = try XCTUnwrap(c["requested"] as? String, name)
+            let model = c["model"] as? String
+            let group = (c["group"] as? [String: Any]).map { g -> Group in
+                let providerId = g["providerId"] as? String ?? ""
+                return Group(id: providerId.isEmpty ? defaultGroupId : "g", name: "Group", providerId: providerId,
+                             credentialId: g["credentialId"] as? String, model: g["model"] as? String,
+                             createdAt: Date(timeIntervalSince1970: 0))
+            }
+            let credentials = try XCTUnwrap(c["credentials"] as? [[String: Any]], name).map { k in
+                Credential(id: k["id"] as? String ?? "", providerId: k["providerId"] as? String ?? "", label: "key",
+                           authMethod: .apiKey,
+                           createdAt: Date(timeIntervalSince1970: ((k["createdAt"] as? NSNumber)?.doubleValue ?? 0) / 1000),
+                           baseUrl: nil)
+            }
+
+            let decision = RoutingResolver.resolve(requestedProviderId: requested, requestedModel: model,
+                                                   group: group, credentials: credentials)
+            // Connect availability is the same decision without a model.
+            XCTAssertEqual(RoutingResolver.canServe(providerId: requested, group: group, credentials: credentials)?.id,
+                           decision?.credential.id, name)
+            guard let expect = c["expect"] as? [String: Any] else {
+                XCTAssertNil(decision, name)
+                continue
+            }
+            let d = try XCTUnwrap(decision, name)
+            XCTAssertEqual(d.credential.id, expect["credential"] as? String, name)
+            let translation = expect["translation"] as? [String: Any]
+            XCTAssertEqual(d.translation?.dstProviderId, translation?["dstProviderId"] as? String, name)
+            XCTAssertEqual(d.translation?.dstModel, translation?["dstModel"] as? String, name)
+            if let t = d.translation {
+                XCTAssertEqual(t.srcProviderId, requested, name)
+                XCTAssertEqual(t.srcModel, model ?? "", name)
+            }
+            let swap = expect["swap"] as? [String: Any]
+            XCTAssertEqual(d.swapToProviderId, swap?["dstProviderId"] as? String, name)
+            XCTAssertEqual(d.swapDstModel, swap?["dstModel"] as? String, name)
+            XCTAssertEqual(d.modelOverride, expect["modelOverride"] as? String, name)
+        }
+    }
+
     // MARK: - Connect availability (F101)
 
     func testCanServeFollowsRoutingWithoutAModel() {

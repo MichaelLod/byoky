@@ -1,10 +1,13 @@
 package com.byoky.app.proxy
 
 import com.byoky.app.data.Credential
+import com.byoky.app.data.DEFAULT_GROUP_ID
 import com.byoky.app.data.Group
+import com.byoky.app.data.Provider
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -12,24 +15,28 @@ import org.junit.Test
 class RoutingResolverTest {
 
     /**
-     * Family table and routing models for the providers used here (core:
-     * translate/families.ts and autoRouteModelFor in routing.ts).
+     * Shared routing vectors (packages/core/tests/vectors/routing.json),
+     * written from core by scripts/gen-routing-vectors.mjs.
+     */
+    private val vectors = SharedVectors.load("routing.json")
+
+    /**
+     * Core's answers to the family questions (translate/families.ts and
+     * autoRouteModelFor in routing.ts), from the vectors' provider table: the
+     * JVM tests can't run the bundled core that answers them on a phone.
      */
     private val families = object : RoutingResolver.Families {
-        private val family = mapOf(
-            "anthropic" to "anthropic", "openai" to "openai", "groq" to "openai", "deepseek" to "openai",
-            "ollama" to "openai", "lm_studio" to "openai", "azure_openai" to "openai", "mistral" to "openai", "gemini" to "gemini",
-            "cohere" to "cohere",
-        )
-        private val autoModels = mapOf("anthropic" to "claude-sonnet-4-6", "openai" to "gpt-5.5", "gemini" to "gemini-2.5-pro")
+        private val table = vectors.getJSONObject("providers")
+        private fun field(providerId: String, name: String): String? =
+            table.optJSONObject(providerId)?.takeUnless { it.isNull(name) }?.getString(name)
         override fun shouldTranslate(srcProviderId: String, dstProviderId: String): Boolean {
-            val a = family[srcProviderId] ?: return false
-            val b = family[dstProviderId] ?: return false
+            val a = field(srcProviderId, "family") ?: return false
+            val b = field(dstProviderId, "family") ?: return false
             return a != b
         }
         override fun sameFamily(srcProviderId: String, dstProviderId: String): Boolean =
-            srcProviderId != dstProviderId && family[srcProviderId] != null && family[srcProviderId] == family[dstProviderId]
-        override fun autoRouteModel(providerId: String): String? = autoModels[providerId]
+            field(srcProviderId, "family")?.let { it == field(dstProviderId, "family") } ?: false
+        override fun autoRouteModel(providerId: String): String? = field(providerId, "autoRouteModel")
     }
 
     private val key1 = Credential(id = "k1", providerId = "anthropic", label = "key #1", createdAt = 2)
@@ -282,6 +289,66 @@ class RoutingResolverTest {
         val routed = RoutingResolver.resolve("ollama", "llama3.1", toClaude, listOf(key1), families)!!
         assertEquals("k1", routed.credential.id)
         assertEquals("anthropic", routed.translation?.dstProviderId)
+    }
+
+    // ── Shared routing vectors (F092) ────────────────────────────────────
+
+    /** Every provider of the wallet is in the vectors' table, and no other. */
+    @Test
+    fun theVectorsCoverEveryProvider() {
+        val table = vectors.getJSONObject("providers")
+        assertEquals(Provider.all.map { it.id }.sorted(), table.keys().asSequence().toList().sorted())
+    }
+
+    /** The routing decisions every wallet makes the same way. */
+    @Test
+    fun sharedRoutingVectors() {
+        val cases = vectors.getJSONArray("cases")
+        assertTrue(cases.length() > 40)
+        for (i in 0 until cases.length()) {
+            val c = cases.getJSONObject(i)
+            val name = c.getString("name")
+            val requested = c.getString("requested")
+            val model = if (c.isNull("model")) null else c.getString("model")
+            val group = c.optJSONObject("group")?.let { g ->
+                val providerId = g.getString("providerId")
+                Group(
+                    id = if (providerId.isEmpty()) DEFAULT_GROUP_ID else "g",
+                    name = "Group",
+                    providerId = providerId,
+                    credentialId = if (g.isNull("credentialId")) null else g.getString("credentialId"),
+                    model = if (g.isNull("model")) null else g.getString("model"),
+                )
+            }
+            val keys = c.getJSONArray("credentials")
+            val credentials = (0 until keys.length()).map { k ->
+                val key = keys.getJSONObject(k)
+                Credential(id = key.getString("id"), providerId = key.getString("providerId"), label = "key", createdAt = key.getLong("createdAt"))
+            }
+
+            val decision = RoutingResolver.resolve(requested, model, group, credentials, families)
+            // Connect availability is the same decision without a model.
+            assertEquals(name, decision?.credential?.id, RoutingResolver.canServe(requested, group, credentials, families)?.id)
+            val expect = c.optJSONObject("expect")
+            if (expect == null) {
+                assertNull(name, decision)
+                continue
+            }
+            assertNotNull(name, decision)
+            decision!!
+            assertEquals(name, expect.getString("credential"), decision.credential.id)
+            val translation = expect.optJSONObject("translation")
+            assertEquals(name, translation?.getString("dstProviderId"), decision.translation?.dstProviderId)
+            assertEquals(name, translation?.getString("dstModel"), decision.translation?.dstModel)
+            decision.translation?.let {
+                assertEquals(name, requested, it.srcProviderId)
+                assertEquals(name, model.orEmpty(), it.srcModel)
+            }
+            val swap = expect.optJSONObject("swap")
+            assertEquals(name, swap?.getString("dstProviderId"), decision.swapToProviderId)
+            assertEquals(name, swap?.takeUnless { it.isNull("dstModel") }?.getString("dstModel"), decision.swapDstModel)
+            assertEquals(name, if (expect.isNull("modelOverride")) null else expect.getString("modelOverride"), decision.modelOverride)
+        }
     }
 
     // ── Connect availability (F101) ──────────────────────────────────────

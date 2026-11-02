@@ -8,7 +8,9 @@ import {
   autoRouteModelFor,
 } from '../src/routing.js';
 import { rewriteProxyUrl, familyOf } from '../src/translate/index.js';
+import { PROVIDERS } from '../src/providers.js';
 import type { Credential, Group } from '../src/types.js';
+import routingVectors from './vectors/routing.json';
 
 function cred(id: string, providerId: string): Credential {
   return {
@@ -566,5 +568,52 @@ describe('local OpenAI-compatible servers (F032)', () => {
       dstProviderId: 'anthropic',
       dstModel: 'claude-sonnet-4-6',
     });
+  });
+});
+
+// The routing cases every wallet runs (iOS RoutingResolverTests, Android
+// RoutingResolverTest), written by scripts/gen-routing-vectors.mjs from core.
+// A failure here means routing.ts changed: regenerate the file, review its
+// diff, and bring the mobile resolvers in line.
+describe('vectors/routing.json', () => {
+  it('lists every provider with core\'s family and routing model', () => {
+    expect(Object.keys(routingVectors.providers)).toEqual(Object.keys(PROVIDERS).sort());
+    for (const [id, row] of Object.entries(routingVectors.providers)) {
+      expect({ family: familyOf(id), autoRouteModel: autoRouteModelFor(id) ?? null }, id).toEqual(row);
+    }
+  });
+
+  it.each(routingVectors.cases.map((c) => [c.name, c] as const))('%s', (_name, c) => {
+    const credentials: Credential[] = c.credentials.map((k) => ({
+      id: k.id,
+      providerId: k.providerId,
+      label: k.id,
+      authMethod: 'api_key',
+      encryptedKey: '',
+      createdAt: k.createdAt,
+    }));
+    const g: Group | undefined = c.group
+      ? {
+          id: c.group.providerId ? 'g' : 'default',
+          name: 'Group',
+          providerId: c.group.providerId,
+          credentialId: c.group.credentialId ?? undefined,
+          model: c.group.model ?? undefined,
+          createdAt: 0,
+        }
+      : undefined;
+
+    const route = resolveRoute(c.requested, g, credentials);
+
+    expect(route && {
+      credential: route.credential.id,
+      translation: route.translation
+        ? { dstProviderId: route.translation.dstProviderId, dstModel: route.translation.dstModel }
+        : null,
+      swap: route.swap ? { dstProviderId: route.swap.dstProviderId, dstModel: route.swap.dstModel ?? null } : null,
+      modelOverride: route.modelOverride ?? null,
+    }).toEqual(c.expect);
+    if (route?.translation) expect(route.translation.srcProviderId).toBe(c.requested);
+    if (route?.swap) expect(route.swap.srcProviderId).toBe(c.requested);
   });
 });
