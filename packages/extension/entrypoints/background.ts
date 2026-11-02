@@ -3191,12 +3191,21 @@ export default defineBackground(() => {
   // storage.session too, since Safari's background page restarts.
   let walletWindowId: number | undefined;
   let walletWindowShowing: Promise<void> | null = null;
+  let watchingWalletWindow = false;
 
-  browser.windows?.onRemoved?.addListener((windowId: number) => {
-    if (windowId !== walletWindowId) return;
-    walletWindowId = undefined;
-    if (hasSessionStorage) browser.storage.session.remove('_walletWindow').catch(() => {});
-  });
+  // Forgets the window once it is closed. Listened for only once there is
+  // one: a listener added at startup would wake Chrome's worker for every
+  // window closed in the browser. A restarted worker doesn't hear of it, but
+  // focusing a closed window fails, and showWalletWindow opens a new one.
+  function watchWalletWindow() {
+    if (watchingWalletWindow) return;
+    watchingWalletWindow = true;
+    browser.windows?.onRemoved?.addListener((windowId: number) => {
+      if (windowId !== walletWindowId) return;
+      walletWindowId = undefined;
+      if (hasSessionStorage) browser.storage.session.remove('_walletWindow').catch(() => {});
+    });
+  }
 
   /** Show the wallet in a window of its own: the one already open, else a new one. Concurrent calls share one. */
   function openPopupWindow(): Promise<void> {
@@ -3222,9 +3231,9 @@ export default defineBackground(() => {
       height: 600,
     });
     walletWindowId = created?.id;
-    if (hasSessionStorage && walletWindowId !== undefined) {
-      browser.storage.session.set({ _walletWindow: walletWindowId }).catch(() => {});
-    }
+    if (walletWindowId === undefined) return;
+    watchWalletWindow();
+    if (hasSessionStorage) browser.storage.session.set({ _walletWindow: walletWindowId }).catch(() => {});
   }
 
   async function getStoredCredentials(): Promise<Credential[]> {

@@ -237,8 +237,11 @@ describe('background: the wallet window on Firefox and Safari (F004)', () => {
 
   it('opens a new window once the user closed it', async () => {
     const h = await firefoxWallet();
+    // Not at startup: Chrome would wake the worker for every closed window.
+    expect(h.browser.windows.onRemoved.listeners).toHaveLength(0);
     h.connect(APP, OPENAI);
     await h.until(() => h.browser.windows.create.mock.calls.length === 1, 5_000, 'the wallet window');
+    expect(h.browser.windows.onRemoved.listeners).toHaveLength(1);
     await h.browser.windows.remove(99);
     h.connect('https://other.example', OPENAI, { tabId: 2 });
     await h.until(() => h.browser.windows.create.mock.calls.length === 2, 5_000, 'a new window');
