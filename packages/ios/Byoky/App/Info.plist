@@ -46,6 +46,8 @@
 	</dict>
 	<key>NSCameraUsageDescription</key>
 	<string>Apps you open in Byoky's browser can ask for a photo, for example to attach an image to a chat. Byoky itself never uses the camera.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Apps you open in Byoky's browser can ask to record audio, for example a video attachment or voice input. Byoky itself never uses the microphone.</string>
 	<key>UIAppFonts</key>
 	<array>
 		<string>ChakraPetch-SemiBold.ttf</string>
