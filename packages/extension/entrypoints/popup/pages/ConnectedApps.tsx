@@ -1,4 +1,4 @@
-import { useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { useWalletStore } from '../store';
 import { TrustResetNotice } from '../components/TrustResetNotice';
 import { LimitsHoldNotice } from '../components/LimitsHoldNotice';
@@ -53,6 +53,10 @@ export function ConnectedApps() {
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
   const [showCreateGroup, setShowCreateGroup] = useState(false);
   const [dragOriginOver, setDragOriginOver] = useState<string | null>(null);
+  // Destructive actions ask first, inline (see InlineConfirm).
+  const [confirmingDisconnectAll, setConfirmingDisconnectAll] = useState(false);
+  const [confirmingDeleteGroup, setConfirmingDeleteGroup] = useState<string | null>(null);
+  const [confirmingRemoveSite, setConfirmingRemoveSite] = useState<string | null>(null);
   // Set while the pointer is down on a card's Group select, so pressing it
   // doesn't start dragging the card.
   const pressingGroupSelect = useRef(false);
@@ -63,6 +67,11 @@ export function ConnectedApps() {
     targetGroupName: string;
     targetModel: string;
   } | null>(null);
+
+  // Disconnect all goes when one app or none is left; so does its question.
+  useEffect(() => {
+    if (sessions.length <= 1) setConfirmingDisconnectAll(false);
+  }, [sessions.length]);
 
   // Lifetime totals, the numbers allowances are enforced against (the
   // request log only keeps the last 500 entries).
@@ -220,12 +229,26 @@ export function ConnectedApps() {
           <button
             className="text-link bracket-link"
             style={{ color: 'var(--danger)', fontSize: '11px' }}
-            onClick={() => sessions.forEach((s) => revokeSession(s.id))}
+            onClick={() => setConfirmingDisconnectAll(true)}
           >
             Disconnect all
           </button>
         )}
       </div>
+
+      {confirmingDisconnectAll && (
+        <InlineConfirm
+          confirmLabel="Disconnect all"
+          onCancel={() => setConfirmingDisconnectAll(false)}
+          onConfirm={() => {
+            setConfirmingDisconnectAll(false);
+            sessions.forEach((s) => revokeSession(s.id));
+          }}
+        >
+          Disconnect {sessions.length} apps? Every connected app loses access to your keys until
+          you approve it again.
+        </InlineConfirm>
+      )}
 
       {sessions.length > 0 && (
         <div className="warning-box" style={{ marginBottom: '12px' }}>
@@ -398,17 +421,26 @@ export function ConnectedApps() {
                   <button
                     className="text-link bracket-link"
                     style={{ fontSize: '11px', color: 'var(--danger)' }}
-                    onClick={() => {
-                      if (confirm(`Delete group "${group.name}"? Apps in this group will move back to Default.`)) {
-                        deleteGroup(group.id);
-                      }
-                    }}
+                    onClick={() => setConfirmingDeleteGroup(group.id)}
                   >
                     Delete
                   </button>
                 </div>
               )}
             </div>
+
+            {confirmingDeleteGroup === group.id && (
+              <InlineConfirm
+                confirmLabel="Delete"
+                onCancel={() => setConfirmingDeleteGroup(null)}
+                onConfirm={() => {
+                  setConfirmingDeleteGroup(null);
+                  deleteGroup(group.id);
+                }}
+              >
+                Delete group &ldquo;{group.name}&rdquo;? Apps in this group will move back to Default.
+              </InlineConfirm>
+            )}
 
             {editingGroupId === group.id && (
               <GroupForm
@@ -556,11 +588,23 @@ export function ConnectedApps() {
                   </div>
                   <button
                     className="btn btn-danger btn-sm"
-                    onClick={() => removeTrustedSite(site.origin)}
+                    onClick={() => setConfirmingRemoveSite(site.origin)}
                   >
                     Remove
                   </button>
                 </div>
+                {confirmingRemoveSite === site.origin && (
+                  <InlineConfirm
+                    confirmLabel="Remove"
+                    onCancel={() => setConfirmingRemoveSite(null)}
+                    onConfirm={() => {
+                      setConfirmingRemoveSite(null);
+                      removeTrustedSite(site.origin);
+                    }}
+                  >
+                    Stop trusting {insecure ? site.origin : label}? Its next connect will ask for approval.
+                  </InlineConfirm>
+                )}
                 {site.allowedProviders && site.allowedProviders.length > 0 && (
                   <div className="connected-providers" style={{ marginTop: '8px' }}>
                     {site.allowedProviders.map((id: string) => (
@@ -575,6 +619,53 @@ export function ConnectedApps() {
           })}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Asks before a destructive action, inline: popups can't rely on
+ * window.confirm (Firefox doesn't show dialogs from extension popups).
+ * Focus starts on Cancel; Escape cancels, and cancelling gives focus back
+ * to the button that asked.
+ */
+function InlineConfirm({ children, confirmLabel, onConfirm, onCancel }: {
+  children: ReactNode;
+  confirmLabel: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const id = useId();
+  // Read while rendering, before Cancel takes focus.
+  const [opener] = useState(() => document.activeElement);
+
+  function cancel() {
+    onCancel();
+    if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
+  }
+
+  return (
+    <div
+      className="warning-box inline-confirm"
+      role="group"
+      aria-labelledby={id}
+      onKeyDown={(e) => {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          e.stopPropagation();
+          cancel();
+        }
+      }}
+    >
+      <div id={id}>{children}</div>
+      <div className="inline-confirm-actions">
+        <button type="button" className="btn btn-secondary btn-sm" onClick={cancel} autoFocus>
+          Cancel
+        </button>
+        <button type="button" className="btn btn-danger btn-sm" onClick={onConfirm}>
+          {confirmLabel}
+        </button>
+      </div>
     </div>
   );
 }

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
 import { bg, mount, run, buttonByText, type Mounted } from './helpers/popup-harness';
 
 type Store = typeof import('../entrypoints/popup/store');
@@ -116,5 +116,97 @@ describe('form fields have names, not just placeholders (F064)', () => {
     const card = [...view.container.querySelectorAll('.credential-card')].find((c) => c.textContent?.includes('Work'))!;
     await run(() => card.querySelector<HTMLButtonElement>('[aria-label="Rename credential"]')!.click());
     expect(accessibleName(card.querySelector('.credential-label-input')!)).toBe('Rename Work');
+  });
+});
+
+// F063: Disconnect all revoked every session on one click (iOS and Android
+// ask first), and group Delete asked with window.confirm, which Firefox
+// doesn't show from an extension popup.
+describe('destructive actions ask first, inline', () => {
+  const session = (id: string, appOrigin: string) => ({
+    id, sessionKey: `k-${id}`, appOrigin, createdAt: Date.now(), expiresAt: Date.now() + 1e6,
+    providers: [{ providerId: 'openai', credentialId: 'o1', available: true, authMethod: 'api_key' }],
+  });
+  let confirmSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    bg.state.sessions = [session('s1', 'https://one.example'), session('s2', 'https://two.example')];
+    bg.handlers.revokeSession = (p: { sessionId: string }) => {
+      bg.state.sessions = (bg.state.sessions as Array<{ id: string }>).filter((s) => s.id !== p.sessionId);
+      return { success: true };
+    };
+    confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+  });
+
+  afterEach(() => {
+    expect(confirmSpy).not.toHaveBeenCalled();
+    confirmSpy.mockRestore();
+  });
+
+  const confirmBox = (c: HTMLElement) => c.querySelector<HTMLElement>('.inline-confirm');
+
+  it('Disconnect all revokes nothing until confirmed', async () => {
+    const container = await openConnectedApps();
+    const trigger = buttonByText(container, 'Disconnect all')!;
+    trigger.focus();
+    await run(() => trigger.click());
+    expect(bg.payloads('revokeSession')).toEqual([]);
+    const box = confirmBox(container)!;
+    expect(box.textContent).toContain('Disconnect 2 apps?');
+    expect(document.activeElement).toBe(buttonByText(box, 'Cancel'));
+
+    await run(() => buttonByText(box, 'Cancel')!.click());
+    expect(confirmBox(container)).toBeNull();
+    expect(bg.payloads('revokeSession')).toEqual([]);
+    expect(document.activeElement).toBe(trigger);
+
+    await run(() => trigger.click());
+    await run(() => buttonByText(confirmBox(container)!, 'Disconnect all')!.click());
+    expect(bg.payloads('revokeSession')).toEqual([{ sessionId: 's1' }, { sessionId: 's2' }]);
+    expect(confirmBox(container)).toBeNull();
+  });
+
+  it('Escape cancels it, and it goes when one app is left', async () => {
+    const container = await openConnectedApps();
+    await run(() => buttonByText(container, 'Disconnect all')!.click());
+    await run(() => {
+      document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    });
+    expect(confirmBox(container)).toBeNull();
+
+    await run(() => buttonByText(container, 'Disconnect all')!.click());
+    // One app disconnects elsewhere: nothing is left to disconnect "all" of.
+    bg.state.sessions = [session('s1', 'https://one.example')];
+    await bg.broadcast('sessionChanged');
+    expect(confirmBox(container)).toBeNull();
+    expect(bg.payloads('revokeSession')).toEqual([]);
+  });
+
+  it('group Delete asks inline', async () => {
+    bg.state.groups = [
+      { id: 'default', name: 'Default', providerId: '', createdAt: 1 },
+      { id: 'g1', name: 'Cheap', providerId: 'openai', createdAt: 2 },
+    ];
+    bg.handlers.deleteGroup = () => ({ success: true });
+    const container = await openConnectedApps();
+    await run(() => buttonByText(container, 'Delete')!.click());
+    expect(confirmBox(container)?.textContent).toContain('Delete group \u201cCheap\u201d?');
+    await run(() => buttonByText(confirmBox(container)!, 'Cancel')!.click());
+    expect(bg.payloads('deleteGroup')).toEqual([]);
+
+    await run(() => buttonByText(container, 'Delete')!.click());
+    await run(() => buttonByText(confirmBox(container)!, 'Delete')!.click());
+    expect(bg.payloads('deleteGroup')).toEqual([{ id: 'g1' }]);
+  });
+
+  it('removing a trusted site asks inline', async () => {
+    trustedSites = [{ origin: 'https://chat.example', trustedAt: Date.now(), allowedProviders: ['openai'] }];
+    bg.handlers.removeTrustedSite = () => ({ success: true });
+    const container = await openConnectedApps();
+    await run(() => buttonByText(container, 'Remove')!.click());
+    expect(bg.payloads('removeTrustedSite')).toEqual([]);
+    expect(confirmBox(container)?.textContent).toContain('Stop trusting chat.example?');
+    await run(() => buttonByText(confirmBox(container)!, 'Remove')!.click());
+    expect(bg.payloads('removeTrustedSite')).toEqual([{ origin: 'https://chat.example' }]);
   });
 });

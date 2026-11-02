@@ -1787,6 +1787,22 @@ html.popup .app {
   color: var(--amber);
 }
 
+/* Asks before a destructive action (ConnectedApps InlineConfirm). */
+.inline-confirm {
+  margin: 0 0 12px;
+}
+
+.card .inline-confirm {
+  margin: 8px 0 0;
+}
+
+.inline-confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
 .warning-box code {
   background: var(--ink);
   padding: 1px 4px;
