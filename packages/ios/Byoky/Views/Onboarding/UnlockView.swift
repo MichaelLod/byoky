@@ -42,7 +42,7 @@ struct UnlockView: View {
                 wallet.resetWallet()
             }
         } message: {
-            Text("This will permanently delete all API keys, sessions, and settings. This cannot be undone.")
+            Text("This will permanently delete all API keys, sessions, and settings, and the logins and data of apps in the built-in browser. This cannot be undone.")
         }
         .onReceive(lockoutTimer) { _ in
             updateLockoutState()

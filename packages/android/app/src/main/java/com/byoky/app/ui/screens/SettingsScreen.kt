@@ -119,7 +119,7 @@ fun SettingsScreen(wallet: WalletStore, onBack: () -> Unit) {
             // Danger Zone
             SettingsCard(title = "Danger Zone", titleColor = Alarm) {
                 Text(
-                    "Reset wallet permanently deletes all keys and settings on this device. Export a backup first if you want to keep them.",
+                    "Reset wallet permanently deletes all keys and settings on this device, and app logins and data in the built-in browser. Export a backup first if you want to keep your keys.",
                     color = Fog,
                     fontSize = 13.sp,
                     lineHeight = 18.sp,
@@ -144,7 +144,7 @@ fun SettingsScreen(wallet: WalletStore, onBack: () -> Unit) {
             titleColor = Alarm,
             text = {
                 Text(
-                    "All keys on this device will be permanently deleted. This cannot be undone.",
+                    "All keys on this device will be permanently deleted, along with the logins and data of apps in the built-in browser. This cannot be undone.",
                     fontSize = 13.sp,
                 )
             },

@@ -1,6 +1,7 @@
 import Combine
 import CryptoKit
 import Foundation
+import WebKit
 
 @MainActor
 final class WalletStore: ObservableObject {
@@ -216,7 +217,11 @@ final class WalletStore: ObservableObject {
         AppGroupSync.shared.syncWalletState(isUnlocked: false, providers: [])
     }
 
-    func resetWallet() {
+    /// Deletes the wallet: keys, sessions, settings, the lockout, and what
+    /// apps stored in the built-in browser. The returned task finishes when
+    /// WebKit has removed that site data.
+    @discardableResult
+    func resetWallet() -> Task<Void, Never> {
         masterKey = nil
         backgroundTime = nil
 
@@ -265,6 +270,16 @@ final class WalletStore: ObservableObject {
 
         AppGroupSync.shared.syncWalletState(isUnlocked: false, providers: [])
         status = .uninitialized
+
+        // A reset hands the phone to a new wallet ("Forgot password?" needs no
+        // password): an app added again must not open signed in to the
+        // previous owner's account or with their data.
+        return Task {
+            await WKWebsiteDataStore.default().removeData(
+                ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(),
+                modifiedSince: .distantPast
+            )
+        }
     }
 
     func dismissRetiredFeaturesNotice() {
@@ -310,9 +325,31 @@ final class WalletStore: ObservableObject {
         return app
     }
 
-    func uninstallApp(_ id: String) {
+    /// Removes an app from the list, and what it stored in the built-in
+    /// browser. The returned task finishes when WebKit has removed that.
+    @discardableResult
+    func uninstallApp(_ id: String) -> Task<Void, Never>? {
+        guard let removed = installedApps.first(where: { $0.id == id }) else { return nil }
         installedApps.removeAll { $0.id == id }
         saveInstalledApps()
+        let remainingHosts = installedApps.compactMap { URL(string: $0.url)?.host?.lowercased() }
+        return Task { await Self.removeSiteData(of: removed, keepingFor: remainingHosts) }
+    }
+
+    /// WebKit keeps site data per registrable domain (`example.com` for
+    /// `app.example.com`), so a domain's data stays while another app in the
+    /// list is on it; a reset clears everything.
+    private static func removeSiteData(of app: InstalledApp, keepingFor remainingHosts: [String]) async {
+        guard let host = URL(string: app.url)?.host?.lowercased() else { return }
+        func isOn(_ domain: String, _ host: String) -> Bool { host == domain || host.hasSuffix("." + domain) }
+        let store = WKWebsiteDataStore.default()
+        let types = WKWebsiteDataStore.allWebsiteDataTypes()
+        let records = await store.dataRecords(ofTypes: types).filter { record in
+            let domain = record.displayName.lowercased()
+            return isOn(domain, host) && !remainingHosts.contains { isOn(domain, $0) }
+        }
+        guard !records.isEmpty else { return }
+        await store.removeData(ofTypes: types, for: records)
     }
 
     func toggleApp(_ id: String) {

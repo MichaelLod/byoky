@@ -220,7 +220,7 @@ fun UnlockScreen(wallet: WalletStore) {
             title = "Reset Wallet?",
             titleColor = Alarm,
             text = {
-                Text("This will permanently delete all API keys, sessions, and settings. This cannot be undone.")
+                Text("This will permanently delete all API keys, sessions, and settings, and the logins and data of apps in the built-in browser. This cannot be undone.")
             },
             confirmButton = {
                 DialogButton(

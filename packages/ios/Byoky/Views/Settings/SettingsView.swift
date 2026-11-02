@@ -76,7 +76,7 @@ struct SettingsView: View {
                     wallet.resetWallet()
                 }
             } message: {
-                Text("All keys on this device will be permanently deleted. This cannot be undone.")
+                Text("All keys on this device will be permanently deleted, along with the logins and data of apps in the built-in browser. This cannot be undone.")
             }
         }
     }
@@ -122,7 +122,7 @@ struct SettingsView: View {
         } header: {
             ListHeader("Danger Zone")
         } footer: {
-            ListFooter("Reset wallet clears all keys on this device.")
+            ListFooter("Reset wallet clears all keys on this device, and app logins and data in the built-in browser.")
         }
         .retroRow(border: Theme.alarm)
     }

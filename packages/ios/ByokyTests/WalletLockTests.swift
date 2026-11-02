@@ -1,4 +1,5 @@
 import Combine
+import WebKit
 import XCTest
 @testable import Byoky
 
@@ -129,6 +130,56 @@ final class WalletLockTests: XCTestCase {
         XCTAssertNil(wallet.lockoutEndTime)
         try wallet.createPassword(password)
         XCTAssertTrue(wallet.credentials.isEmpty)
+    }
+
+    // MARK: - Built-in browser data
+
+    private func cookie(_ name: String, domain: String) throws -> HTTPCookie {
+        try XCTUnwrap(HTTPCookie(properties: [
+            .domain: domain, .path: "/", .name: name, .value: "owner",
+            .secure: "TRUE", .expires: Date().addingTimeInterval(3600),
+        ]))
+    }
+
+    /// A reset ("Forgot password?" asks for no password) leaves the next
+    /// wallet nothing of what apps stored in the built-in browser: no
+    /// logins, no site data.
+    @MainActor
+    func testResetDeletesWhatAppsStoredInTheBuiltInBrowser() async throws {
+        let wallet = try freshWallet()
+        let store = WKWebsiteDataStore.default()
+        await store.httpCookieStore.setCookie(try cookie("sid", domain: "reset-test.example.com"))
+        let before = await store.httpCookieStore.allCookies()
+        XCTAssertTrue(before.contains { $0.name == "sid" })
+
+        wallet.lock()
+        await wallet.resetWallet().value
+
+        let cookies = await store.httpCookieStore.allCookies()
+        XCTAssertFalse(cookies.contains { $0.domain.hasSuffix("reset-test.example.com") }, "a login survived the reset")
+        let records = await store.dataRecords(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes())
+        XCTAssertTrue(records.isEmpty, "site data survived the reset: \(records.map(\.displayName))")
+    }
+
+    /// Removing an app takes its site data along, but not a domain another
+    /// app in the list still uses.
+    @MainActor
+    func testRemovingAnAppDeletesItsSiteData() async throws {
+        let wallet = try freshWallet()
+        let store = WKWebsiteDataStore.default()
+        await store.httpCookieStore.setCookie(try cookie("sid", domain: "chat.removed-app.test"))
+        await store.httpCookieStore.setCookie(try cookie("sid", domain: "kept-app.test"))
+        let removed = try wallet.addApp(urlString: "https://chat.removed-app.test/")
+        let kept = try wallet.addApp(urlString: "https://kept-app.test/")
+        addTeardownBlock { @MainActor in
+            WalletStore.shared.uninstallApp(kept.id)
+        }
+
+        await wallet.uninstallApp(removed.id)?.value
+
+        let cookies = await store.httpCookieStore.allCookies()
+        XCTAssertFalse(cookies.contains { $0.domain.hasSuffix("removed-app.test") }, "the removed app's login stayed")
+        XCTAssertTrue(cookies.contains { $0.domain.hasSuffix("kept-app.test") }, "another app's login went too")
     }
 
     // MARK: - Where a key is sent
