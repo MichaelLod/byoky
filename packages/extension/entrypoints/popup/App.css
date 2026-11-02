@@ -1477,6 +1477,14 @@ html.popup .app {
   color: var(--text-secondary);
 }
 
+/* In place of the trust checkbox, for a plain-http site. */
+.approval-trust-note {
+  margin: 4px 0 20px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
 .approval-actions {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

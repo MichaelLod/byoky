@@ -53,6 +53,7 @@ import type { Runtime } from 'wxt/browser';
 import { exportVaultFile, importVaultFile } from '../lib/vault-file';
 import { KEYLESS_PROVIDERS, openCredentialSecret, upgradeWallet } from '../lib/wallet-upgrade';
 import { isProviderIdList, parseProviderRequirements } from '../lib/connect-request';
+import { isInsecureOrigin } from '../lib/origin';
 import { MAX_BINARY_CHUNK_BYTES, bytesToBase64 } from '../lib/binary-body';
 import {
   REVOKED_ORIGINS_KEY,
@@ -1829,7 +1830,9 @@ export default defineBackground(() => {
           // (the wallet upgrade failed), the connection still goes ahead; the
           // site just asks again next time.
           await clearRevocation(pending.approval.appOrigin).catch(() => {});
-          if (trust) {
+          // A plain-http site is never trusted (anyone on the network path
+          // can be it); the popup doesn't offer it, and this holds anyway.
+          if (trust && !isInsecureOrigin(pending.approval.appOrigin)) {
             await addTrustedSite(pending.approval.appOrigin, approvedProviderIds).catch(() => {});
           }
         });
@@ -1868,7 +1871,8 @@ export default defineBackground(() => {
       case 'addTrustedSite': {
         if (!masterPassword) return { error: 'Wallet is locked' };
         const { origin, allowedProviders } = message.payload as { origin: unknown; allowedProviders: unknown };
-        if (typeof origin !== 'string' || origin === 'unknown' || !isProviderIdList(allowedProviders)) {
+        if (typeof origin !== 'string' || origin === 'unknown' || isInsecureOrigin(origin)
+          || !isProviderIdList(allowedProviders)) {
           return { error: 'Invalid trusted site' };
         }
         await addTrustedSite(origin, allowedProviders);
@@ -3772,8 +3776,11 @@ export default defineBackground(() => {
   async function addTrustedSite(origin: string, allowedProviders: string[]) {
     // Anything else would make the signed state unreadable (parseTrustedSites)
     // and so wipe every trusted site; an opaque origin would trust every
-    // sandboxed frame on every site.
-    if (origin === 'unknown' || !isProviderIdList(allowedProviders)) throw new Error('Invalid trusted site');
+    // sandboxed frame on every site, and a plain-http one whoever is on the
+    // network path.
+    if (origin === 'unknown' || isInsecureOrigin(origin) || !isProviderIdList(allowedProviders)) {
+      throw new Error('Invalid trusted site');
+    }
     await updateTrustState((state) => {
       const existing = state.sites.find((s) => s.origin === origin);
       if (!existing) return { ...state, sites: [...state.sites, { origin, trustedAt: Date.now(), allowedProviders }] };

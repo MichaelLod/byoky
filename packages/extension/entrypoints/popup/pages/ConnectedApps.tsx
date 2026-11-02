@@ -530,35 +530,46 @@ export function ConnectedApps() {
           <p className="card-subtitle" style={{ marginBottom: '12px' }}>
             These sites connect without asking for approval.
           </p>
-          {trustedSites.map((site) => (
-            <div key={site.origin} className="card">
-              <div className="card-header">
-                <div style={{ minWidth: 0 }}>
-                  <span className="card-title" title={site.origin} style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {formatOrigin(site.origin)}
-                  </span>
-                  <div className="card-subtitle mono">
-                    Trusted {timeAgo(site.trustedAt)}
-                  </div>
-                </div>
-                <button
-                  className="btn btn-danger btn-sm"
-                  onClick={() => removeTrustedSite(site.origin)}
-                >
-                  Remove
-                </button>
-              </div>
-              {site.allowedProviders && site.allowedProviders.length > 0 && (
-                <div className="connected-providers" style={{ marginTop: '8px' }}>
-                  {site.allowedProviders.map((id: string) => (
-                    <span key={id} className="badge badge-provider">
-                      {PROVIDERS[id]?.name ?? id}
+          {trustedSites.map((site) => {
+            // Trusted before plain-http sites couldn't be: it asks again, and
+            // shows its scheme so it can't pass for the https site.
+            const { label, insecure } = describeOrigin(site.origin);
+            return (
+              <div key={site.origin} className="card">
+                <div className="card-header">
+                  <div style={{ minWidth: 0 }}>
+                    <span className="card-title" title={site.origin} style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {insecure ? site.origin : label}
                     </span>
-                  ))}
+                    <div className="card-subtitle mono">
+                      Trusted {timeAgo(site.trustedAt)}
+                    </div>
+                    {insecure && (
+                      <div className="card-subtitle trusted-site-insecure">
+                        <span className="result-tag alarm">Not secure</span>
+                        {' '}Plain http, so it asks before connecting.
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    className="btn btn-danger btn-sm"
+                    onClick={() => removeTrustedSite(site.origin)}
+                  >
+                    Remove
+                  </button>
                 </div>
-              )}
-            </div>
-          ))}
+                {site.allowedProviders && site.allowedProviders.length > 0 && (
+                  <div className="connected-providers" style={{ marginTop: '8px' }}>
+                    {site.allowedProviders.map((id: string) => (
+                      <span key={id} className="badge badge-provider">
+                        {PROVIDERS[id]?.name ?? id}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

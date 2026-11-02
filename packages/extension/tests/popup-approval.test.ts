@@ -98,6 +98,25 @@ describe('approval headline names the full origin (F093)', () => {
   });
 });
 
+describe('a plain-http site can\'t be trusted (F035)', () => {
+  it('offers no Trust checkbox, says why, and approves without trust', async () => {
+    bg.state.approvals = [approval('a1', 'http://insecure.example')];
+    view = await mount(App);
+    const { container } = view;
+    expect(container.querySelector('.approval-trust')).toBeNull();
+    expect(container.querySelector('.approval-trust-note')?.textContent).toContain("can't be trusted");
+    await run(() => buttonByText(container, 'Approve')!.click());
+    expect(bg.payloads('approveConnect')).toEqual([{ approvalId: 'a1', trust: false }]);
+  });
+
+  it.each(['https://app.example', 'http://localhost:3000', 'http://127.0.0.1:5173'])('offers it for %s', async (origin) => {
+    bg.state.approvals = [approval('a1', origin)];
+    view = await mount(App);
+    expect(trustBox(view.container)).not.toBeNull();
+    expect(view.container.querySelector('.approval-trust-note')).toBeNull();
+  });
+});
+
 describe('a malformed request or record does not blank the popup (F076)', () => {
   // React reports errors caught by a boundary on the console.
   beforeEach(() => { vi.spyOn(console, 'error').mockImplementation(() => {}); });

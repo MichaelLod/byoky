@@ -159,14 +159,22 @@ function ApprovalCard({ approval, queued }: { approval: PendingApproval; queued:
         </div>
       </div>
 
-      <label className="approval-trust">
-        <input
-          type="checkbox"
-          checked={trust}
-          onChange={(e) => setTrust(e.target.checked)}
-        />
-        <span>Trust this site (auto-approve future connections)</span>
-      </label>
+      {origin.insecure ? (
+        // The background refuses to trust these too.
+        <p className="approval-trust-note">
+          Sites on plain http can&apos;t be trusted to connect without asking:
+          anyone on the network can pose as them.
+        </p>
+      ) : (
+        <label className="approval-trust">
+          <input
+            type="checkbox"
+            checked={trust}
+            onChange={(e) => setTrust(e.target.checked)}
+          />
+          <span>Trust this site (auto-approve future connections)</span>
+        </label>
+      )}
 
       <div className="approval-actions">
         <button
@@ -177,7 +185,7 @@ function ApprovalCard({ approval, queued }: { approval: PendingApproval; queued:
         </button>
         <button
           className="btn btn-primary"
-          onClick={() => approveConnect(approval.id, trust)}
+          onClick={() => approveConnect(approval.id, trust && !origin.insecure)}
         >
           Approve
         </button>
