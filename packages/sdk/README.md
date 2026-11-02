@@ -212,6 +212,8 @@ A request sent over the relay may be at most 1 MB once serialized (URL, headers 
 
 The built-in modal connects to the wallet when one is present, and otherwise shows install guidance (store link for the current browser, a hint to use the Byoky app's built-in browser on phones). If the user dismisses it without a wallet, `connect()` rejects with `WALLET_NOT_INSTALLED`; a cancelled approval rejects with `Error('User cancelled')`.
 
+By default it uses Byoky's dark violet look with square corners. A `theme` overrides the accent, background, text colour and corner radius; raised surfaces, borders and secondary text follow your background and text colours, so set both together.
+
 ```typescript
 const session = await byoky.connect({
   providers: [{ id: 'anthropic', required: true }],

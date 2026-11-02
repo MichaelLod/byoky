@@ -546,12 +546,17 @@ const byoky = new Byoky({
       <Code lang="typescript">{`interface ModalOptions {
   container?: HTMLElement;      // mount point (defaults to document.body)
   theme?: {
-    accentColor?: string;
-    backgroundColor?: string;
-    textColor?: string;
-    borderRadius?: string;
+    accentColor?: string;       // default '#7C3AED'
+    backgroundColor?: string;   // default '#100D16'
+    textColor?: string;         // default '#ECE8F4'
+    borderRadius?: string;      // default '0px'
   };
 }`}</Code>
+      <p>
+        By default the modal uses Byoky&apos;s dark violet look with square corners. Raised
+        surfaces, borders and secondary text follow your <code>backgroundColor</code> and{' '}
+        <code>textColor</code>, so a light theme works as well as a dark one; set both together.
+      </p>
       <p>
         Without <code>modal</code>, <code>connect()</code> throws a <code>ByokyError</code> with code{' '}
         <code>WALLET_NOT_INSTALLED</code> when no wallet is present (and opens the store page for the

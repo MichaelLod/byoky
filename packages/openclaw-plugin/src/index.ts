@@ -986,27 +986,30 @@ function buildAuthPage(requestProviderId: string | null, nonce: string): string 
   <title>Byoky — Connect to OpenClaw</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
   <style>
+    /* Byoky's brand (docs/brand/README.md): dark, violet, square. */
     :root {
-      --bg: #fafaf9;
-      --bg-card: #ffffff;
-      --bg-elevated: #f5f5f4;
-      --border: #e7e5e4;
-      --border-hover: #d6d3d1;
-      --text: #1c1917;
-      --text-secondary: #57534e;
-      --text-muted: #a8a29e;
-      --teal: #FF4F00;
-      --teal-light: #ff6a2a;
-      --teal-dark: #e64500;
-      --teal-glow: rgba(255, 79, 0, 0.15);
-      --green: #16a34a;
+      --bg: #07060A;
+      --bg-card: #100D16;
+      --bg-elevated: #17121F;
+      --border: #2A2236;
+      --border-hover: #3B2D55;
+      --text: #ECE8F4;
+      --text-secondary: #A79FB8;
+      --text-muted: #857C95;
+      --teal: #7C3AED;
+      --teal-light: #A78BFA;
+      --teal-dark: #8B5CF6;
+      --teal-glow: rgba(124, 58, 237, 0.18);
+      --green: #4ADE80;
+      --red: #F87171;
+      --display: 'Chakra Petch', system-ui, -apple-system, sans-serif;
     }
     *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
     html { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
     body {
-      font-family: 'Sora', system-ui, -apple-system, sans-serif;
+      font-family: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
       background: var(--bg);
       color: var(--text);
       min-height: 100vh;
@@ -1022,8 +1025,8 @@ function buildAuthPage(requestProviderId: string | null, nonce: string): string 
       content: '';
       position: fixed;
       inset: 0;
-      background-image: radial-gradient(circle at 1px 1px, rgba(28, 25, 23, 0.04) 1px, transparent 0);
-      background-size: 40px 40px;
+      background-image: radial-gradient(circle at 1px 1px, rgba(167, 139, 250, 0.08) 1px, transparent 0);
+      background-size: 28px 28px;
       pointer-events: none;
       z-index: 0;
     }
@@ -1045,12 +1048,10 @@ function buildAuthPage(requestProviderId: string | null, nonce: string): string 
       z-index: 1;
       background: var(--bg-card);
       border: 1px solid var(--border);
-      border-radius: 16px;
       padding: 40px 36px 32px;
       max-width: 440px;
       width: 100%;
       text-align: center;
-      box-shadow: 0 4px 24px rgba(28, 25, 23, 0.04);
     }
     .eyebrow {
       display: inline-block;
@@ -1058,14 +1059,14 @@ function buildAuthPage(requestProviderId: string | null, nonce: string): string 
       font-weight: 600;
       letter-spacing: 0.12em;
       text-transform: uppercase;
-      color: var(--teal);
-      background: rgba(255, 79, 0, 0.08);
-      border: 1px solid rgba(255, 79, 0, 0.25);
+      color: var(--teal-light);
+      background: var(--teal-glow);
+      border: 1px solid var(--border-hover);
       padding: 5px 11px;
-      border-radius: 999px;
       margin-bottom: 18px;
     }
     h1 {
+      font-family: var(--display);
       font-size: 26px;
       font-weight: 700;
       letter-spacing: -0.02em;
@@ -1074,7 +1075,7 @@ function buildAuthPage(requestProviderId: string | null, nonce: string): string 
       color: var(--text);
     }
     h1 .grad {
-      background: linear-gradient(90deg, var(--teal-light), var(--teal));
+      background: linear-gradient(90deg, var(--teal-light), #C4B5FD);
       -webkit-background-clip: text;
       background-clip: text;
       color: transparent;
@@ -1090,7 +1091,6 @@ function buildAuthPage(requestProviderId: string | null, nonce: string): string 
       justify-content: center;
       gap: 10px;
       padding: 14px 16px;
-      border-radius: 10px;
       margin-bottom: 18px;
       font-size: 14px;
       font-weight: 500;
@@ -1100,14 +1100,13 @@ function buildAuthPage(requestProviderId: string | null, nonce: string): string 
     }
     .status .dot {
       flex-shrink: 0;
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
+      width: 7px;
+      height: 7px;
     }
     .waiting {
-      background: rgba(255, 79, 0, 0.06);
-      border-color: rgba(255, 79, 0, 0.2);
-      color: var(--teal-dark);
+      background: var(--teal-glow);
+      border-color: var(--border-hover);
+      color: var(--teal-light);
     }
     .waiting .dot {
       background: var(--teal);
@@ -1115,23 +1114,22 @@ function buildAuthPage(requestProviderId: string | null, nonce: string): string 
       animation: pulse 1.6s ease-in-out infinite;
     }
     .success {
-      background: rgba(22, 163, 74, 0.07);
-      border-color: rgba(22, 163, 74, 0.25);
-      color: #15803d;
+      background: rgba(74, 222, 128, 0.08);
+      border-color: rgba(74, 222, 128, 0.3);
+      color: var(--green);
     }
     .success .dot {
       background: var(--green);
-      box-shadow: 0 0 8px rgba(22, 163, 74, 0.6);
     }
     .error {
-      background: rgba(220, 38, 38, 0.06);
-      border-color: rgba(220, 38, 38, 0.22);
-      color: #b91c1c;
+      background: rgba(248, 113, 113, 0.08);
+      border-color: rgba(248, 113, 113, 0.3);
+      color: var(--red);
     }
-    .error .dot { background: #dc2626; }
+    .error .dot { background: var(--red); }
     @keyframes pulse {
-      0%, 100% { box-shadow: 0 0 0 0 rgba(255, 79, 0, 0.35); }
-      50% { box-shadow: 0 0 0 6px rgba(255, 79, 0, 0); }
+      0%, 100% { box-shadow: 0 0 0 0 rgba(124, 58, 237, 0.45); }
+      50% { box-shadow: 0 0 0 6px rgba(124, 58, 237, 0); }
     }
     .info {
       color: var(--text-secondary);
@@ -1139,7 +1137,6 @@ function buildAuthPage(requestProviderId: string | null, nonce: string): string 
       line-height: 1.6;
       padding: 14px 16px;
       background: var(--bg-elevated);
-      border-radius: 10px;
       text-align: left;
     }
     .info strong { color: var(--text); font-weight: 600; }
@@ -1160,17 +1157,17 @@ function buildAuthPage(requestProviderId: string | null, nonce: string): string 
       margin-bottom: 16px;
       padding: 13px 20px;
       border: none;
-      border-radius: 10px;
       background: var(--teal);
       color: #fff;
-      font-family: inherit;
+      font-family: var(--display);
       font-size: 15px;
-      font-weight: 700;
-      letter-spacing: -0.01em;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
       cursor: pointer;
-      transition: background 0.15s ease, transform 0.15s ease;
+      transition: background 0.15s ease;
     }
-    .connect-btn:hover { background: var(--teal-dark); transform: translateY(-1px); }
+    .connect-btn:hover { background: var(--teal-dark); }
     .connect-btn:disabled { opacity: 0.6; cursor: default; transform: none; }
   </style>
 </head>
