@@ -11,6 +11,8 @@ import org.json.JSONObject
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.byoky.app.data.WalletStore
+import com.byoky.app.testing.FakeServer
+import com.byoky.app.testing.clearWalletState
 import kotlinx.coroutines.runBlocking
 import okhttp3.Call
 import org.junit.After
@@ -22,12 +24,8 @@ import org.junit.Assert.fail
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
-import java.io.BufferedInputStream
 import java.io.ByteArrayOutputStream
-import java.net.InetAddress
-import java.net.ServerSocket
 import java.util.concurrent.CopyOnWriteArrayList
-import kotlin.concurrent.thread
 
 /**
  * [ProxyService.forward] end to end against a local fake server (an Ollama
@@ -45,7 +43,7 @@ class ProxyServiceLocalFlowTest {
     @Before
     fun setup() {
         context = InstrumentationRegistry.getInstrumentation().targetContext
-        clearWalletState()
+        clearWalletState(context)
         wallet = WalletStore(context)
         runBlocking { wallet.createPassword("ProxyLocalFlowTest!long") }
         proxy = ProxyService(wallet, context)
@@ -57,7 +55,7 @@ class ProxyServiceLocalFlowTest {
     fun tearDown() {
         server.close()
         try { wallet.lock() } catch (_: Throwable) {}
-        clearWalletState()
+        clearWalletState(context)
     }
 
     /** Only allow-listed headers reach the provider, plus the key (F091). */
@@ -284,67 +282,5 @@ class ProxyServiceLocalFlowTest {
         override fun onChunk(chunk: String) { text.append(chunk); chunks += chunk }
         override fun onBytes(chunk: ByteArray) { bytes.write(chunk) }
         override fun onDone() { done = true }
-    }
-
-    private fun clearWalletState() {
-        context.getSharedPreferences("byoky_state", Context.MODE_PRIVATE).edit().clear().commit()
-        try { context.deleteSharedPreferences(WalletStore.ENCRYPTED_PREFS_FILE) } catch (_: Throwable) {}
-    }
-
-    /** One-connection-per-request HTTP/1.1 server on [host] (127.0.0.1 unless given). */
-    private class FakeServer(host: String = "127.0.0.1") : AutoCloseable {
-        data class Request(val line: String, val headers: Map<String, String>, val body: ByteArray)
-        data class Reply(val contentType: String, val body: ByteArray, val status: Int = 200)
-
-        @Volatile var reply = Reply("application/json", "{}".toByteArray())
-        val requests = CopyOnWriteArrayList<Request>()
-        private val socket = ServerSocket(0, 16, InetAddress.getByName(host))
-        val base = "http://${if (':' in host) "[$host]" else host}:${socket.localPort}"
-
-        init {
-            thread(isDaemon = true) {
-                while (!socket.isClosed) {
-                    val client = try { socket.accept() } catch (_: Exception) { break }
-                    client.use { c ->
-                        val input = BufferedInputStream(c.getInputStream())
-                        val line = readLine(input)
-                        val headers = mutableMapOf<String, String>()
-                        while (true) {
-                            val h = readLine(input)
-                            if (h.isEmpty()) break
-                            val i = h.indexOf(':')
-                            if (i > 0) headers[h.substring(0, i).trim().lowercase()] = h.substring(i + 1).trim()
-                        }
-                        val length = headers["content-length"]?.toIntOrNull() ?: 0
-                        val body = ByteArray(length)
-                        var read = 0
-                        while (read < length) {
-                            val n = input.read(body, read, length - read)
-                            if (n < 0) break
-                            read += n
-                        }
-                        requests += Request(line, headers, body)
-                        val r = reply
-                        val out = c.getOutputStream()
-                        out.write(("HTTP/1.1 ${r.status} OK\r\nContent-Type: ${r.contentType}\r\n" +
-                            "Content-Length: ${r.body.size}\r\nConnection: close\r\n\r\n").toByteArray())
-                        out.write(r.body)
-                        out.flush()
-                    }
-                }
-            }
-        }
-
-        private fun readLine(input: BufferedInputStream): String {
-            val sb = StringBuilder()
-            while (true) {
-                val b = input.read()
-                if (b < 0 || b == '\n'.code) break
-                if (b != '\r'.code) sb.append(b.toChar())
-            }
-            return sb.toString()
-        }
-
-        override fun close() = socket.close()
     }
 }

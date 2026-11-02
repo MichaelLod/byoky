@@ -174,6 +174,9 @@ dependencies {
     androidTestImplementation("androidx.test:core-ktx:1.6.1")
     androidTestImplementation("androidx.test:rules:1.6.1")
     androidTestImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3")
+    // Self-signed certificates for a local TLS server (the in-wallet
+    // browser's certificate-error state).
+    androidTestImplementation("com.squareup.okhttp3:okhttp-tls:4.12.0")
     // Compose UI tests: what a component hands to screen readers.
     androidTestImplementation(composeBom)
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")

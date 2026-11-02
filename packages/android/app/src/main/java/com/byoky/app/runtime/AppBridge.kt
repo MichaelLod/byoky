@@ -37,8 +37,9 @@ import java.util.concurrent.ConcurrentHashMap
  * native object to frames whose origin matches the app's origin. Messages
  * from subframes or any other origin are ignored as well.
  *
- * One instance per opened app (per WebView). Call [dispose] when the WebView
- * goes away; in-flight requests are aborted.
+ * One instance per opened app (per WebView). Call [cancelInFlight] when
+ * another document replaces the page and [dispose] when the WebView goes
+ * away; in-flight requests are aborted either way.
  */
 class AppBridge(
     private val wallet: WalletStore,
@@ -77,7 +78,11 @@ class AppBridge(
     /** Issued on BYOKY_CONNECT_REQUEST. Main thread only. */
     private var sessionKey: String? = null
 
-    /** Proxy requests still running, by request id, so the app can cancel them. */
+    /**
+     * Proxy requests still running, by request id, so the app can cancel them.
+     * All are cancelled when the page closes, reloads or navigates to another
+     * document, so nothing keeps spending a key on a reply nobody will read.
+     */
     private val inFlight = ConcurrentHashMap<String, InFlight>()
 
     private class InFlight {
@@ -116,6 +121,21 @@ class AppBridge(
             "BYOKY_SESSION_USAGE" -> handleSessionUsage(requestId, msg, replyProxy)
             "BYOKY_DISCONNECT" -> handleDisconnect(msg)
         }
+    }
+
+    /**
+     * Another document replaced the app's page (Reload, a navigation within
+     * the app, a renderer that died). The old page's requests stop, as when
+     * the browser extension's tab goes away: nothing is left to read their
+     * replies, and a request that already went out is still charged
+     * (ProxyService). Its session key goes too; the new page connects again
+     * (the SDK reconnects on SESSION_EXPIRED). Unlike [dispose], the bridge
+     * stays in use for the new page. Main thread.
+     */
+    fun cancelInFlight() {
+        sessionKey = null
+        inFlight.values.forEach { it.cancel() }
+        inFlight.clear()
     }
 
     fun dispose() {
