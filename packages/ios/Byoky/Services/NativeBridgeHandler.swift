@@ -14,8 +14,8 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
     private weak var webView: WKWebView?
     private var sessionKey: String?
     /// Proxied requests still running, by request id. Cancelled when the
-    /// page closes or the wallet locks, so nothing keeps spending a key the
-    /// user put away.
+    /// page closes, reloads or navigates to another document, or the wallet
+    /// locks, so nothing keeps spending a key on a reply nobody will read.
     private var inFlight: [String: Task<Void, Never>] = [:]
     private var lockObserver: AnyCancellable?
     /// Idle timeout of upstream requests (`URLRequest.timeoutInterval`).
@@ -57,6 +57,18 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
     func close() {
         cancelRequests()
         lockObserver = nil
+        sessionKey = nil
+    }
+
+    /// Another document replaced the app's page (Reload, a navigation within
+    /// the app, a crashed web content process). The old page's requests stop,
+    /// as when the browser extension's tab goes away: nothing is left to read
+    /// their replies. A request that already went out is still charged and
+    /// its reservation settled. Its session key goes too; the new page
+    /// connects again (the SDK reconnects on SESSION_EXPIRED). Unlike
+    /// `close()`, the handler stays in use for the new page.
+    func pageDidChange() {
+        cancelRequests()
         sessionKey = nil
     }
 

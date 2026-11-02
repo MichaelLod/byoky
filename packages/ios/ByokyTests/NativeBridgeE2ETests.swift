@@ -290,6 +290,62 @@ final class NativeBridgeE2ETests: XCTestCase {
         try await StubUpstream.waitForStops(1)
     }
 
+    // MARK: - Page replaced (F006)
+
+    /// Reload, or a navigation to another document of the app: the old
+    /// page's request stops (charged as cancelled, its reservation settled)
+    /// and its session key ends; the new page connects again. The app's
+    /// first page replaces nothing.
+    @MainActor
+    func testAReplacedPageStopsItsRequests() async throws {
+        let h = try await BridgeHarness.make(self)
+        h.wallet.setAllowance(TokenAllowance(origin: BridgeHarness.origin, totalLimit: 100_000, providerLimits: nil))
+        let coordinator = AppWebView.Coordinator(allowedOrigin: BridgeHarness.origin, browser: AppBrowserState())
+        coordinator.bridgeHandler = h.handler
+        let oldKey = try await h.connect()
+        StubUpstream.script(.init(hold: true))
+        let requestId = "reload-\(UUID().uuidString.prefix(8))"
+
+        async let replies = h.proxy(body: #"{"model":"gpt-5.5","max_tokens":20000,"messages":[]}"#, requestId: requestId, timeoutMs: 3_000)
+        try await StubUpstream.waitForRequests(1)
+        // The app's first page commits: nothing to stop.
+        coordinator.webView(h.webView, didCommit: nil)
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertEqual(StubUpstream.stopCount, 0, "the first page replaced nothing")
+
+        // Reload: a second document commits in the same web view.
+        coordinator.webView(h.webView, didCommit: nil)
+        try await StubUpstream.waitForStops(1)
+        _ = try await replies
+        XCTAssertEqual(h.wallet.requestLogs.first?.statusCode, 499)
+        let charged = h.wallet.tokenUsage(for: BridgeHarness.origin)
+        XCTAssertGreaterThan(charged, 0)
+        // Settled: only what was charged counts against the allowance.
+        XCTAssertNoThrow(try h.wallet.reserveTokens(origin: BridgeHarness.origin, providerId: "openai", estimatedTokens: 100_000 - charged).get())
+
+        // The old page's key is gone; the new page's connect works.
+        let stale = try await h.proxy(body: #"{"model":"gpt-5.5","messages":[]}"#, sessionKey: oldKey)
+        XCTAssertEqual((stale.first?["error"] as? [String: Any])?["code"] as? String, "SESSION_EXPIRED")
+        let reconnect = try await h.send(["type": "BYOKY_CONNECT_REQUEST", "requestId": "reconnect-1", "payload": [:]])
+        XCTAssertEqual(reconnect.first?.type, "BYOKY_CONNECT_RESPONSE")
+    }
+
+    /// The web content process ended: its page's requests stop with it.
+    @MainActor
+    func testACrashedPageStopsItsRequests() async throws {
+        let h = try await BridgeHarness.make(self)
+        let coordinator = AppWebView.Coordinator(allowedOrigin: BridgeHarness.origin, browser: AppBrowserState())
+        coordinator.bridgeHandler = h.handler
+        StubUpstream.script(.init(hold: true))
+
+        async let replies = h.proxy(body: #"{"model":"gpt-5.5","messages":[]}"#, timeoutMs: 1_500)
+        try await StubUpstream.waitForRequests(1)
+        coordinator.webViewWebContentProcessDidTerminate(h.webView)
+        try await StubUpstream.waitForStops(1)
+        _ = try await replies
+        XCTAssertEqual(h.wallet.requestLogs.first?.statusCode, 499)
+    }
+
     @MainActor
     func testRevokedAppGetsSessionExpired() async throws {
         let h = try await BridgeHarness.make(self)

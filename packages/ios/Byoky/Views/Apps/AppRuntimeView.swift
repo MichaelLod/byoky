@@ -668,6 +668,13 @@ struct AppWebView: UIViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+            // A new document replaced the app's page (Reload, a navigation,
+            // a new window loaded in place): the old page's requests stop.
+            // didCommit is for main-frame documents only, not pushState or
+            // #fragment changes; the first page replaces nothing.
+            if browser.hasCommittedPage {
+                bridgeHandler?.pageDidChange()
+            }
             browser.hasCommittedPage = true
             browser.failedURL = nil
             browser.notice = nil
@@ -690,6 +697,8 @@ struct AppWebView: UIViewRepresentable {
         }
 
         func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+            // The page is gone with its process; so are its requests.
+            bridgeHandler?.pageDidChange()
             browser.notice = .stopped
         }
 
