@@ -20,7 +20,10 @@ struct RoutingResolver {
     ///   1. Cross-family translation (group binds to a different family)
     ///   2. Same-family swap (group binds to a different openai-family
     ///      provider with the same wire format)
-    ///   3. Direct credential for the provider the SDK called
+    ///   3. Direct credential for the provider the SDK called — unless the
+    ///      app's group binds another provider: a group 1 and 2 can't serve
+    ///      (no model to translate with, its key deleted, a stale pin) gets
+    ///      nothing, never the app's own key
     ///   4. Auto cross-family translation — opportunistic fallback when the
     ///      user holds credentials only in other families and the app has no
     ///      group binding. Skipped when a group is set (group intent wins).
@@ -73,6 +76,12 @@ struct RoutingResolver {
             guard let pinned = credentials.first(where: { $0.id == pinnedId && $0.providerId == requestedProviderId }) else { return nil }
             return RoutingDecision(credential: pinned, translation: nil, modelOverride: override)
         }
+        // A group bound to another provider that steps 1 and 2 couldn't
+        // serve never falls back to the app's own key: the user routed this
+        // app away from it (e.g. onto a local server). The empty providerId
+        // is the default group, which binds nothing. Core's resolveRoute
+        // does the same.
+        if let group, !group.providerId.isEmpty, group.providerId != requestedProviderId { return nil }
         if let cred = credentials.first(where: { $0.providerId == requestedProviderId }) {
             return RoutingDecision(credential: cred, translation: nil, modelOverride: override)
         }

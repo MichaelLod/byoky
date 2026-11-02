@@ -148,14 +148,13 @@ describe('resolveRoute', () => {
 
     it('ignores a pin to another provider\'s key', () => {
       // Group binds Azure but pins a planted record of another provider:
-      // the swap must not hand that credential to the Azure destination.
+      // the swap must not hand that credential to the Azure destination,
+      // and the app's own OpenAI key doesn't stand in for the group (F002).
       const credentials = [cred('c1', 'openai'), { ...cred('planted', 'groq'), encryptedKey: '' }];
       const g = group('azure_openai', { credentialId: 'planted' });
 
       expect(resolveSameFamilySwapRoute(g, 'openai', credentials)).toBeUndefined();
-      const decision = resolveRoute('openai', g, credentials);
-      expect(decision?.swap).toBeUndefined();
-      expect(decision?.credential.id).toBe('c1');
+      expect(resolveRoute('openai', g, credentials)).toBeNull();
     });
 
     it('does not swap when both providers are the same', () => {
@@ -266,6 +265,44 @@ describe('resolveRoute', () => {
       expect(decision!.translation).toBeDefined();
       expect(decision!.swap).toBeUndefined();
     });
+  });
+});
+
+describe('a group bound to another provider never falls back to the app\'s own key (F002)', () => {
+  const ollama: Credential = { ...cred('ol', 'ollama'), baseUrl: 'http://localhost:11434' };
+
+  it('model-less group whose provider has no routing default', () => {
+    const credentials = [cred('a', 'anthropic'), cred('d', 'deepseek')];
+    const g = group('deepseek');
+
+    expect(resolveRoute('anthropic', g, credentials)).toBeNull();
+    expect(buildNoCredentialMessage('anthropic', ['anthropic', 'deepseek'], g))
+      .toBe("This app's group routes it to deepseek, which needs a model to translate anthropic requests. Set a model on the group.");
+  });
+
+  it('model-less group bound to a local server', () => {
+    expect(resolveRoute('anthropic', group('ollama'), [cred('a', 'anthropic'), ollama])).toBeNull();
+  });
+
+  it('group whose local-server key was deleted', () => {
+    const g = group('ollama', { model: 'llama3.3' });
+
+    expect(resolveRoute('anthropic', g, [cred('a', 'anthropic')])).toBeNull();
+    expect(buildNoCredentialMessage('anthropic', ['anthropic'], g)).toContain('ollama');
+    // Same family: the app's OpenAI key doesn't stand in either.
+    expect(resolveRoute('openai', g, [cred('o', 'openai')])).toBeNull();
+  });
+
+  it('group with a stale pin', () => {
+    const g = group('gemini', { credentialId: 'removed' });
+
+    expect(resolveRoute('anthropic', g, [cred('a', 'anthropic'), cred('g', 'gemini')])).toBeNull();
+  });
+
+  it('still routes when the group can serve the request', () => {
+    const decision = resolveRoute('anthropic', group('ollama', { model: 'llama3.3' }), [cred('a', 'anthropic'), ollama]);
+    expect(decision?.credential.id).toBe('ol');
+    expect(decision?.translation?.dstModel).toBe('llama3.3');
   });
 });
 

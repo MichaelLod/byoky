@@ -44,7 +44,8 @@ object RoutingResolver {
      *   1. Cross-family translation (group binds to a different family)
      *   2. Same-family swap (group binds to a different openai-family
      *      provider with the same wire format)
-     *   3. Direct credential for the provider the SDK called
+     *   3. Direct credential for the provider the SDK called — unless the
+     *      app's group binds another provider (see [resolveDirect])
      *   4. Auto cross-family translation — opportunistic fallback when the
      *      user holds credentials only in other families and the app has no
      *      group binding. Skipped when a group is set (group intent wins).
@@ -98,8 +99,17 @@ object RoutingResolver {
      * key (pins are for cost attribution). Otherwise the first key of the
      * provider. A model the group pins is surfaced as `modelOverride`: the
      * group is the strongest routing force, stronger than the app's choice.
+     *
+     * A group bound to another provider gets null, never the app's own key:
+     * the user routed this app away from it (e.g. onto a local server), and
+     * when translation or a swap can't serve the group (no model to
+     * translate with, its key deleted, a stale pin, no translation engine)
+     * the request must fail rather than go to the provider it was routed
+     * away from. The empty providerId is the default group, which binds
+     * nothing.
      */
     fun resolveDirect(requestedProviderId: String, group: Group?, credentials: List<Credential>): RoutingDecision? {
+        if (group != null && group.providerId.isNotEmpty() && group.providerId != requestedProviderId) return null
         val bindsProvider = group != null && group.providerId == requestedProviderId
         val override = if (bindsProvider) group?.model?.takeIf { it.isNotEmpty() } else null
         val pin = if (bindsProvider) group?.credentialId else null

@@ -101,17 +101,44 @@ class RoutingResolverTest {
         val cross = Group(id = "g", name = "Tampered", providerId = "anthropic", credentialId = "o1", model = "claude-x")
         assertNull(RoutingResolver.resolve("gemini", "gemini-2.5-pro", cross, listOf(key1, openai), families))
 
-        // Same-family swap: group binds groq but pins the OpenAI key; the
-        // swap is refused and the app's own key is used for its own provider.
+        // Same-family swap: group binds groq but pins the OpenAI key. The
+        // swap is refused, and the app's own key doesn't stand in for the
+        // group either (F002).
         val swap = Group(id = "g", name = "Tampered", providerId = "groq", credentialId = "o1")
-        val decision = RoutingResolver.resolve("openai", "gpt-5.5", swap, listOf(openai), families)!!
-        assertNull(decision.swapToProviderId)
-        assertEquals("o1", decision.credential.id)
+        assertNull(RoutingResolver.resolve("openai", "gpt-5.5", swap, listOf(openai), families))
 
         // Direct: group binds openai but pins an Anthropic key.
         val direct = Group(id = "g", name = "Tampered", providerId = "openai", credentialId = "k1")
         assertNull(RoutingResolver.resolve("openai", "gpt-5.5", direct, listOf(key1, openai), families))
         assertNull(RoutingResolver.resolveDirect("openai", direct, listOf(key1, openai)))
+    }
+
+    // ── A group bound elsewhere never falls back to the app's key (F002) ─
+
+    @Test
+    fun aGroupBoundToAnotherProviderNeverFallsBackToTheAppsOwnKey() {
+        val deepseek = Credential(id = "d1", providerId = "deepseek", label = "ds", createdAt = 1)
+        val ollama = Credential(id = "l1", providerId = "ollama", label = "local", createdAt = 1, baseUrl = "http://localhost:11434")
+        val gemini = Credential(id = "gm", providerId = "gemini", label = "gemini", createdAt = 1)
+        // No model, and DeepSeek has no routing default.
+        val toDeepSeek = Group(id = "g", name = "DeepSeek", providerId = "deepseek")
+        assertNull(RoutingResolver.resolve("anthropic", "claude-sonnet-4-6", toDeepSeek, listOf(key1, deepseek), families))
+        // A local-server group without a model.
+        val localNoModel = Group(id = "g", name = "Local", providerId = "ollama")
+        assertNull(RoutingResolver.resolve("anthropic", "claude-sonnet-4-6", localNoModel, listOf(key1, ollama), families))
+        // A local-server group whose key was deleted, cross-family and same-family.
+        val local = Group(id = "g", name = "Local", providerId = "ollama", model = "llama3.3")
+        assertNull(RoutingResolver.resolve("anthropic", "claude-sonnet-4-6", local, listOf(key1), families))
+        assertNull(RoutingResolver.resolve("openai", "gpt-5.5", local, listOf(openai), families))
+        assertNull(RoutingResolver.canServe("openai", local, listOf(openai), families))
+        // A stale pin.
+        val stalePin = Group(id = "g", name = "Gemini", providerId = "gemini", credentialId = "removed")
+        assertNull(RoutingResolver.resolve("anthropic", "claude-sonnet-4-6", stalePin, listOf(key1, gemini), families))
+        // Without the translation engine, ProxyService uses resolveDirect alone.
+        assertNull(RoutingResolver.resolveDirect("openai", local, listOf(openai)))
+        assertNull(RoutingResolver.resolveDirect("anthropic", toDeepSeek, listOf(key1)))
+        // The default group binds nothing: the app's own key serves it.
+        assertEquals("k1", RoutingResolver.resolveDirect("anthropic", Group.makeDefault(), listOf(key1))?.credential?.id)
     }
 
     // ── Model-less cross-family groups (F099) ────────────────────────────

@@ -133,11 +133,12 @@ describe('background: a key is only sent to its own provider', () => {
     expect(reply.payload.providers.anthropic.available).toBe(false);
   });
 
-  it('treats a wrong-provider cross-family pin as stale: the app\'s own key serves it directly', async () => {
+  it('treats a wrong-provider cross-family pin as stale: the app\'s own key doesn\'t stand in', async () => {
     // Same tampered group, with an Anthropic key in the wallet. Core's
     // resolver (F010) ignores a pin to another provider's key like a stale
-    // pin, so the request goes to Anthropic with the Anthropic key, never to
-    // OpenAI with the Groq key.
+    // pin, and a group bound to another provider never falls back to the
+    // app's own key (F002): nothing is sent, neither to OpenAI with the Groq
+    // key nor to Anthropic, which the group routes this app away from.
     const h = await startBackground({
       local: await walletStorage(KEYS, {
         groups: [group('default', ''), group('g-x', 'openai', { credentialId: 'groq1', model: 'gpt-5.5' })],
@@ -146,23 +147,18 @@ describe('background: a key is only sent to its own provider', () => {
     });
     await h.unlock();
     const reply = await connectApproved(h, APP, { providers: [{ id: 'anthropic', required: true }] });
+    expect(reply.payload.providers.anthropic.available).toBe(false);
     const [session] = (await h.internal('getSessions')).sessions;
-    const entry = session.providers.find((p: { providerId: string }) => p.providerId === 'anthropic');
-    expect(entry).toMatchObject({ credentialId: 'a1' });
-    expect(entry.translation).toBeUndefined();
+    expect(session.providers.find((p: { providerId: string }) => p.providerId === 'anthropic')).toBeUndefined();
 
-    h.fetch.mockImplementation(async () => jsonResponse({ usage: { input_tokens: 1, output_tokens: 1 } }));
     const r = await h.proxy(APP, {
       sessionKey: reply.payload.sessionKey,
       providerId: 'anthropic',
       url: 'https://api.anthropic.com/v1/messages',
       body: JSON.stringify({ model: 'claude-app', max_tokens: 8, messages: [{ role: 'user', content: 'hi' }] }),
     }).result;
-    expect(r.done).toBe(true);
-    const call = upstream(h);
-    expect(call.url).toBe('https://api.anthropic.com/v1/messages');
-    expect(call.headers['x-api-key']).toBe('sk-ant-REAL');
-    expect(JSON.stringify(call.headers)).not.toContain('gsk-GROQ');
+    expect(r.error.error.code).toBe('PROVIDER_UNAVAILABLE');
+    expect(h.fetch).not.toHaveBeenCalled();
   });
 
   it('refuses a session entry whose credential belongs to another provider', async () => {

@@ -143,19 +143,66 @@ final class RoutingResolverTests: XCTestCase {
             requestedProviderId: "gemini", requestedModel: "gemini-2.5-pro",
             group: group("anthropic", pin: openai.id, model: "claude-sonnet-4-6"), credentials: [claude, openai]
         ))
-        // Same-family swap: the group binds Groq but pins the OpenAI key; the
-        // app's own key serves its own provider instead.
-        let swap = try XCTUnwrap(RoutingResolver.resolve(
+        // Same-family swap: the group binds Groq but pins the OpenAI key.
+        // The swap is refused, and the app's own key doesn't stand in for
+        // the group either (F002).
+        XCTAssertNil(RoutingResolver.resolve(
             requestedProviderId: "openai", requestedModel: "gpt-5.5",
             group: group("groq", pin: openai.id), credentials: [openai]
         ))
-        XCTAssertNil(swap.swapToProviderId)
-        XCTAssertEqual(swap.credential.id, openai.id)
         // Direct: the group binds OpenAI but pins the Anthropic key.
         XCTAssertNil(RoutingResolver.resolve(
             requestedProviderId: "openai", requestedModel: "gpt-5.5",
             group: group("openai", pin: claude.id), credentials: [claude, openai]
         ))
+    }
+
+    // MARK: - A group bound elsewhere never falls back to the app's key (F002)
+
+    func testAGroupBoundToAnotherProviderNeverFallsBackToTheAppsOwnKey() throws {
+        let claude = credential("anthropic", "Claude")
+        let deepseek = credential("deepseek", "DeepSeek")
+        let ollama = Credential.create(providerId: "ollama", label: "Local", baseUrl: "http://localhost:11434")
+        // No model, and DeepSeek has no routing default.
+        XCTAssertNil(RoutingResolver.resolve(
+            requestedProviderId: "anthropic", requestedModel: "claude-sonnet-4-6",
+            group: group("deepseek"), credentials: [claude, deepseek]
+        ))
+        XCTAssertEqual(
+            RoutingResolver.noCredentialMessage(requestedProviderId: "anthropic", userCredentialProviderIds: ["anthropic", "deepseek"], group: group("deepseek")),
+            "This app's group routes it to deepseek, which needs a model to translate anthropic requests. Set a model on the group."
+        )
+        // A local-server group without a model.
+        XCTAssertNil(RoutingResolver.resolve(
+            requestedProviderId: "anthropic", requestedModel: "claude-sonnet-4-6",
+            group: group("ollama"), credentials: [claude, ollama]
+        ))
+        // A local-server group whose key was deleted, cross-family and same-family.
+        let local = group("ollama", model: "llama3.3")
+        XCTAssertNil(RoutingResolver.resolve(
+            requestedProviderId: "anthropic", requestedModel: "claude-sonnet-4-6",
+            group: local, credentials: [claude]
+        ))
+        XCTAssertTrue(RoutingResolver.noCredentialMessage(
+            requestedProviderId: "anthropic", userCredentialProviderIds: ["anthropic"], group: local
+        ).contains("ollama"))
+        let openai = credential("openai", "OpenAI")
+        XCTAssertNil(RoutingResolver.resolve(
+            requestedProviderId: "openai", requestedModel: "gpt-5.5",
+            group: local, credentials: [openai]
+        ))
+        XCTAssertNil(RoutingResolver.canServe(providerId: "openai", group: local, credentials: [openai]))
+        // A stale pin.
+        let gemini = credential("gemini", "Gemini")
+        XCTAssertNil(RoutingResolver.resolve(
+            requestedProviderId: "anthropic", requestedModel: "claude-sonnet-4-6",
+            group: group("gemini", pin: "removed"), credentials: [claude, gemini]
+        ))
+        // The default group binds nothing: the app's own key serves it.
+        XCTAssertEqual(RoutingResolver.resolve(
+            requestedProviderId: "anthropic", requestedModel: "claude-sonnet-4-6",
+            group: Group.makeDefault(), credentials: [claude]
+        )?.credential.id, claude.id)
     }
 
     // MARK: - Routing models from core (F015, F099, F100)

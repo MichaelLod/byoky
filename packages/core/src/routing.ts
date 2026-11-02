@@ -19,8 +19,12 @@
  *   2. Same-family swap — group binds to a different provider in the SAME
  *      family (e.g. Groq → OpenAI, both openai dialect). No translation; just
  *      a URL rewrite + credential swap + optional model substitution.
- *   3. Direct credential — no group, or group binds to the same provider the
- *      SDK called. Standard pass-through.
+ *   3. Direct credential — no group, the default group, or a group bound to
+ *      the provider the SDK called. Standard pass-through. A group bound to
+ *      another provider never falls back to the app's own key: when steps 1
+ *      and 2 can't serve it (no model to translate with, its key deleted, a
+ *      stale pin), the request gets nothing, so a group meant to keep
+ *      prompts on a local server can't quietly send them to a cloud key.
  *   4. Auto cross-family translation — no group, no direct credential, but the
  *      user holds a credential in a different translatable family. Silently
  *      pick one (most-recently-used first, then family order) and translate
@@ -150,6 +154,10 @@ export function resolveRoute(
   //        user's intent.
   //    (b) No pin → use any credential of the provider, most-recently-used
   //        first.
+  //    A group bound to another provider that steps 1 and 2 couldn't serve
+  //    gets null, not the app's own key: the user routed this app away from
+  //    that provider (the caller's buildNoCredentialMessage says what's
+  //    missing: a model on the group, or the group's key).
   //
   // In both sub-cases, when the group also pins a model, surface it as
   // `modelOverride` so the proxy rewrites the outgoing body. The group is
@@ -163,6 +171,7 @@ export function resolveRoute(
     const pinned = pinnedCredential(group, credentials);
     return pinned ? { credential: pinned, modelOverride } : null;
   }
+  if (group?.providerId && group.providerId !== requestedProviderId) return null;
   const direct = credentials.find((c) => c.providerId === requestedProviderId);
   if (direct) return { credential: direct, modelOverride };
 
