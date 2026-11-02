@@ -2,7 +2,8 @@ import type { Metadata } from 'next';
 import { FadeIn } from '../components/FadeIn';
 
 export const metadata: Metadata = {
-  title: 'Built with Byoky',
+  // Absolute: the root template would add a second "— Byoky".
+  title: { absolute: 'Built with Byoky' },
   description:
     'Apps and sites powered by Byoky — the open-source wallet for AI API keys.',
   alternates: {

@@ -81,18 +81,16 @@ export const metadata: Metadata = {
     shortcut: `/favicon-v2.ico${ICON_VERSION}`,
     apple: `/apple-touch-icon.png${ICON_VERSION}`,
   },
+  // No title or description here: every page inherits these two objects
+  // whole, so Next fills og:/twitter:title and description from each page's
+  // own title and description. A page that sets its own openGraph must also
+  // give it images (opengraph-image.tsx), or its card loses the picture.
   openGraph: {
-    title: 'Byoky — The MetaMask for API keys',
-    description:
-      'Keep every AI API key in one wallet. Apps connect to the wallet. Your keys never leave Byoky. No servers, no accounts, fully open source.',
     siteName: 'Byoky',
     type: 'website',
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'Byoky — The MetaMask for API keys',
-    description:
-      'Keep every AI API key in one wallet. Apps connect to the wallet. Your keys never leave Byoky. No servers, no accounts, fully open source.',
   },
 };
 
