@@ -418,7 +418,7 @@ export default defineBackground(() => {
   // Called from two places: the SW boot chain (cold start) and the periodic
   // keepalive alarm (warm-state health check).
   async function maybeAutoStartBridgeProxy() {
-    if (bridgeProxyPort) return;
+    if (bridge) return;
     if (!authorizedBridgeSessionKey || !authorizedBridgePort) return;
     if (!masterPassword) return;
     if (!sessions.has(authorizedBridgeSessionKey)) return;
@@ -2298,9 +2298,110 @@ export default defineBackground(() => {
 
   // --- Bridge HTTP proxy (generic local gateway for CLI/desktop apps) ---
 
-  let bridgeProxyPort: Runtime.Port | null = null;
+  /**
+   * One native connection to a bridge host, as its requests see it. Replies
+   * go back on the connection the request came in on, and only while it is
+   * open, so a host that replaced it never gets messages for requests it
+   * didn't send.
+   */
+  interface BridgeConnection {
+    readonly open: boolean;
+    reply(msg: Record<string, unknown>): void;
+    /**
+     * Calls `onEnd` once: with the host's proxy_direct_done report for
+     * `requestId`, or with none when the connection ends first.
+     */
+    awaitDirectDone(requestId: string, onEnd: (report?: Record<string, unknown>) => void): void;
+  }
+
+  /** The running bridge connection; close() ends what still runs on it. */
+  let bridge: { close: () => void } | null = null;
   let authorizedBridgeSessionKey: string | null = null;
   let authorizedBridgePort: number | null = null;
+
+  function closeBridge() {
+    const current = bridge;
+    bridge = null;
+    current?.close();
+  }
+
+  /**
+   * Serves the bridge's HTTP proxy requests on one native connection.
+   * Returns settle(), which ends every request still running on it: the
+   * upstream calls are aborted (and charged for what they used), and the
+   * direct fetches the host made are logged as failed and their holds
+   * released. Called when the connection ends, whether the host went away
+   * or a new start replaced it.
+   */
+  function serveBridgeConnection(nativePort: Runtime.Port): () => void {
+    // A body too big for one native message (1 MiB) arrives first in
+    // slices, then the request with `bodyChunked`. `proxy_http_cancel`
+    // means the client hung up: abort that request's upstream fetch.
+    const pendingBodies = new Map<string, string[]>();
+    const inFlight = new Map<string, AbortController>();
+    const directDone = new Map<string, (report?: Record<string, unknown>) => void>();
+    let open = true;
+
+    const endDirect = (requestId: string, report?: Record<string, unknown>) => {
+      const onEnd = directDone.get(requestId);
+      if (!onEnd) return;
+      directDone.delete(requestId);
+      onEnd(report);
+    };
+
+    const conn: BridgeConnection = {
+      get open() { return open; },
+      reply(msg) {
+        if (!open) return;
+        // Posting to a port that has gone throws; settle() follows.
+        try { nativePort.postMessage(msg); } catch { /* gone */ }
+      },
+      awaitDirectDone(requestId, onEnd) {
+        if (!open) {
+          onEnd();
+          return;
+        }
+        directDone.set(requestId, onEnd);
+      },
+    };
+
+    nativePort.onMessage.addListener(async (raw: unknown) => {
+      const msg = raw as Record<string, unknown>;
+      if (msg.type === 'proxy_http_body_chunk') {
+        if (typeof msg.requestId !== 'string' || typeof msg.chunk !== 'string') return;
+        const parts = pendingBodies.get(msg.requestId) ?? [];
+        parts.push(msg.chunk);
+        pendingBodies.set(msg.requestId, parts);
+      } else if (msg.type === 'proxy_http_cancel') {
+        if (typeof msg.requestId === 'string') inFlight.get(msg.requestId)?.abort();
+      } else if (msg.type === 'proxy_direct_done') {
+        if (typeof msg.requestId === 'string') endDirect(msg.requestId, msg);
+      } else if (msg.type === 'proxy_http') {
+        if (typeof msg.requestId !== 'string' || !open) return;
+        const requestId = msg.requestId;
+        if (msg.bodyChunked === true) {
+          msg.body = (pendingBodies.get(requestId) ?? []).join('');
+          pendingBodies.delete(requestId);
+        }
+        const controller = new AbortController();
+        inFlight.set(requestId, controller);
+        try {
+          await handleBridgeProxyRequest(msg, controller.signal, conn);
+        } finally {
+          if (inFlight.get(requestId) === controller) inFlight.delete(requestId);
+        }
+      }
+    });
+
+    return () => {
+      if (!open) return;
+      open = false;
+      for (const controller of inFlight.values()) controller.abort();
+      inFlight.clear();
+      pendingBodies.clear();
+      for (const requestId of [...directDone.keys()]) endDirect(requestId);
+    };
+  }
 
   async function startBridgeProxy(
     sessionKey: string,
@@ -2320,14 +2421,18 @@ export default defineBackground(() => {
     if (providerIds.length === 0) return { success: false, error: 'No providers available' };
 
     try {
-      // Close existing proxy connection if any
-      if (bridgeProxyPort) {
-        bridgeProxyPort.disconnect();
-        bridgeProxyPort = null;
-      }
+      // Close the existing connection, ending what still runs on it.
+      closeBridge();
 
       const nativePort = browser.runtime.connectNative(BRIDGE_HOST);
-      bridgeProxyPort = nativePort;
+      const settle = serveBridgeConnection(nativePort);
+      const entry = {
+        close: () => {
+          settle();
+          try { nativePort.disconnect(); } catch { /* already gone */ }
+        },
+      };
+      bridge = entry;
 
       authorizedBridgeSessionKey = sessionKey;
       authorizedBridgePort = port;
@@ -2365,40 +2470,9 @@ export default defineBackground(() => {
         providers: providerIds,
       });
 
-      // Listen for HTTP proxy requests from the bridge. A body too big for
-      // one native message (1 MiB) arrives first in slices, then the
-      // request with `bodyChunked`. `proxy_http_cancel` means the client
-      // hung up: abort that request's upstream fetch.
-      const pendingBodies = new Map<string, string[]>();
-      const inFlight = new Map<string, AbortController>();
-      nativePort.onMessage.addListener(async (raw: unknown) => {
-        const msg = raw as Record<string, unknown>;
-        if (msg.type === 'proxy_http_body_chunk') {
-          if (typeof msg.requestId !== 'string' || typeof msg.chunk !== 'string') return;
-          const parts = pendingBodies.get(msg.requestId) ?? [];
-          parts.push(msg.chunk);
-          pendingBodies.set(msg.requestId, parts);
-        } else if (msg.type === 'proxy_http_cancel') {
-          if (typeof msg.requestId === 'string') inFlight.get(msg.requestId)?.abort();
-        } else if (msg.type === 'proxy_http') {
-          if (typeof msg.requestId !== 'string') return;
-          const requestId = msg.requestId;
-          if (msg.bodyChunked === true) {
-            msg.body = (pendingBodies.get(requestId) ?? []).join('');
-            pendingBodies.delete(requestId);
-          }
-          const controller = new AbortController();
-          inFlight.set(requestId, controller);
-          try {
-            await handleBridgeProxyRequest(msg, controller.signal);
-          } finally {
-            inFlight.delete(requestId);
-          }
-        }
-      });
-
       nativePort.onDisconnect.addListener(() => {
-        if (bridgeProxyPort === nativePort) bridgeProxyPort = null;
+        if (bridge === entry) bridge = null;
+        settle();
         // Note: do NOT clear authorizedBridgeSessionKey here. The native-host
         // port disconnects on every MV3 service-worker recycle (which is
         // frequent and unrelated to user intent). Keeping the key authorized
@@ -2411,10 +2485,7 @@ export default defineBackground(() => {
       const error = await startError;
       if (error) {
         // Drop the port so the keepalive's auto-start can try again later.
-        if (bridgeProxyPort === nativePort) {
-          nativePort.disconnect();
-          bridgeProxyPort = null;
-        }
+        if (bridge === entry) closeBridge();
         return { success: false, error };
       }
       return { success: true, port };
@@ -2423,8 +2494,15 @@ export default defineBackground(() => {
     }
   }
 
-  /** `signal` aborts when the bridge reports that the client hung up. */
-  async function handleBridgeProxyRequest(msg: Record<string, unknown>, signal: AbortSignal): Promise<void> {
+  /**
+   * `signal` aborts when the bridge reports that the client hung up, or the
+   * connection ends. Every reply goes back on `conn`.
+   */
+  async function handleBridgeProxyRequest(
+    msg: Record<string, unknown>,
+    signal: AbortSignal,
+    conn: BridgeConnection,
+  ): Promise<void> {
     if (typeof msg.requestId !== 'string' || typeof msg.sessionKey !== 'string' ||
         typeof msg.providerId !== 'string' || typeof msg.url !== 'string' ||
         typeof msg.method !== 'string' || typeof msg.headers !== 'object' || !msg.headers ||
@@ -2451,7 +2529,7 @@ export default defineBackground(() => {
 
     // Validate the session key matches the one authorized at proxy start
     if (sessionKey !== authorizedBridgeSessionKey) {
-      bridgeProxyPort?.postMessage({
+      conn.reply({
         type: 'proxy_http_error',
         requestId,
         error: 'Unauthorized session key',
@@ -2471,7 +2549,7 @@ export default defineBackground(() => {
       authorizedBridgeSessionKey = null;
       authorizedBridgePort = null;
       persistAuthorizedBridgeSessionKey();
-      bridgeProxyPort?.postMessage({
+      conn.reply({
         type: 'proxy_http_error',
         requestId,
         status: 401,
@@ -2481,7 +2559,7 @@ export default defineBackground(() => {
       return;
     }
     if (!masterPassword) {
-      bridgeProxyPort?.postMessage({
+      conn.reply({
         type: 'proxy_http_error',
         requestId,
         status: 423,
@@ -2493,7 +2571,7 @@ export default defineBackground(() => {
 
     // Validate providerId is one the session actually granted access to
     if (!session.providers.some((p) => p.providerId === providerId && p.available)) {
-      bridgeProxyPort?.postMessage({
+      conn.reply({
         type: 'proxy_http_error',
         requestId,
         error: 'Provider not available in this session',
@@ -2512,7 +2590,7 @@ export default defineBackground(() => {
     // Anthropic paths beyond inference.
     const providerCfg = PROVIDERS[providerId];
     if (!providerCfg?.requiresCustomBaseUrl && !validateProxyUrl(providerId, url)) {
-      bridgeProxyPort?.postMessage({
+      conn.reply({
         type: 'proxy_http_error',
         requestId,
         error: 'Request URL does not match the provider\'s registered base URL',
@@ -2529,7 +2607,7 @@ export default defineBackground(() => {
         Array.from(new Set(allCreds.map((c) => c.providerId))).sort(),
         group,
       );
-      bridgeProxyPort?.postMessage({
+      conn.reply({
         type: 'proxy_http_error',
         requestId,
         error: message,
@@ -2544,7 +2622,7 @@ export default defineBackground(() => {
     const effectiveProviderId = translation?.dstProviderId ?? swap?.dstProviderId ?? providerId;
     // The key goes out with effectiveProviderId's headers (as on the page path).
     if (credential.providerId !== effectiveProviderId) {
-      bridgeProxyPort?.postMessage({
+      conn.reply({
         type: 'proxy_http_error',
         requestId,
         error: `The key this app is routed to is not a ${effectiveProviderId} key`,
@@ -2560,7 +2638,7 @@ export default defineBackground(() => {
       const routed = !!(translation || swap);
       if (!routed) url = rebaseOntoCredential(providerId, url, credential.baseUrl) ?? url;
       if (!sourceUrlAllowed(providerId, url, routed, credential.baseUrl)) {
-        bridgeProxyPort?.postMessage({
+        conn.reply({
           type: 'proxy_http_error',
           requestId,
           error: 'Request URL does not match the credential\'s registered base URL',
@@ -2573,7 +2651,7 @@ export default defineBackground(() => {
     // only chat requests can be swapped or translated (same rule as the page
     // path). Model lists or token counting would be mangled into chat calls.
     if ((translation || swap) && !isRoutableChatRequest(providerId, url)) {
-      bridgeProxyPort?.postMessage({
+      conn.reply({
         type: 'proxy_http_error',
         requestId,
         status: 400,
@@ -2585,7 +2663,7 @@ export default defineBackground(() => {
 
     // Routing rewrites a JSON body; a binary one can't be.
     if (bodyEncoding && (translation || swap)) {
-      bridgeProxyPort?.postMessage({
+      conn.reply({
         type: 'proxy_http_error',
         requestId,
         status: 400,
@@ -2609,7 +2687,7 @@ export default defineBackground(() => {
         try {
           translatedBody = applyRequestTranslation(translation, body, requestId, url);
         } catch (err) {
-          bridgeProxyPort?.postMessage({
+          conn.reply({
             type: 'proxy_http_error',
             requestId,
             error: err instanceof Error ? err.message : 'Translation failed',
@@ -2619,7 +2697,7 @@ export default defineBackground(() => {
         const isStreaming = detectStreamingRequest(body, url);
         const rewritten = rewriteProxyUrl(translation.dstProviderId, translation.dstModel, isStreaming, credential.baseUrl);
         if (!rewritten) {
-          bridgeProxyPort?.postMessage({
+          conn.reply({
             type: 'proxy_http_error',
             requestId,
             error: `Cannot rewrite URL for destination provider ${translation.dstProviderId}`,
@@ -2632,7 +2710,7 @@ export default defineBackground(() => {
         const isStreaming = detectStreamingRequest(body, url);
         const rewritten = rewriteProxyUrl(swap.dstProviderId, swap.dstModel ?? '', isStreaming, credential.baseUrl);
         if (!rewritten) {
-          bridgeProxyPort?.postMessage({
+          conn.reply({
             type: 'proxy_http_error',
             requestId,
             error: `Cannot rewrite URL for destination provider ${swap.dstProviderId}`,
@@ -2649,7 +2727,7 @@ export default defineBackground(() => {
         try {
           translatedBody = rewriteRequestModel({ dstProviderId: effectiveProviderId, dstModel: pinnedModel, url }, body);
         } catch (err) {
-          bridgeProxyPort?.postMessage({
+          conn.reply({
             type: 'proxy_http_error',
             requestId,
             status: 400,
@@ -2676,7 +2754,7 @@ export default defineBackground(() => {
       // to bypass TLS fingerprint detection on api.anthropic.com.
       // Bridge does the fetch directly and streams response to proxy-server (no double hop).
       if (credential.authMethod === 'oauth' && effectiveProviderId === 'anthropic') {
-        if (!bridgeProxyPort) return;
+        if (!conn.open) return;
 
         // Translation + OAuth direct-fetch is unsupported in the bridge HTTP
         // path: the bridge streams the response back to its own HTTP server
@@ -2684,7 +2762,7 @@ export default defineBackground(() => {
         // to insert the SSE rewriter that would translate chunks back to the
         // source dialect.
         if (translation) {
-          bridgeProxyPort.postMessage({
+          conn.reply({
             type: 'proxy_http_error',
             requestId,
             error: 'Cross-family translation is not supported on the bridge OAuth path. Bind this app to an Anthropic credential or remove the OAuth requirement.',
@@ -2693,7 +2771,7 @@ export default defineBackground(() => {
         }
         // The setup-token request is rewritten as JSON (tool names, system prompt).
         if (bodyEncoding) {
-          bridgeProxyPort.postMessage({
+          conn.reply({
             type: 'proxy_http_error',
             requestId,
             status: 400,
@@ -2714,15 +2792,15 @@ export default defineBackground(() => {
           relocateExisting: isThirdParty,
         });
 
-        const nativePort = bridgeProxyPort;
         const reservation = await checkAndReserveAllowance(session.appOrigin, providerId, appRequest);
         if (!reservation.allowed) {
-          nativePort.postMessage({ type: 'proxy_http_error', requestId, error: reservation.reason });
+          conn.reply({ type: 'proxy_http_error', requestId, error: reservation.reason });
           return;
         }
-        // The client already hung up: don't start a call nobody will read.
-        // (Once it runs, the bridge aborts it on hang-up by itself.)
-        if (signal.aborted) {
+        // The client already hung up, or the connection is gone: don't start
+        // a call nobody will read. (Once it runs, the bridge aborts it on
+        // hang-up by itself.)
+        if (signal.aborted || !conn.open) {
           reservation.release();
           return;
         }
@@ -2732,8 +2810,6 @@ export default defineBackground(() => {
           // charge it then, the same way recordProxyUsage does for responses
           // the extension reads itself.
           const finish = async (status: number, report?: Record<string, unknown>) => {
-            nativePort.onMessage.removeListener(onDone);
-            nativePort.onDisconnect.removeListener(onGone);
             try {
               await chargeDirectFetch(status, report);
             } finally {
@@ -2761,15 +2837,11 @@ export default defineBackground(() => {
             browser.runtime.sendMessage({ type: 'BYOKY_INTERNAL', action: 'usageUpdated' }).catch(() => {});
             await addUsage(session.appOrigin, providerId, (inputTokens ?? 0) + (outputTokens ?? 0));
           };
-          const onDone = (raw: unknown) => {
-            const report = raw as Record<string, unknown>;
-            if (report.type !== 'proxy_direct_done' || report.requestId !== requestId) return;
-            void finish(typeof report.status === 'number' ? report.status : 502, report).catch(() => {});
-          };
-          // The bridge died mid-request: the client got an error, log one.
-          const onGone = () => { void finish(502).catch(() => {}); };
-          nativePort.onMessage.addListener(onDone);
-          nativePort.onDisconnect.addListener(onGone);
+          // Without a report the connection ended first (the host died, or a
+          // new start replaced it): the client got an error, log one.
+          conn.awaitDirectDone(requestId, (report) => {
+            void finish(typeof report?.status === 'number' ? report.status : 502, report).catch(() => {});
+          });
         } else {
           // Older bridges don't report back; log what is known now.
           reservation.release();
@@ -2779,7 +2851,7 @@ export default defineBackground(() => {
           });
         }
 
-        nativePort.postMessage({
+        conn.reply({
           type: 'proxy_direct_fetch',
           requestId,
           url: translatedUrl,
@@ -2799,7 +2871,7 @@ export default defineBackground(() => {
       // as on the page path.
       const reservation = await checkAndReserveAllowance(session.appOrigin, providerId, appRequest);
       if (!reservation.allowed) {
-        bridgeProxyPort?.postMessage({ type: 'proxy_http_error', requestId, error: reservation.reason });
+        conn.reply({ type: 'proxy_http_error', requestId, error: reservation.reason });
         return;
       }
       let logEntryId: string | undefined;
@@ -2826,7 +2898,7 @@ export default defineBackground(() => {
         });
         responseContentType = responseHeaders['content-type'] ?? '';
 
-        bridgeProxyPort?.postMessage({
+        conn.reply({
           type: 'proxy_http_response_meta',
           requestId,
           status: response.status,
@@ -2852,7 +2924,7 @@ export default defineBackground(() => {
             if (done) break;
             if (binaryResponse) {
               for (let i = 0; i < value.length; i += MAX_BINARY_CHUNK_BYTES) {
-                bridgeProxyPort?.postMessage({
+                conn.reply({
                   type: 'proxy_http_response_chunk',
                   requestId,
                   chunk: bytesToBase64(value.subarray(i, i + MAX_BINARY_CHUNK_BYTES)),
@@ -2866,14 +2938,14 @@ export default defineBackground(() => {
             if (sseRewriter) {
               const rewritten = sseRewriter.process(text);
               if (rewritten) {
-                bridgeProxyPort?.postMessage({
+                conn.reply({
                   type: 'proxy_http_response_chunk',
                   requestId,
                   chunk: rewritten,
                 });
               }
             } else if (!translation) {
-              bridgeProxyPort?.postMessage({
+              conn.reply({
                 type: 'proxy_http_response_chunk',
                 requestId,
                 chunk: text,
@@ -2886,7 +2958,7 @@ export default defineBackground(() => {
         if (sseRewriter) {
           const tail = sseRewriter.flush();
           if (tail) {
-            bridgeProxyPort?.postMessage({
+            conn.reply({
               type: 'proxy_http_response_chunk',
               requestId,
               chunk: tail,
@@ -2897,13 +2969,13 @@ export default defineBackground(() => {
             const translatedResponse = responseStatus >= 200 && responseStatus < 300
               ? applyResponseTranslation(translation, body, requestId, chunks.join(''), url)
               : translateErrorBody(translation, body, requestId, chunks.join(''), url, responseStatus);
-            bridgeProxyPort?.postMessage({
+            conn.reply({
               type: 'proxy_http_response_chunk',
               requestId,
               chunk: translatedResponse,
             });
           } catch (err) {
-            bridgeProxyPort?.postMessage({
+            conn.reply({
               type: 'proxy_http_error',
               requestId,
               error: err instanceof Error ? err.message : 'Response translation failed',
@@ -2912,7 +2984,7 @@ export default defineBackground(() => {
           }
         }
 
-        bridgeProxyPort?.postMessage({
+        conn.reply({
           type: 'proxy_http_response_done',
           requestId,
         });
@@ -2928,7 +3000,7 @@ export default defineBackground(() => {
         reservation.release();
       }
     } catch {
-      bridgeProxyPort?.postMessage({
+      conn.reply({
         type: 'proxy_http_error',
         requestId,
         error: 'Proxy request failed',
