@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { request, type IncomingHttpHeaders } from 'node:http';
 import { createServer as createNetServer } from 'node:net';
-import { runHandshake, DEFAULT_HANDSHAKE_PORT } from '../src/connect-mode.js';
+import { runHandshake, formatConnectSummary, DEFAULT_HANDSHAKE_PORT } from '../src/connect-mode.js';
 import { cleanPageMessage } from '../src/loopback-page.js';
 import { FakeWallet, type WalletKind } from './helpers/fake-wallet.js';
 import { openLoginPage } from './helpers/login-page.js';
@@ -235,4 +235,29 @@ beforeEach(() => {
   process.stderr.write = ((chunk: string | Uint8Array, ...rest: unknown[]) =>
     typeof chunk === 'string' && chunk.startsWith('Open this URL') ? true : (write as (...a: unknown[]) => boolean)(chunk, ...rest)) as typeof process.stderr.write;
   return () => { process.stderr.write = write; };
+});
+
+// F077: the Claude Code setup was printed whenever anthropic was asked for,
+// even when the wallet didn't grant it, so Claude Code was pointed at a 404.
+describe('the summary connect prints', () => {
+  it('sets up Claude Code when the wallet granted anthropic', () => {
+    const text = formatConnectSummary(['anthropic'], { providers: ['anthropic'], port: 19280 });
+    expect(text).toContain('Providers: anthropic');
+    expect(text).toContain('export ANTHROPIC_BASE_URL=http://127.0.0.1:19280/anthropic');
+    expect(text).not.toContain('Not available');
+  });
+
+  it('doesn\'t when anthropic was asked for but not granted, and names what is missing', () => {
+    const text = formatConnectSummary(['anthropic', 'groq'], { providers: ['groq'], port: 19280 });
+    expect(text).toContain('Providers: groq');
+    expect(text).not.toContain('ANTHROPIC_BASE_URL');
+    expect(text).toContain('Not available in your wallet: anthropic');
+    expect(text).toContain('Claude Code needs anthropic');
+    expect(text).toContain('`byoky-bridge token`');
+  });
+
+  it('follows the providers granted, also beyond those asked for', () => {
+    const text = formatConnectSummary(['openai'], { providers: ['openai', 'anthropic'], port: 19290 });
+    expect(text).toContain('export ANTHROPIC_BASE_URL=http://127.0.0.1:19290/anthropic');
+  });
 });
