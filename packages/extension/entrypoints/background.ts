@@ -151,11 +151,15 @@ export default defineBackground(() => {
   function updateBadge() {
     const count = _pendingMap.size;
     const text = count > 0 ? String(count) : '';
+    // MV3 (Chrome) calls it action; the MV2 builds (Firefox, Safari) only
+    // have browserAction.
+    const action: typeof browser.action | typeof browser.browserAction | undefined = browser.action ?? browser.browserAction;
+    if (!action) return;
     try {
-      browser.action.setBadgeText({ text });
-      browser.action.setBadgeBackgroundColor({ color: '#7C3AED' });
+      action.setBadgeText({ text })?.catch(() => {});
+      action.setBadgeBackgroundColor({ color: '#7C3AED' })?.catch(() => {});
     } catch {
-      // Fallback for older APIs
+      // Safari on iOS has no badge colour.
     }
   }
 

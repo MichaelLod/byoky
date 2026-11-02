@@ -199,6 +199,27 @@ describe('background: showing the wallet for a connect request', () => {
   });
 });
 
+describe('background: the toolbar badge counts waiting requests (F055)', () => {
+  // The MV2 builds (Firefox, Safari) have browserAction and no action, so
+  // the badge call threw there and the error was swallowed.
+  for (const browserKind of ['firefox', 'chrome'] as const) {
+    it(`shows the count while a request waits and clears it after (${browserKind})`, async () => {
+      const h = await startBackground({ [browserKind]: true, local: await walletStorage([{ id: 'o1', providerId: 'openai', key: 'sk-o' }]) });
+      await h.unlock();
+      const badge = browserKind === 'firefox' ? h.browser.browserAction : h.browser.action;
+      const texts = () => badge.setBadgeText.mock.calls.map(([d]: [{ text: string }]) => d.text);
+
+      const { response } = h.connect(APP, OPENAI);
+      await h.until(() => texts().includes('1'), 5_000, 'the badge');
+      expect(badge.setBadgeBackgroundColor).toHaveBeenCalled();
+      const [approval] = (await h.internal('getPendingApprovals')).approvals;
+      await h.internal('rejectConnect', { approvalId: approval.id });
+      await response;
+      expect(texts().at(-1)).toBe('');
+    });
+  }
+});
+
 /** Approve APP for openai as a trusted site, then let it disconnect itself (no revocation). */
 async function trustAndDisconnect(h: Harness): Promise<void> {
   const first = await connectApproved(h, APP, OPENAI, true);

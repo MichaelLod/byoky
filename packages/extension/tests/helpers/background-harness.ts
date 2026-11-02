@@ -320,13 +320,15 @@ export async function startBackground(opts: HarnessOptions = {}): Promise<Harnes
   const browser: any = {
     runtime,
     storage: { local, ...(session ? { session } : {}) },
-    action: { setBadgeText: vi.fn(), setBadgeBackgroundColor: vi.fn() },
     windows: { create: vi.fn(async () => ({ id: 99 })) },
     alarms: { create: vi.fn(), clear: vi.fn(async () => true), onAlarm: new FakeEvent() },
   };
   if (opts.firefox) {
+    // MV2: browserAction, and no action.
     browser.sidebarAction = { toggle: vi.fn() };
-    browser.browserAction = { onClicked: new FakeEvent() };
+    browser.browserAction = { onClicked: new FakeEvent(), setBadgeText: vi.fn(), setBadgeBackgroundColor: vi.fn() };
+  } else {
+    browser.action = { setBadgeText: vi.fn(), setBadgeBackgroundColor: vi.fn() };
   }
 
   const chrome = opts.chrome
