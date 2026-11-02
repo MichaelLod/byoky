@@ -407,12 +407,14 @@ class AppBridge(
         private val REQUEST_ID = Regex("^[A-Za-z0-9_-]{1,128}$")
 
         /** `https://host[:port]` for a WebView-reported source origin. */
-        fun originOf(uri: Uri): String? {
-            val scheme = uri.scheme?.lowercase() ?: return null
-            val host = uri.host?.lowercase() ?: return null
-            val port = uri.port
-            val defaultPort = if (scheme == "https") 443 else if (scheme == "http") 80 else -1
-            return "$scheme://$host" + if (port != -1 && port != defaultPort) ":$port" else ""
+        fun originOf(uri: Uri): String? = originOf(uri.scheme, uri.host, uri.port)
+
+        /** `scheme://host[:port]` from a URL's parts; the default port is left out. */
+        fun originOf(scheme: String?, host: String?, port: Int): String? {
+            val s = scheme?.lowercase() ?: return null
+            val h = host?.lowercase()?.takeIf { it.isNotEmpty() } ?: return null
+            val defaultPort = if (s == "https") 443 else if (s == "http") 80 else -1
+            return "$s://$h" + if (port != -1 && port != defaultPort) ":$port" else ""
         }
 
         /**
