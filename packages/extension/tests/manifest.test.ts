@@ -1,4 +1,6 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import config from '../wxt.config';
 
 /**
@@ -35,5 +37,44 @@ describe('manifest', () => {
     expect(generatedManifest('safari', MV2_BACKGROUND).background).toEqual({ scripts: ['background.js'], persistent: false });
     expect(generatedManifest('chrome', { background: { service_worker: 'background.js' } }).background)
       .toEqual({ service_worker: 'background.js' });
+  });
+
+  it('leaves the side panel permission and the key to Chrome', () => {
+    const base = { permissions: ['storage', 'sidePanel', 'nativeMessaging', 'alarms'], key: 'MIIB-test' };
+    for (const browser of ['firefox', 'safari']) {
+      const m = generatedManifest(browser, base);
+      expect(m.permissions, browser).toEqual(['storage', 'nativeMessaging', 'alarms']);
+      expect(m, browser).not.toHaveProperty('key');
+    }
+    expect(generatedManifest('chrome', base)).toMatchObject(base);
+  });
+
+  // F056: apps detect Byoky by the window.__byoky__ that provider.js defines
+  // in the page's own world. A content script's world: 'MAIN' needs Firefox
+  // 128 and Safari 18 (iOS 18; macOS 13 is the oldest that gets Safari 18).
+  // Older versions installed Byoky, ran the script in the isolated world,
+  // and every app said Byoky was not installed.
+  it('asks for browsers that run the MAIN-world content script', async () => {
+    vi.stubGlobal('defineContentScript', (definition: unknown) => definition);
+    const scripts = await Promise.all([
+      import('../entrypoints/provider.content'),
+      import('../entrypoints/content'),
+    ]).finally(() => vi.unstubAllGlobals());
+    const mainWorld = scripts.some((m) => (m.default as { world?: string }).world === 'MAIN');
+    expect(mainWorld).toBe(true);
+
+    const gecko = (config.manifest as { browser_specific_settings: { gecko: { strict_min_version: string } } })
+      .browser_specific_settings.gecko;
+    expect(parseFloat(gecko.strict_min_version)).toBeGreaterThanOrEqual(128);
+
+    // The Safari extension targets (packages/ios/project.yml).
+    const project = readFileSync(fileURLToPath(new URL('../../ios/project.yml', import.meta.url)), 'utf-8');
+    const target = (name: string) => {
+      const block = project.split(/\n(?=  \S)/).find((b) => b.startsWith(`  ${name}:`));
+      return parseFloat(/deploymentTarget: "([\d.]+)"/.exec(block ?? '')?.[1] ?? '0');
+    };
+    expect(target('ByokySafariExtension')).toBeGreaterThanOrEqual(18);
+    expect(target('ByokySafariExtension (macOS)')).toBeGreaterThanOrEqual(13);
+    expect(target('Byoky (macOS)')).toBeGreaterThanOrEqual(13);
   });
 });

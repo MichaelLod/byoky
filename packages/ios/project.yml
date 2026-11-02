@@ -29,10 +29,16 @@ targets:
     dependencies:
       - target: ByokySafariExtension
 
+  # The web extension's provider script runs in the page's world (manifest
+  # content_scripts world: MAIN), which is how apps detect Byoky. Safari
+  # supports that from 18, so the extension needs iOS 18; on iOS 17 it would
+  # install and every app would say Byoky is not installed. The app itself
+  # (wallet, in-wallet browser) still runs on 17.
+  # packages/extension/tests/manifest.test.ts checks these targets.
   ByokySafariExtension:
     type: app-extension
     platform: iOS
-    deploymentTarget: "17.0"
+    deploymentTarget: "18.0"
     sources:
       - path: SafariExtension
         excludes:
@@ -93,10 +99,12 @@ targets:
     dependencies:
       - target: Byoky
 
+  # The Mac app only carries the Safari extension, which needs Safari 18
+  # (see ByokySafariExtension): macOS 13 is the oldest that gets it.
   Byoky (macOS):
     type: application
     platform: macOS
-    deploymentTarget: "12.0"
+    deploymentTarget: "13.0"
     sources:
       - path: macOS
         excludes:
@@ -122,7 +130,7 @@ targets:
   ByokySafariExtension (macOS):
     type: app-extension
     platform: macOS
-    deploymentTarget: "12.0"
+    deploymentTarget: "13.0"
     sources:
       - path: SafariExtension
         excludes:
