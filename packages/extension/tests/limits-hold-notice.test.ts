@@ -31,7 +31,7 @@ beforeAll(async () => {
   ({ LimitsHoldNotice } = await import('../entrypoints/popup/components/LimitsHoldNotice'));
 });
 
-async function openPopup(page: 'dashboard' | 'connected-apps' = 'dashboard'): Promise<{ root: Root; container: HTMLElement }> {
+async function openPopup(page: 'dashboard' | 'connect' | 'connected-apps' = 'dashboard'): Promise<{ root: Root; container: HTMLElement }> {
   useWalletStore.setState({ isUnlocked: true, limitsHold: null, currentPage: page });
   const container = document.createElement('div');
   document.body.append(container);
@@ -79,10 +79,22 @@ describe('apps paused notice', () => {
     expect(notice(container)?.textContent).toContain('usage totals failed their integrity check');
     expect(notice(container)?.textContent).not.toContain('groups were reset');
     await act(async () => button(container, 'Check limits')!.click());
-    expect(useWalletStore.getState().currentPage).toBe('connected-apps');
+    // F068: the Connect tab, whose Sessions list holds the limits.
+    expect(useWalletStore.getState().currentPage).toBe('connect');
     // Already there: no button to go there.
     expect(button(container, 'Check limits')).toBeUndefined();
     root.unmount();
+  });
+
+  it('has no Check limits button on the Connect tab it leads to (F068)', async () => {
+    storedHold = 'settings';
+    for (const page of ['connect', 'connected-apps'] as const) {
+      const { root, container } = await openPopup(page);
+      expect(notice(container)).not.toBeNull();
+      expect(button(container, 'Check limits')).toBeUndefined();
+      expect(button(container, 'Resume apps')).toBeDefined();
+      root.unmount();
+    }
   });
 
   it('does not show while nothing is paused', async () => {
