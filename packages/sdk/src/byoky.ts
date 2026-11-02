@@ -408,14 +408,22 @@ export class Byoky {
         return relay;
       },
       disconnect: () => {
+        // A repeat call has nothing left to end; clearing sessionStorage
+        // again would drop what a session connected since then saved.
         if (ended) return;
         ended = true;
-        // Its relays end with it: every request they relay would fail now.
-        for (const relay of relays) relay.close();
-        relays.clear();
         clearExtSession();
         releaseNotify();
         this.sendDisconnect(sessionKeyRef.current);
+        // Its relays end with it: every request they relay would fail now.
+        // Closing one runs the app's onClose callbacks, so that comes after
+        // the session is gone, and a callback that throws (one that opens a
+        // new relay gets NO_SESSION) cannot stop the other relays closing.
+        const open = [...relays];
+        relays.clear();
+        for (const relay of open) {
+          try { relay.close(); } catch {}
+        }
       },
       isConnected: () => this.querySessionStatus(sessionKeyRef.current),
       getUsage: () => this.querySessionUsage(sessionKeyRef.current),

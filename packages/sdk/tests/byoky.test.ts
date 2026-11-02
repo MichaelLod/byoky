@@ -826,6 +826,45 @@ describe('Byoky', () => {
       expect(() => session.createRelay('ws://localhost:3001/ws/relay'))
         .toThrow(expect.objectContaining({ code: ByokyErrorCode.NO_SESSION }));
     });
+
+    it('ends the session even when a relay onClose callback throws', async () => {
+      const connectPromise = new Byoky().connect({ providers: [{ id: 'openai', required: true }] });
+      await tick();
+      simulateResponse({
+        type: 'BYOKY_CONNECT_RESPONSE',
+        requestId: connectRequests()[0].data.requestId,
+        payload: { sessionKey: 'byk_onclose', proxyUrl: 'extension-proxy', providers: { openai: { available: true, authMethod: 'api_key' } } },
+      });
+      const session = await connectPromise;
+      expect(sessionStorage.getItem('byoky:session')).not.toBeNull();
+      expect(sessionStorage.getItem('byoky:request')).not.toBeNull();
+
+      // The usual auto-reconnect: open a new relay when this one closes.
+      const reopening = session.createRelay('ws://localhost:3001/ws/relay');
+      const reopeningWs = MockWebSocket.last;
+      reopeningWs.open();
+      let reopenError: unknown;
+      reopening.onClose(() => {
+        try { session.createRelay('ws://localhost:3001/ws/relay'); } catch (err) { reopenError = err; throw err; }
+      });
+      const broken = session.createRelay('ws://localhost:3001/ws/relay');
+      const brokenWs = MockWebSocket.last;
+      brokenWs.open();
+      broken.onClose(() => { throw new Error('app bug'); });
+
+      expect(() => session.disconnect()).not.toThrow();
+      expect(reopenError).toMatchObject({ code: ByokyErrorCode.NO_SESSION });
+      expect(reopeningWs.readyState).toBe(3);
+      expect(brokenWs.readyState).toBe(3);
+      expect(reopening.status).toBe('disconnected');
+      expect(broken.status).toBe('disconnected');
+      expect(sessionStorage.getItem('byoky:session')).toBeNull();
+      expect(sessionStorage.getItem('byoky:request')).toBeNull();
+      await tick();
+      const sent = postedMessages.filter((m) => m.data.type === 'BYOKY_DISCONNECT');
+      expect(sent.length).toBe(1);
+      expect((sent[0].data.payload as Record<string, string>).sessionKey).toBe('byk_onclose');
+    });
   });
 
   describe('after session.disconnect()', () => {
@@ -863,6 +902,23 @@ describe('Byoky', () => {
       // A second disconnect() sends nothing more.
       session.disconnect();
       await tick();
+      expect(ofType('BYOKY_DISCONNECT').length).toBe(1);
+    });
+
+    it('a repeat disconnect() leaves the session connected after it alone', async () => {
+      const first = await connected();
+      first.disconnect();
+      const connectPromise = new Byoky().connect({ providers: [{ id: 'anthropic' }] });
+      await tick();
+      answer(ofType('BYOKY_CONNECT_REQUEST')[1], granted('byk_next'));
+      await connectPromise;
+      expect(JSON.parse(sessionStorage.getItem('byoky:session')!).sessionKey).toBe('byk_next');
+
+      // A second cleanup of the old session (a React effect run twice, say).
+      first.disconnect();
+      await tick();
+      expect(JSON.parse(sessionStorage.getItem('byoky:session')!).sessionKey).toBe('byk_next');
+      expect(sessionStorage.getItem('byoky:request')).not.toBeNull();
       expect(ofType('BYOKY_DISCONNECT').length).toBe(1);
     });
 
