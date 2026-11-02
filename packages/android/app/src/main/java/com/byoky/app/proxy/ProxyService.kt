@@ -405,9 +405,14 @@ class ProxyService(
     ) {
         val meter = exchange.meter
         val providerId = provider.id
+        // An app knows only the registry's placeholder host for a provider
+        // without a fixed one (Azure's YOUR_RESOURCE, a local server's
+        // default port): it goes to the credential's own server (F020).
         // Gemini names the model in the URL (and ignores one in the body), so
         // a pinned model goes there.
-        val target = modelOverride?.takeIf { providerId == "gemini" }?.let { RoutingResolver.geminiUrl(url, it) } ?: url
+        val target = UpstreamPolicy.rebase(provider, url, credential.baseUrl)
+            ?: modelOverride?.takeIf { providerId == "gemini" }?.let { RoutingResolver.geminiUrl(url, it) }
+            ?: url
         val upstreamUrl = allowedTarget(provider, target, credential)
         val apiKey = apiKey(credential, provider.name)
 

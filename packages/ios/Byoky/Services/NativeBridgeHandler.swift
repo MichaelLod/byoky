@@ -441,6 +441,8 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
         credential: Credential
     ) async -> Int {
         var sent = false
+        var url = url
+        var urlString = urlString
         do {
             // Post-resolve validation for requiresCustomBaseUrl providers.
             // The initial parse in handleProxy was permissive; now we know
@@ -450,6 +452,14 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
                 if let message = Provider.missingEndpointMessage(providerId: providerId, credentialBaseUrl: credential.baseUrl) {
                     deliverProxyError(requestId: requestId, code: "PROVIDER_UNAVAILABLE", message: message)
                     return 0
+                }
+                // An app knows only the registry's placeholder host (Azure's
+                // YOUR_RESOURCE, a local server's default port): such a
+                // request goes to the credential's own endpoint (F020).
+                if let rebased = Provider.rebasedOntoCredential(urlString, for: providerId, credentialBaseUrl: credential.baseUrl),
+                   let rebasedURL = URL(string: rebased) {
+                    url = rebasedURL
+                    urlString = rebased
                 }
                 if Provider.validateUrl(urlString, for: providerId, credentialBaseUrl: credential.baseUrl) == nil {
                     deliverProxyError(requestId: requestId, code: "INVALID_URL",

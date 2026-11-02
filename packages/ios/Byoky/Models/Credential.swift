@@ -247,6 +247,31 @@ struct Provider: Identifiable, Hashable {
             && port(a) == port(b)
     }
 
+    /// The host core's provider registry, and so the SDK (`listModels`, a
+    /// `createFetch` app), names for each provider without a fixed one.
+    static let placeholderBaseUrls: [String: String] = [
+        "azure_openai": "https://YOUR_RESOURCE.openai.azure.com",
+        "ollama": "http://localhost:11434",
+        "lm_studio": "http://localhost:1234",
+    ]
+
+    /// `urlString` on the credential's own endpoint when it names the
+    /// placeholder host of a provider without a fixed one (an app knows no
+    /// other), path and query as they were; nil for any other URL (checked
+    /// by `validateUrl` as it is) or a credential without a usable endpoint.
+    /// Mirrors the extension's `rebaseOntoCredential` and Android's
+    /// `UpstreamPolicy.rebase`.
+    static func rebasedOntoCredential(_ urlString: String, for providerId: String, credentialBaseUrl: String?) -> String? {
+        guard let placeholder = placeholderBaseUrls[providerId].flatMap({ URL(string: $0) }),
+              let base = customBaseUrl(for: providerId, credentialBaseUrl: credentialBaseUrl),
+              let components = URLComponents(string: urlString),
+              let url = components.url, url.host != nil,
+              sameOrigin(url, placeholder) else { return nil }
+        var prefix = base.absoluteString
+        while prefix.hasSuffix("/") { prefix.removeLast() }
+        return prefix + components.percentEncodedPath + (components.percentEncodedQuery.map { "?\($0)" } ?? "")
+    }
+
     /// Check that a request URL targets the provider's upstream before any
     /// key is attached. Fixed-host providers must hit their registered origin
     /// (a credential base URL is ignored); custom-host providers must hit

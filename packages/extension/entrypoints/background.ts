@@ -856,6 +856,17 @@ export default defineBackground(() => {
         return;
       }
 
+      // An app knows only the registry's placeholder host for a provider
+      // without a fixed one (Azure's YOUR_RESOURCE, a local server's default
+      // port; the SDK's listModels uses it too). Unrouted, such a request
+      // goes to the credential's own host, as on the bridge path; any other
+      // host is still checked as it is (sourceUrlAllowed below).
+      const appUrl = !translation && !swap && PROVIDERS[msg.providerId]?.requiresCustomBaseUrl
+        ? rebaseOntoCredential(msg.providerId, msg.url, credential.baseUrl) ?? msg.url
+        : msg.url;
+      // The request as logged and charged: where it went.
+      const appRequest: ProxyRequest = appUrl === msg.url ? msg : { ...msg, url: appUrl };
+
       // Check the token allowance and hold what this request may use in one
       // step, so a burst of parallel requests can't all pass the check.
       const reservation = await checkAndReserveAllowance(session.appOrigin, msg.providerId, msg);
@@ -881,7 +892,7 @@ export default defineBackground(() => {
         // The URL the SDK sent must match the SOURCE provider's base URL.
         // (After translation we issue against the destination's URL — see
         // rewriteProxyUrl below.)
-        if (!sourceUrlAllowed(msg.providerId, msg.url, !!(translation || swap), credential.baseUrl)) {
+        if (!sourceUrlAllowed(msg.providerId, appUrl, !!(translation || swap), credential.baseUrl)) {
           send({
             type: 'BYOKY_PROXY_RESPONSE_ERROR',
             requestId: msg.requestId,
@@ -907,7 +918,7 @@ export default defineBackground(() => {
         // Translate the request body up front, before any branch (the OAuth
         // bridge path needs to see the translated body too).
         let translatedBody: string | undefined = msg.body;
-        let translatedUrl = msg.url;
+        let translatedUrl = appUrl;
         if (translation) {
           if (msg.bodyEncoding) {
             // Binary bodies cannot be translated — translation requires JSON.
@@ -1049,7 +1060,7 @@ export default defineBackground(() => {
 
         responseStatus = response.status;
         responseContentType = respHeaders['content-type'] ?? '';
-        logEntryId = await logRequest(session, msg, response.status);
+        logEntryId = await logRequest(session, appRequest, response.status);
 
         // Decide streaming vs single-shot from the response Content-Type.
         // Translation activates a per-chunk SSE rewriter for streaming
@@ -1158,11 +1169,11 @@ export default defineBackground(() => {
         // usage is counted, so the tokens are never counted nowhere.
         try {
           if (logEntryId && responseChunks) {
-            await recordProxyUsage(session.appOrigin, msg, effectiveProviderId, logEntryId, responseStatus, responseContentType, responseChunks.join(''), streamComplete);
+            await recordProxyUsage(session.appOrigin, appRequest, effectiveProviderId, logEntryId, responseStatus, responseContentType, responseChunks.join(''), streamComplete);
           } else if (fetchSent && upstreamAbort.signal.aborted) {
             // Cancelled before the response headers (for a non-streaming
             // reply that's until generation ends): the provider still bills.
-            await chargeCancelledRequest(session, msg);
+            await chargeCancelledRequest(session, appRequest);
           }
         } catch { /* usage bookkeeping must not break the response */ }
         reservation.release();
@@ -3081,11 +3092,11 @@ export default defineBackground(() => {
   }
 
   /**
-   * The bridge knows only the registry's placeholder host for a provider
-   * without a fixed one (Azure's YOUR_RESOURCE, the local servers' default
-   * ports). A request it sends there goes to the credential's own host,
-   * same path and query. Null when `url` names another host (validated as
-   * it is) or the credential has no usable base URL.
+   * Apps and the bridge know only the registry's placeholder host for a
+   * provider without a fixed one (Azure's YOUR_RESOURCE, the local servers'
+   * default ports). A request they send there goes to the credential's own
+   * host, same path and query. Null when `url` names another host (validated
+   * as it is) or the credential has no usable base URL.
    */
   function rebaseOntoCredential(providerId: string, url: string, credentialBaseUrl: string | undefined): string | null {
     const placeholder = PROVIDERS[providerId]?.baseUrl;

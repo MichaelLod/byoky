@@ -98,6 +98,55 @@ describe('background: bridge requests for providers without a fixed host', () =>
   });
 });
 
+describe('background: app requests for providers without a fixed host', () => {
+  // F020: the SDK's listModels and createFetch know only the registry's
+  // placeholder host, which the page path refused (F029 fixed the bridge).
+  const CUSTOM: CredentialSpec[] = [
+    { id: 'az', providerId: 'azure_openai', key: 'az-key', baseUrl: 'https://myres.openai.azure.com' },
+    { id: 'ol', providerId: 'ollama', key: '', baseUrl: 'http://localhost:11500' },
+  ];
+
+  async function connected() {
+    const h = await startBackground({ local: await walletStorage(CUSTOM) });
+    await h.unlock();
+    const { payload } = await connectApproved(h, APP, { providers: [{ id: 'azure_openai' }, { id: 'ollama' }] });
+    return { h, sessionKey: payload.sessionKey as string };
+  }
+
+  it('sends a placeholder-host request to the credential\'s own host', async () => {
+    const { h, sessionKey } = await connected();
+    h.fetch.mockImplementation(async () => jsonResponse({ data: [] }));
+
+    const azure = await h.proxy(APP, {
+      sessionKey, providerId: 'azure_openai', method: 'GET', body: undefined,
+      url: 'https://YOUR_RESOURCE.openai.azure.com/openai/models?api-version=2024-10-21',
+    }).result;
+    expect(azure.error).toBeUndefined();
+    expect(h.fetch.mock.calls[0][0]).toBe('https://myres.openai.azure.com/openai/models?api-version=2024-10-21');
+    // Logged without the query, at the real host.
+    await h.until(() => requestLog(h).length === 1);
+    expect(requestLog(h)[0].url).toBe('https://myres.openai.azure.com/openai/models');
+
+    const ollama = await h.proxy(APP, {
+      sessionKey, providerId: 'ollama', method: 'GET', body: undefined, url: 'http://localhost:11434/api/tags',
+    }).result;
+    expect(ollama.error).toBeUndefined();
+    expect(h.fetch.mock.calls[1][0]).toBe('http://localhost:11500/api/tags');
+  });
+
+  it('still refuses a request naming another host', async () => {
+    const { h, sessionKey } = await connected();
+    for (const [providerId, url] of [
+      ['azure_openai', 'https://evil.openai.azure.com/openai/deployments/d/chat/completions'],
+      ['ollama', 'http://127.0.0.1:11434/api/chat'],
+    ]) {
+      const r = await h.proxy(APP, { sessionKey, providerId, url, body: '{"messages":[]}' }).result;
+      expect(r.error?.error.code, url).toBe('INVALID_URL');
+    }
+    expect(h.fetch).not.toHaveBeenCalled();
+  });
+});
+
 describe('background: routed requests from providers without a fixed host', () => {
   // F033: a routed app calling Azure (or a local server) had its own URL
   // checked against no base URL at all, so it was always refused.

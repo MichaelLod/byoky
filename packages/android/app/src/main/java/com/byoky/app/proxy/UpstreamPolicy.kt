@@ -49,6 +49,32 @@ object UpstreamPolicy {
         return if (originOf(url) == origin) Target.Allowed(url.toString()) else Target.WrongHost
     }
 
+    /**
+     * The host core's provider registry, and so the SDK (`listModels`, a
+     * `createFetch` app), names for each provider without a fixed one.
+     */
+    private val PLACEHOLDER_BASE_URLS = mapOf(
+        "azure_openai" to "https://YOUR_RESOURCE.openai.azure.com",
+        "ollama" to "http://localhost:11434",
+        "lm_studio" to "http://localhost:1234",
+    )
+
+    /**
+     * [url] on the credential's own server when it names the placeholder
+     * host of a provider without a fixed one (an app knows no other), path
+     * and query as they were; null for any other URL (checked by [target]
+     * as it is) or a credential without a usable base URL. Mirrors the
+     * extension's `rebaseOntoCredential` and iOS.
+     */
+    fun rebase(provider: Provider, url: HttpUrl, credentialBaseUrl: String?): HttpUrl? {
+        if (!provider.requiresCustomBaseUrl) return null
+        val placeholder = PLACEHOLDER_BASE_URLS[provider.id]?.toHttpUrlOrNull() ?: return null
+        if (originOf(url) != originOf(placeholder)) return null
+        val base = CredentialBaseUrl.normalize(provider.id, credentialBaseUrl) ?: return null
+        val query = url.encodedQuery?.let { "?$it" } ?: ""
+        return "$base${url.encodedPath}$query".toHttpUrlOrNull()
+    }
+
     /** Base URL to hand to `rewriteProxyUrl` when routing to [dstProviderId]. */
     fun rewriteOverride(dstProviderId: String, credentialBaseUrl: String?): Override {
         if (!CredentialBaseUrl.isRequired(dstProviderId)) return Override.None
