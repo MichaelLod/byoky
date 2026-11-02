@@ -1,11 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { request } from 'node:http';
 import { createServer as createNetServer } from 'node:net';
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { platform, tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { ProviderAuthContext, ProviderAuthResult } from 'openclaw/plugin-sdk/core';
-import { getManifestLocations, registerHostAt } from '../../bridge/src/native-manifest.js';
+import { getManifestLocations, registerHostAt, wrapperTarget } from '../../bridge/src/native-manifest.js';
 import { DEFAULT_MODELS, getModel, modelsForProvider } from '../../core/src/models.js';
 import { FakeWallet, type WalletKind } from '../../bridge/tests/helpers/fake-wallet.js';
 import { openLoginPage } from '../../bridge/tests/helpers/login-page.js';
@@ -91,11 +92,14 @@ function context(config: object = {}): ProviderAuthContext {
   } as unknown as ProviderAuthContext;
 }
 
+/** The bridge's bin script, as the plugin finds it in node_modules. */
+const BRIDGE_BIN = fileURLToPath(new URL('../../bridge/bin/byoky-bridge.js', import.meta.url));
+
 /** A home where Chrome is installed and already has the host registered. */
-function registeredHome(): void {
+function registeredHome(hostPath = BRIDGE_BIN): void {
   const chrome = getManifestLocations(home, platform()).find((l) => l.browser === 'Chrome')!;
   mkdirSync(chrome.profileDirs[0], { recursive: true });
-  registerHostAt(home, platform(), '/opt/byoky-bridge.js');
+  registerHostAt(home, platform(), hostPath);
 }
 
 beforeEach(async () => {
@@ -207,6 +211,23 @@ describe('login', () => {
       return { update: () => {}, stop: () => {} };
     };
     await expect(run!(ctx)).rejects.toThrow(`(http://127.0.0.1:${CALLBACK_PORT})`);
+  });
+
+  // F019: a registration pointing at a shim (written by `byoky-bridge
+  // install` under pnpm) counted as registered, so the plugin never wrote
+  // its own working one.
+  it('registers again when the registered host can\'t start', async () => {
+    const shim = join(home, 'byoky-bridge');
+    writeFileSync(shim, '#!/bin/sh\nexec node "$(dirname "$0")/x.js" "$@"\n');
+    registeredHome(shim);
+    const chrome = getManifestLocations(home, platform()).find((l) => l.browser === 'Chrome')!;
+    const run = authRuns().byoky(context());
+    await expect.poll(() => opened.length).toBe(1);
+    expect(stops).toContain('Registered with Chrome');
+    const wrapper = JSON.parse(readFileSync(chrome.path, 'utf8')).path;
+    expect(wrapperTarget(readFileSync(wrapper, 'utf8'))?.host).toBe(BRIDGE_BIN);
+    await post('/callback', { nonce: await pageNonce(), providers: ['openai'] });
+    await run;
   });
 
   it('registers the native host with the browsers that are installed', async () => {

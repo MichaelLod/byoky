@@ -1,15 +1,21 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { platform, tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   getManifestLocations,
   getRegistrationStatusAt,
   registerHostAt,
   unregisterHostAt,
+  wrapperTarget,
   PUBLISHED_EXTENSION_ID,
 } from '../src/native-manifest.js';
+import { registerHost } from '../src/installer.js';
+
+/** The bridge's own bin script, which the wrapper must run. */
+const BRIDGE_BIN = resolve(dirname(fileURLToPath(import.meta.url)), '../bin/byoky-bridge.js');
 
 let home: string;
 
@@ -83,9 +89,39 @@ describe('registerHostAt', () => {
 describe('status and uninstall', () => {
   it('lists only installed browsers', () => {
     mkdirSync(join(home, '.config/BraveSoftware/Brave-Browser'), { recursive: true });
-    registerHostAt(home, 'linux', '/opt/bridge.js');
+    registerHostAt(home, 'linux', BRIDGE_BIN);
     mkdirSync(join(home, '.config/google-chrome'), { recursive: true });
-    expect(getRegistrationStatusAt(home, 'linux')).toEqual({ registered: ['Brave'], missing: ['Chrome'] });
+    expect(getRegistrationStatusAt(home, 'linux')).toEqual({ registered: ['Brave'], missing: ['Chrome'], broken: [] });
+  });
+
+  // F019: status only checked that the manifest was there, so a host the
+  // browser can't start was reported as registered.
+  it.each<[string, (dir: string) => string]>([
+    ['a host script that is gone', (dir) => join(dir, 'gone.js')],
+    ['a pnpm shim', (dir) => {
+      const shim = join(dir, 'byoky-bridge');
+      writeFileSync(shim, '#!/bin/sh\nbasedir=$(dirname "$0")\nexec node "$basedir/../@byoky/bridge/bin/byoky-bridge.js" "$@"\n');
+      chmodSync(shim, 0o755);
+      return shim;
+    }],
+    ['a native shim', (dir) => {
+      const shim = join(dir, 'byoky-bridge');
+      symlinkSync(process.execPath, shim);
+      return shim;
+    }],
+  ])('reports a registration with %s as broken', (_what, hostPath) => {
+    mkdirSync(join(home, '.config/BraveSoftware/Brave-Browser'), { recursive: true });
+    mkdirSync(join(home, '.mozilla'), { recursive: true });
+    registerHostAt(home, 'linux', hostPath(home));
+    expect(getRegistrationStatusAt(home, 'linux')).toEqual({ registered: [], missing: [], broken: ['Brave', 'Firefox'] });
+  });
+
+  it('reads the node and host paths back out of a wrapper, old or new', () => {
+    expect(wrapperTarget("#!/bin/bash\nexec '/opt/no'\\''de' '/a b/host.js' host \"$@\"\n"))
+      .toEqual({ node: "/opt/no'de", host: '/a b/host.js' });
+    expect(wrapperTarget('#!/bin/bash\nexport PATH="/x"\nexec "/opt/node" "/a b/host.js" host "$@"\n'))
+      .toEqual({ node: '/opt/node', host: '/a b/host.js' });
+    expect(wrapperTarget('#!/bin/bash\necho hi\n')).toBeNull();
   });
 
   it('removes the manifests and the wrapper scripts', () => {
@@ -99,6 +135,40 @@ describe('status and uninstall', () => {
       expect(existsSync(join(dir, 'com.byoky.bridge.json'))).toBe(false);
       expect(existsSync(join(dir, 'byoky-bridge-host'))).toBe(false);
     }
-    expect(getRegistrationStatusAt(home, 'linux')).toEqual({ registered: [], missing: ['Brave', 'Firefox'] });
+    expect(getRegistrationStatusAt(home, 'linux')).toEqual({ registered: [], missing: ['Brave', 'Firefox'], broken: [] });
+  });
+});
+
+// F019: `byoky-bridge install` took the host from `which byoky-bridge`,
+// which under pnpm or Volta is a shim node can't run, so the browser could
+// never start the host.
+describe('byoky-bridge install', () => {
+  let savedHome: string | undefined;
+  let savedPath: string | undefined;
+
+  beforeEach(() => {
+    savedHome = process.env.HOME;
+    savedPath = process.env.PATH;
+    process.env.HOME = home;
+  });
+
+  afterEach(() => {
+    process.env.HOME = savedHome;
+    process.env.PATH = savedPath;
+  });
+
+  it('registers its own bin script, not the shim first on PATH', () => {
+    const shims = join(home, 'pnpm-global');
+    mkdirSync(shims);
+    writeFileSync(join(shims, 'byoky-bridge'), '#!/bin/sh\nexec node "$(dirname "$0")/elsewhere.js" "$@"\n');
+    chmodSync(join(shims, 'byoky-bridge'), 0o755);
+    process.env.PATH = `${shims}:${savedPath}`;
+    const chrome = getManifestLocations(home, platform()).find((l) => l.browser === 'Chrome')!;
+    mkdirSync(chrome.profileDirs[0], { recursive: true });
+
+    expect(registerHost().browsers).toEqual(['Chrome']);
+    const wrapper = JSON.parse(readFileSync(chrome.path, 'utf8')).path;
+    expect(wrapperTarget(readFileSync(wrapper, 'utf8'))?.host).toBe(BRIDGE_BIN);
+    expect(getRegistrationStatusAt(home, platform())).toEqual({ registered: ['Chrome'], missing: [], broken: [] });
   });
 });

@@ -427,11 +427,13 @@ function resolveBridgeBin(): string {
     const pkgPath = req.resolve('@byoky/bridge/package.json');
     return resolve(dirname(pkgPath), 'bin/byoky-bridge.js');
   } catch {
-    return resolve(dirname(new URL(import.meta.url).pathname), '../bin/byoky-bridge.js');
+    // fileURLToPath, not .pathname, which keeps spaces and non-ASCII letters
+    // percent-encoded.
+    return fileURLToPath(new URL('../bin/byoky-bridge.js', import.meta.url));
   }
 }
 
-function getRegistrationStatus(): { registered: string[]; missing: string[] } {
+function getRegistrationStatus(): { registered: string[]; missing: string[]; broken: string[] } {
   return getRegistrationStatusAt(homedir(), platform());
 }
 
@@ -508,7 +510,11 @@ async function renderByokyStatus(): Promise<string> {
 
   if (!health) {
     lines.push(`Status: **offline**`);
-    if (reg.registered.length === 0) {
+    if (reg.broken.length > 0) {
+      lines.push('');
+      lines.push(`Registered with ${reg.broken.join(', ')}, but the host can't start there.`);
+      lines.push('Run: `openclaw models auth login --provider byoky` to register it again.');
+    } else if (reg.registered.length === 0) {
       lines.push('');
       lines.push('Native messaging host is not registered with any browser.');
       lines.push('Run: `openclaw models auth login --provider byoky`');
@@ -546,11 +552,14 @@ async function ensureNativeHostRegistered(
   ctx: ProviderAuthContext,
 ): Promise<boolean> {
   const reg = getRegistrationStatus();
-  if (reg.registered.length > 0) return true;
+  // A registration whose host can't start (a shim, a package since
+  // removed) is no registration.
+  if (reg.registered.length > 0 && reg.broken.length === 0) return true;
 
   const ok = await ctx.prompter.confirm({
-    message:
-      'Byoky Bridge native messaging host is not registered. Register it now so the wallet can reach the bridge?',
+    message: reg.broken.length > 0
+      ? `Byoky Bridge is registered with ${reg.broken.join(', ')}, but the host it points at can't start. Register it again so the wallet can reach the bridge?`
+      : 'Byoky Bridge native messaging host is not registered. Register it now so the wallet can reach the bridge?',
     initialValue: true,
   });
   if (!ok) {
