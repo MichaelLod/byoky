@@ -109,12 +109,13 @@ type AnthropicImageSource =
   | { type: 'base64'; media_type: string; data: string }
   | { type: 'url'; url: string };
 
-/** PDF as base64 or URL, or plain text. (Content and file sources aren't
- *  translatable: file ids belong to Anthropic's Files API.) */
+/** PDF as base64 or URL, plain text, or text-only custom content. (File
+ *  sources aren't translatable: file ids belong to Anthropic's Files API.) */
 type AnthropicDocumentSource =
   | { type: 'base64'; media_type: string; data: string }
   | { type: 'url'; url: string }
-  | { type: 'text'; media_type: 'text/plain'; data: string };
+  | { type: 'text'; media_type: 'text/plain'; data: string }
+  | { type: 'content'; content: string | Array<{ type: 'text'; text: string }> };
 
 interface AnthropicTool {
   name: string;
@@ -273,13 +274,11 @@ function parseAnthropicContentBlock(
       return null;
     case 'image': {
       const src = (block as { source?: AnthropicImageSource }).source;
-      const irSrc = parseAnthropicImageSource(src);
-      return irSrc ? { type: 'image', source: irSrc } : null;
+      return { type: 'image', source: parseAnthropicImageSource(src) };
     }
     case 'document': {
       const doc = block as { source?: AnthropicDocumentSource; title?: unknown };
       const irSrc = parseAnthropicDocumentSource(doc.source);
-      if (!irSrc) return null;
       return {
         type: 'document',
         source: irSrc,
@@ -313,38 +312,59 @@ function parseAnthropicContentBlock(
   }
 }
 
-function parseAnthropicImageSource(
-  src: AnthropicImageSource | undefined,
-): IRImageSource | null {
-  if (!src || typeof src !== 'object') return null;
-  if (
-    src.type === 'base64' &&
-    typeof src.media_type === 'string' &&
-    typeof src.data === 'string'
-  ) {
-    return { kind: 'base64', mediaType: src.media_type, data: src.data };
-  }
-  if (src.type === 'url' && typeof src.url === 'string') {
-    return { kind: 'url', url: src.url };
-  }
-  return null;
+/**
+ * An image or document source no other provider can read (a Files API id,
+ * a source type Byoky doesn't know, a malformed one) is refused rather than
+ * dropped: the model would answer without the attachment.
+ */
+function untranslatableSource(kind: 'image' | 'document', src: unknown): TranslationError {
+  const type = isRecord(src) && typeof src.type === 'string' ? src.type : undefined;
+  const what =
+    type === undefined ? 'no valid source'
+    : ['base64', 'url', 'text', 'content'].includes(type) ? `a malformed ${type} source`
+    : `source type ${type}`;
+  return new TranslationError(
+    'UNSUPPORTED_FEATURE',
+    type === 'file'
+      ? `An ${kind} from Anthropic's Files API (source type file) can't be routed to another provider; send it inline.`
+      : `An ${kind} with ${what} can't be routed to another provider.`,
+  );
 }
 
-function parseAnthropicDocumentSource(
-  src: AnthropicDocumentSource | undefined,
-): IRDocumentSource | null {
-  if (!src || typeof src !== 'object') return null;
-  if (src.type === 'base64' && typeof src.media_type === 'string' && typeof src.data === 'string') {
-    return { kind: 'base64', mediaType: src.media_type, data: src.data };
+function parseAnthropicImageSource(src: AnthropicImageSource | undefined): IRImageSource {
+  if (isRecord(src)) {
+    if (src.type === 'base64' && typeof src.media_type === 'string' && typeof src.data === 'string') {
+      return { kind: 'base64', mediaType: src.media_type, data: src.data };
+    }
+    if (src.type === 'url' && typeof src.url === 'string') {
+      return { kind: 'url', url: src.url };
+    }
   }
-  // Anthropic fetches URL documents as PDFs.
-  if (src.type === 'url' && typeof src.url === 'string') {
-    return { kind: 'url', url: src.url, mediaType: 'application/pdf' };
+  throw untranslatableSource('image', src);
+}
+
+function parseAnthropicDocumentSource(src: AnthropicDocumentSource | undefined): IRDocumentSource {
+  if (isRecord(src)) {
+    if (src.type === 'base64' && typeof src.media_type === 'string' && typeof src.data === 'string') {
+      return { kind: 'base64', mediaType: src.media_type, data: src.data };
+    }
+    // Anthropic fetches URL documents as PDFs.
+    if (src.type === 'url' && typeof src.url === 'string') {
+      return { kind: 'url', url: src.url, mediaType: 'application/pdf' };
+    }
+    if (src.type === 'text' && typeof src.data === 'string') {
+      return { kind: 'text', text: src.data };
+    }
+    // Custom content: text blocks (or a string) make a text document.
+    if (src.type === 'content') {
+      const content = (src as { content?: unknown }).content;
+      if (typeof content === 'string') return { kind: 'text', text: content };
+      if (Array.isArray(content) && content.every((b) => isRecord(b) && b.type === 'text' && typeof b.text === 'string')) {
+        return { kind: 'text', text: content.map((b) => (b as { text: string }).text).join('\n') };
+      }
+    }
   }
-  if (src.type === 'text' && typeof src.data === 'string') {
-    return { kind: 'text', text: src.data };
-  }
-  return null;
+  throw untranslatableSource('document', src);
 }
 
 function parseAnthropicToolResultContent(
