@@ -334,27 +334,32 @@ object RoutingResolver {
             if (!routingSupported) {
                 return "This phone can't route requests to another provider: that needs Android System WebView 110 or newer. " +
                     "Update Android System WebView from the Play Store, or move this app out of the group \"${group.name}\", " +
-                    "which routes it to ${Provider.find(groupBinding)?.name ?: groupBinding}."
+                    "which routes it to ${providerName(groupBinding)}."
             }
             val modelMissing = group.model.isNullOrEmpty() && engine?.autoRouteModel(groupBinding) == null
             if (modelMissing && engine != null && credentials.any { it.providerId == groupBinding } &&
                 engine.shouldTranslate(providerId, groupBinding)
             ) {
-                return "This app's group routes it to $groupBinding, which needs a model to translate $providerId requests. Set a model on the group."
+                return "This app's group routes it to ${providerName(groupBinding)}, which needs a model to translate " +
+                    "${providerName(providerId)} requests. Set a model on the group."
             }
-            return "No $groupBinding API key found. Add a $groupBinding key to your wallet, or assign this app to a provider you already have a key for."
+            return "No API key for ${providerName(groupBinding)} found. Add one to your wallet, or assign this app to a provider you already have a key for."
         }
         val held = credentials.map { it.providerId }.distinct().sorted()
         if (held.isNotEmpty() && !routingSupported) {
-            val name = Provider.find(providerId)?.name ?: providerId
+            val name = providerName(providerId)
             return "No API key for $name found. This phone can't route requests to another provider's key: that needs " +
                 "Android System WebView 110 or newer. Add a key for $name, or update Android System WebView from the Play Store."
         }
         if (held.isNotEmpty()) {
-            return "No $providerId API key found. Keys: ${held.joinToString(", ")}. Add a $providerId key, or assign this app to one of those providers."
+            return "No API key for ${providerName(providerId)} found. You have keys for: ${held.joinToString(", ") { providerName(it) }}. " +
+                "Add one, or assign this app to one of those providers."
         }
         return "No API keys in your wallet. Add a key for any provider to get started."
     }
+
+    /** A provider's display name ("Ollama (local)"), or its id when unknown. */
+    private fun providerName(providerId: String): String = Provider.find(providerId)?.name ?: providerId
 
     /**
      * Best-effort `model` extraction from a JSON request body. Returns null

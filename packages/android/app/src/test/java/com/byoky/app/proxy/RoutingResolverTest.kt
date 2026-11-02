@@ -197,11 +197,19 @@ class RoutingResolverTest {
         val noGroup = RoutingResolver.noCredentialMessage("anthropic", listOf(openai), null, noSandbox, routingSupported = false)
         assertTrue(noGroup, noGroup.startsWith("No API key for Anthropic found. This phone can't route"))
         // Where the phone can route, the group's missing key or model is named as before.
-        assertTrue(RoutingResolver.noCredentialMessage("anthropic", listOf(key1), local, families, routingSupported = true)
-            .startsWith("No ollama API key found."))
+        assertEquals(
+            "No API key for Ollama (local) found. Add one to your wallet, or assign this app to a provider you already have a key for.",
+            RoutingResolver.noCredentialMessage("anthropic", listOf(key1), local, families, routingSupported = true),
+        )
+        assertEquals(
+            "No API key for Anthropic found. You have keys for: Google Gemini, OpenAI. Add one, or assign this app to one of those providers.",
+            RoutingResolver.noCredentialMessage(
+                "anthropic", listOf(openai, Credential(id = "gm", providerId = "gemini", label = "g", createdAt = 1)), null, families, routingSupported = true,
+            ),
+        )
         val deepseek = Credential(id = "d1", providerId = "deepseek", label = "ds", createdAt = 1)
         assertEquals(
-            "This app's group routes it to deepseek, which needs a model to translate anthropic requests. Set a model on the group.",
+            "This app's group routes it to DeepSeek, which needs a model to translate Anthropic requests. Set a model on the group.",
             RoutingResolver.noCredentialMessage("anthropic", listOf(deepseek), Group(id = "g", name = "DS", providerId = "deepseek"), families, routingSupported = true),
         )
         // A pin to a key that's gone is named first.

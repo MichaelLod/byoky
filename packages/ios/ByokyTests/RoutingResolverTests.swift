@@ -170,7 +170,7 @@ final class RoutingResolverTests: XCTestCase {
         ))
         XCTAssertEqual(
             RoutingResolver.noCredentialMessage(requestedProviderId: "anthropic", userCredentialProviderIds: ["anthropic", "deepseek"], group: group("deepseek")),
-            "This app's group routes it to deepseek, which needs a model to translate anthropic requests. Set a model on the group."
+            "This app's group routes it to DeepSeek, which needs a model to translate Anthropic requests. Set a model on the group."
         )
         // A local-server group without a model.
         XCTAssertNil(RoutingResolver.resolve(
@@ -183,9 +183,14 @@ final class RoutingResolverTests: XCTestCase {
             requestedProviderId: "anthropic", requestedModel: "claude-sonnet-4-6",
             group: local, credentials: [claude]
         ))
-        XCTAssertTrue(RoutingResolver.noCredentialMessage(
-            requestedProviderId: "anthropic", userCredentialProviderIds: ["anthropic"], group: local
-        ).contains("ollama"))
+        XCTAssertEqual(
+            RoutingResolver.noCredentialMessage(requestedProviderId: "anthropic", userCredentialProviderIds: ["anthropic"], group: local),
+            "No API key for Ollama (local) found. Add one to your wallet, or assign this app to a provider you already have a key for."
+        )
+        XCTAssertEqual(
+            RoutingResolver.noCredentialMessage(requestedProviderId: "anthropic", userCredentialProviderIds: ["openai", "gemini"], group: nil),
+            "No API key for Anthropic found. You have keys for: OpenAI, Google Gemini. Add one, or assign this app to one of those providers."
+        )
         let openai = credential("openai", "OpenAI")
         XCTAssertNil(RoutingResolver.resolve(
             requestedProviderId: "openai", requestedModel: "gpt-5.5",
@@ -274,7 +279,7 @@ final class RoutingResolverTests: XCTestCase {
         ))
         XCTAssertEqual(
             RoutingResolver.noCredentialMessage(requestedProviderId: "anthropic", userCredentialProviderIds: ["deepseek"], group: group("deepseek")),
-            "This app's group routes it to deepseek, which needs a model to translate anthropic requests. Set a model on the group."
+            "This app's group routes it to DeepSeek, which needs a model to translate Anthropic requests. Set a model on the group."
         )
     }
 

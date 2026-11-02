@@ -85,7 +85,7 @@ describe('resolveRoute', () => {
       expect(resolveRoute('anthropic', group('deepseek'), credentials)).toBeNull();
       // The message names the real problem: the group needs a model.
       expect(buildNoCredentialMessage('anthropic', ['deepseek'], group('deepseek')))
-        .toBe("This app's group routes it to deepseek, which needs a model to translate anthropic requests. Set a model on the group.");
+        .toBe("This app's group routes it to DeepSeek, which needs a model to translate Anthropic requests. Set a model on the group.");
     });
 
     it('prefers pinned credential id over any-of-provider lookup', () => {
@@ -277,7 +277,7 @@ describe('a group bound to another provider never falls back to the app\'s own k
 
     expect(resolveRoute('anthropic', g, credentials)).toBeNull();
     expect(buildNoCredentialMessage('anthropic', ['anthropic', 'deepseek'], g))
-      .toBe("This app's group routes it to deepseek, which needs a model to translate anthropic requests. Set a model on the group.");
+      .toBe("This app's group routes it to DeepSeek, which needs a model to translate Anthropic requests. Set a model on the group.");
   });
 
   it('model-less group bound to a local server', () => {
@@ -288,7 +288,9 @@ describe('a group bound to another provider never falls back to the app\'s own k
     const g = group('ollama', { model: 'llama3.3' });
 
     expect(resolveRoute('anthropic', g, [cred('a', 'anthropic')])).toBeNull();
-    expect(buildNoCredentialMessage('anthropic', ['anthropic'], g)).toContain('ollama');
+    expect(buildNoCredentialMessage('anthropic', ['anthropic'], g)).toBe(
+      'No API key for Ollama (local) found. Add one to your wallet, or assign this app to a provider you already have a key for.',
+    );
     // Same family: the app's OpenAI key doesn't stand in either.
     expect(resolveRoute('openai', g, [cred('o', 'openai')])).toBeNull();
   });
@@ -333,13 +335,19 @@ describe('buildNoCredentialMessage', () => {
   it('points at the missing destination provider when group binds elsewhere', () => {
     const g = group('anthropic');
     const msg = buildNoCredentialMessage('openai', ['openai'], g);
-    expect(msg).toContain('No anthropic API key found');
+    expect(msg).toContain('No API key for Anthropic found');
   });
 
   it('lists existing credentials when wallet has some but not the requested one', () => {
     const msg = buildNoCredentialMessage('anthropic', ['openai', 'gemini'], undefined);
-    expect(msg).toContain('You have keys for: openai, gemini');
-    expect(msg).toContain('Add a anthropic key');
+    expect(msg).toBe(
+      'No API key for Anthropic found. You have keys for: OpenAI, Google Gemini. Add one, or assign this app to one of those providers.',
+    );
+  });
+
+  it('names an unknown provider by its id', () => {
+    expect(buildNoCredentialMessage('nope' as never, ['constructor' as never], undefined))
+      .toBe('No API key for nope found. You have keys for: constructor. Add one, or assign this app to one of those providers.');
   });
 
   it('tells the user the wallet is empty when there are no credentials', () => {

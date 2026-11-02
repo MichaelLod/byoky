@@ -58,6 +58,7 @@ import { shouldTranslate, sameFamily } from './translate/index.js';
 import { familyOf } from './translate/families.js';
 import { DEFAULT_MODELS, type ModelFamily } from './models.js';
 import { isLocalServerProvider } from './proxy-utils.js';
+import { PROVIDERS } from './providers.js';
 
 /**
  * The model routing names when it picks a provider and nothing else names
@@ -376,13 +377,18 @@ export function buildNoCredentialMessage(
   if (groupBinding && groupBinding !== req) {
     const modelMissing = !group?.model && !autoRouteModelFor(groupBinding);
     if (modelMissing && userCredentialProviderIds.includes(groupBinding) && shouldTranslate(req, groupBinding)) {
-      return `This app's group routes it to ${groupBinding}, which needs a model to translate ${req} requests. Set a model on the group.`;
+      return `This app's group routes it to ${providerName(groupBinding)}, which needs a model to translate ${providerName(req)} requests. Set a model on the group.`;
     }
-    return `No ${groupBinding} API key found. Add a ${groupBinding} key to your wallet, or assign this app to a provider you already have a key for.`;
+    return `No API key for ${providerName(groupBinding)} found. Add one to your wallet, or assign this app to a provider you already have a key for.`;
   }
   if (userCredentialProviderIds.length > 0) {
-    const list = userCredentialProviderIds.join(', ');
-    return `No ${req} API key found. You have keys for: ${list}. Add a ${req} key, or assign this app to one of those providers.`;
+    const list = userCredentialProviderIds.map(providerName).join(', ');
+    return `No API key for ${providerName(req)} found. You have keys for: ${list}. Add one, or assign this app to one of those providers.`;
   }
   return `No API keys in your wallet. Add a key for any provider to get started.`;
+}
+
+/** A provider's display name ("Ollama (local)"), or its id when unknown. */
+function providerName(providerId: string): string {
+  return Object.prototype.hasOwnProperty.call(PROVIDERS, providerId) ? PROVIDERS[providerId].name : providerId;
 }

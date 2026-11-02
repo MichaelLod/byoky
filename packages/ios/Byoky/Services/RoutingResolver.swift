@@ -314,14 +314,20 @@ struct RoutingResolver {
             let modelMissing = group?.model?.nilIfEmpty == nil && engine.autoRouteModel(for: groupBinding) == nil
             if modelMissing, userCredentialProviderIds.contains(groupBinding),
                engine.shouldTranslate(srcProviderId: req, dstProviderId: groupBinding) {
-                return "This app's group routes it to \(groupBinding), which needs a model to translate \(req) requests. Set a model on the group."
+                return "This app's group routes it to \(providerName(groupBinding)), which needs a model to translate \(providerName(req)) requests. Set a model on the group."
             }
-            return "No \(groupBinding) API key found. Add a \(groupBinding) key to your wallet, or assign this app to a provider you already have a key for."
+            return "No API key for \(providerName(groupBinding)) found. Add one to your wallet, or assign this app to a provider you already have a key for."
         }
         if !userCredentialProviderIds.isEmpty {
-            return "No \(req) API key found. Keys: \(userCredentialProviderIds.joined(separator: ", ")). Add a \(req) key, or assign this app to one of those providers."
+            let list = userCredentialProviderIds.map(providerName).joined(separator: ", ")
+            return "No API key for \(providerName(req)) found. You have keys for: \(list). Add one, or assign this app to one of those providers."
         }
         return "No API keys in your wallet. Add a key for any provider to get started."
+    }
+
+    /// A provider's display name ("Ollama (local)"), or its id when unknown.
+    private static func providerName(_ providerId: String) -> String {
+        Provider.find(providerId)?.name ?? providerId
     }
 
     /// Best-effort `model` extraction from a JSON request body. Returns nil
