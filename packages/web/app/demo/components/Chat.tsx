@@ -272,6 +272,11 @@ export function Chat({ session, initialProvider }: Props) {
   });
   const [attachedImage, setAttachedImage] = useState<{ file: File; preview: string } | null>(null);
   const [showCode, setShowCode] = useState(true);
+  // On a phone the open code panel takes most of the screen, so it starts
+  // collapsed there. Decided after mount, so the server render matches.
+  useEffect(() => {
+    if (window.matchMedia?.('(max-width: 640px)').matches) setShowCode(false);
+  }, []);
   const [lastPrompt, setLastPrompt] = useState('Hello!');
   // Model lists fetched live via session.listModels(). Falls back to the
   // hardcoded `providers[id].models` when a provider has no entry here yet
@@ -306,8 +311,10 @@ export function Chat({ session, initialProvider }: Props) {
   );
 
   useEffect(() => {
+    // Follow the conversation; the empty state (taller than the list on a
+    // phone) stays at its top.
     const el = chatMessagesRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (el && messages.length > 0) el.scrollTop = el.scrollHeight;
   }, [messages]);
 
   useEffect(() => {
