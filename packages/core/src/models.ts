@@ -49,7 +49,8 @@ export interface ModelCapabilities {
   parallelToolCalls: boolean;
   /** Image inputs. */
   vision: boolean;
-  /** JSON-schema-constrained outputs (OpenAI `response_format: json_schema`). */
+  /** JSON-schema-constrained outputs (OpenAI `response_format: json_schema`,
+   *  Gemini `responseSchema`, Claude `output_config.format`). */
   structuredOutput: boolean;
   /** Accepts a top-level system prompt. */
   systemPrompt: boolean;

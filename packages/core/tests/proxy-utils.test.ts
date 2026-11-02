@@ -826,6 +826,17 @@ describe('detectRequestCapabilities', () => {
     })).structuredOutput).toBe(false);
   });
 
+  it('flags structuredOutput in the Gemini, Cohere and Claude dialects too', () => {
+    const flagged = (body: unknown) => detectRequestCapabilities(JSON.stringify(body)).structuredOutput;
+    expect(flagged({ generationConfig: { responseMimeType: 'application/json', responseSchema: { type: 'OBJECT' } } })).toBe(true);
+    expect(flagged({ generationConfig: { responseMimeType: 'application/json', responseJsonSchema: { type: 'object' } } })).toBe(true);
+    expect(flagged({ generation_config: { response_mime_type: 'application/json', response_schema: { type: 'OBJECT' } } })).toBe(true);
+    expect(flagged({ response_format: { type: 'json_object', json_schema: { type: 'object' } } })).toBe(true);
+    expect(flagged({ output_config: { format: { type: 'json_schema', schema: { type: 'object' } } } })).toBe(true);
+    expect(flagged({ generationConfig: { responseMimeType: 'application/json' } })).toBe(false);
+    expect(flagged({ output_config: { effort: 'low' } })).toBe(false);
+  });
+
   it('flags reasoning when the body has a thinking field', () => {
     expect(detectRequestCapabilities(JSON.stringify({ thinking: { type: 'enabled' } })).reasoning).toBe(true);
   });

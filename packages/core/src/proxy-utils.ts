@@ -371,8 +371,21 @@ export function detectRequestCapabilities(body?: string): CapabilitySet {
   }
 
   // OpenAI structured output: response_format with json_schema (not just json_object).
-  const rf = parsed.response_format as { type?: string } | undefined;
+  const rf = parsed.response_format as { type?: string; json_schema?: unknown } | undefined;
   if (rf && typeof rf === 'object' && rf.type === 'json_schema') {
+    out.structuredOutput = true;
+  }
+  // The same constraint in the other dialects: Cohere's json_schema (inside
+  // json_object), Gemini's responseSchema/responseJsonSchema, Claude's
+  // output_config.format.
+  const gc = (parsed.generationConfig ?? parsed.generation_config) as Record<string, unknown> | undefined;
+  const format = (parsed.output_config as { format?: { type?: unknown } } | undefined)?.format;
+  if (
+    (rf && typeof rf === 'object' && rf.type === 'json_object' && rf.json_schema != null) ||
+    (gc && typeof gc === 'object' &&
+      (gc.responseSchema ?? gc.response_schema ?? gc.responseJsonSchema ?? gc.response_json_schema) != null) ||
+    (format && typeof format === 'object' && format.type === 'json_schema')
+  ) {
     out.structuredOutput = true;
   }
 

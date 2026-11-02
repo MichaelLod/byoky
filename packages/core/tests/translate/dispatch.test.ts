@@ -832,3 +832,98 @@ describe('cross-family dispatch — Gemini OpenAPI schemas (Type.OBJECT) reach t
     expect(rf.response_format.json_schema).toEqual({ type: 'object', properties: { n: { type: 'string' } } });
   });
 });
+
+describe('cross-family dispatch — structured outputs reach Claude as output_config.format', () => {
+  const toClaude = (src: ModelFamily, body: unknown) =>
+    JSON.parse(translateRequest({ ...ctx(src, 'anthropic'), dstModel: 'claude-opus-5-5' }, JSON.stringify(body)));
+  const expected = {
+    type: 'json_schema',
+    schema: {
+      type: 'object',
+      properties: { name: { type: 'string' }, n: { anyOf: [{ type: 'integer' }, { type: 'null' }] } },
+      additionalProperties: false,
+      required: ['name'],
+    },
+  };
+
+  it('an OpenAI strict json_schema app (zodResponseFormat) with only a Claude key', () => {
+    const out = toClaude('openai', {
+      model: 'gpt-5.5',
+      messages: [{ role: 'user', content: 'Extract' }],
+      response_format: {
+        type: 'json_schema',
+        json_schema: {
+          name: 'contact',
+          strict: true,
+          schema: {
+            type: 'object',
+            properties: { name: { type: 'string' }, n: { anyOf: [{ type: 'integer' }, { type: 'null' }] } },
+            required: ['name'],
+            additionalProperties: false,
+          },
+        },
+      },
+    });
+    expect(out.output_config).toEqual({ format: expected });
+    expect(out.system).toBeUndefined();
+  });
+
+  it('a Gemini responseSchema built with Type.OBJECT', () => {
+    const out = toClaude('gemini', {
+      contents: [{ role: 'user', parts: [{ text: 'Extract' }] }],
+      generationConfig: {
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: 'OBJECT',
+          properties: { name: { type: 'STRING' }, n: { type: 'INTEGER', nullable: true } },
+          required: ['name'],
+          propertyOrdering: ['name', 'n'],
+        },
+      },
+    });
+    expect(out.output_config).toEqual({ format: expected });
+  });
+
+  it('a Cohere json_schema', () => {
+    const out = toClaude('cohere', {
+      model: 'command-a-03-2025',
+      messages: [{ role: 'user', content: 'Extract' }],
+      response_format: {
+        type: 'json_object',
+        json_schema: {
+          type: 'object',
+          properties: { name: { type: 'string' }, n: { anyOf: [{ type: 'integer' }, { type: 'null' }] } },
+          required: ['name'],
+        },
+      },
+    });
+    expect(out.output_config).toEqual({ format: expected });
+  });
+
+  it('a Gemini app refused by a model without structured outputs is not told about OpenAI', () => {
+    expect(() =>
+      translateRequest(
+        { ...ctx('gemini', 'anthropic'), dstModel: 'claude-3-5-haiku-20241022' },
+        JSON.stringify({
+          contents: [{ parts: [{ text: 'x' }] }],
+          generationConfig: { responseMimeType: 'application/json', responseSchema: { type: 'OBJECT', properties: { a: { type: 'STRING' } } } },
+        }),
+      ),
+    ).toThrow(/^(?!.*OpenAI).*structured outputs/);
+  });
+
+  it('an Anthropic app\'s output_config.format reaches OpenAI and Gemini', () => {
+    const schema = { type: 'object', properties: { a: { type: 'string' } }, required: ['a'], additionalProperties: false };
+    const body = JSON.stringify({
+      model: 'claude-opus-5-5',
+      max_tokens: 256,
+      messages: [{ role: 'user', content: 'x' }],
+      output_config: { effort: 'low', format: { type: 'json_schema', schema } },
+    });
+    const openai = JSON.parse(translateRequest(ctx('anthropic', 'openai'), body));
+    expect(openai.response_format).toEqual({ type: 'json_schema', json_schema: { name: 'response', schema } });
+    const gemini = JSON.parse(translateRequest(ctx('anthropic', 'gemini'), body));
+    expect(gemini.generationConfig.responseJsonSchema).toEqual(schema);
+    expect(gemini.generationConfig.responseMimeType).toBe('application/json');
+  });
+});

@@ -159,13 +159,15 @@ describe('anthropicAdapter.serializeRequest', () => {
     expect(() => anthropicAdapter.serializeRequest(ctx(), ir)).toThrow(/multiple completions/);
   });
 
-  it('refuses json_schema response format', () => {
+  it('an empty json_schema (any JSON) becomes the system hint', () => {
     const ir: IRRequest = {
       system: [],
       messages: [{ role: 'user', content: [{ type: 'text', text: 'x' }] }],
       responseFormat: { type: 'json_schema', schema: {} },
     };
-    expect(() => anthropicAdapter.serializeRequest(ctx(), ir)).toThrow(/json_schema/);
+    const out = JSON.parse(anthropicAdapter.serializeRequest(ctx(), ir)) as Record<string, unknown>;
+    expect(out).not.toHaveProperty('output_config');
+    expect(out.system).toContain('JSON');
   });
 
   it('shims plain json into a system hint', () => {
@@ -549,5 +551,122 @@ describe('anthropicAdapter.serializeRequest — forced tool choice per model', (
     expect(named.tool_choice).toEqual({ type: 'tool', name: 'get_weather' });
     expect(named).not.toHaveProperty('system');
     expect(serialize(model, { tools, toolChoice: { type: 'any' } }).tool_choice).toEqual({ type: 'any' });
+  });
+});
+
+describe('anthropicAdapter — structured outputs (output_config.format)', () => {
+  function serialize(schema: unknown, dstModel = 'claude-sonnet-4-6'): Record<string, unknown> {
+    const ir: IRRequest = {
+      system: [],
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'x' }] }],
+      responseFormat: { type: 'json_schema', schema },
+    };
+    return JSON.parse(anthropicAdapter.serializeRequest(ctx({ dstModel }), ir)) as Record<string, unknown>;
+  }
+
+  it('sends a json_schema as output_config.format, fitted to what Claude takes', () => {
+    const out = serialize({
+      $schema: 'http://json-schema.org/draft-07/schema#',
+      type: 'object',
+      properties: {
+        name: { type: 'string', minLength: 1, maxLength: 80, description: 'Full name' },
+        email: { type: 'string', format: 'email' },
+        age: { type: ['integer', 'null'], minimum: 0 },
+        tags: { type: 'array', items: { type: 'string', pattern: '^[a-z]+$' }, minItems: 1, maxItems: 5 },
+        kind: { oneOf: [{ type: 'string', enum: ['a', 'b'] }, { type: 'object', properties: { x: { type: 'number' } } }] },
+      },
+      required: ['name', 'email'],
+    });
+    expect(out.output_config).toEqual({
+      format: {
+        type: 'json_schema',
+        schema: {
+          type: 'object',
+          properties: {
+            name: { type: 'string', description: 'Full name\n\n{minLength: 1, maxLength: 80}' },
+            email: { type: 'string', format: 'email' },
+            age: { type: ['integer', 'null'], description: '{minimum: 0}' },
+            tags: {
+              type: 'array',
+              items: { type: 'string', description: '{pattern: "^[a-z]+$"}' },
+              minItems: 1,
+              description: '{maxItems: 5}',
+            },
+            kind: {
+              anyOf: [
+                { type: 'string', enum: ['a', 'b'] },
+                { type: 'object', properties: { x: { type: 'number' } }, additionalProperties: false },
+              ],
+            },
+          },
+          additionalProperties: false,
+          required: ['name', 'email'],
+        },
+      },
+    });
+    expect(out.system).toBeUndefined();
+  });
+
+  it('keeps $defs and acyclic $refs', () => {
+    const out = serialize({
+      type: 'object',
+      properties: { a: { $ref: '#/$defs/Point' }, b: { $ref: '#/$defs/Point' } },
+      $defs: { Point: { type: 'object', properties: { x: { type: 'number' } }, required: ['x'] } },
+    });
+    expect((out.output_config as { format: { schema: unknown } }).format.schema).toEqual({
+      $defs: { Point: { type: 'object', properties: { x: { type: 'number' } }, additionalProperties: false, required: ['x'] } },
+      type: 'object',
+      properties: { a: { $ref: '#/$defs/Point' }, b: { $ref: '#/$defs/Point' } },
+      additionalProperties: false,
+    });
+  });
+
+  it('refuses what Claude cannot express, without naming another provider', () => {
+    const recursive = {
+      type: 'object',
+      properties: { root: { $ref: '#/$defs/Node' } },
+      $defs: { Node: { type: 'object', properties: { children: { type: 'array', items: { $ref: '#/$defs/Node' } } } } },
+    };
+    expect(() => serialize(recursive)).toThrow(/recursive/);
+    expect(() => serialize({ type: 'object', properties: { self: { $ref: '#' } } })).toThrow(/recursive/);
+    expect(() => serialize({ type: 'object', properties: { a: { $ref: 'https://x.test/s.json' } } })).toThrow(/another document/);
+    expect(() => serialize({ type: 'object', additionalProperties: { type: 'string' } })).toThrow(/any property names/);
+    expect(() => serialize({ type: 'object', properties: { any: {} } })).toThrow(/no type/);
+    for (const schema of [recursive, { type: 'object', properties: { any: {} } }]) {
+      try {
+        serialize(schema);
+      } catch (err) {
+        expect((err as { code?: string }).code).toBe('UNSUPPORTED_FEATURE');
+        expect(String(err)).not.toMatch(/OpenAI/);
+      }
+    }
+  });
+
+  it('refuses a schema for a model without structured outputs, in words that fit every dialect', () => {
+    expect(() => serialize({ type: 'object', properties: { a: { type: 'string' } } }, 'claude-3-5-haiku-20241022'))
+      .toThrow(/^(?!.*OpenAI).*claude-3-5-haiku-20241022 can't produce/);
+  });
+
+  it('a bare {type: object} asks for any JSON object: the system hint', () => {
+    const out = serialize({ type: 'object' });
+    expect(out).not.toHaveProperty('output_config');
+    expect(out.system).toContain('JSON');
+  });
+
+  it('parses output_config.format (and the older output_format) into the IR', () => {
+    const schema = { type: 'object', properties: { a: { type: 'string' } }, required: ['a'], additionalProperties: false };
+    const ir = anthropicAdapter.parseRequest(
+      JSON.stringify({
+        model: 'claude-opus-5-5',
+        max_tokens: 100,
+        messages: [{ role: 'user', content: 'x' }],
+        output_config: { effort: 'low', format: { type: 'json_schema', schema } },
+      }),
+    );
+    expect(ir.responseFormat).toEqual({ type: 'json_schema', schema });
+    const old = anthropicAdapter.parseRequest(
+      JSON.stringify({ max_tokens: 100, messages: [{ role: 'user', content: 'x' }], output_format: { type: 'json_schema', schema } }),
+    );
+    expect(old.responseFormat).toEqual({ type: 'json_schema', schema });
   });
 });
