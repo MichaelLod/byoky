@@ -205,6 +205,29 @@ final class RoutingResolverTests: XCTestCase {
         )?.credential.id, claude.id)
     }
 
+    // MARK: - Requests that name no model are routed too (F041)
+
+    /// A GET or a multipart upload names no model. The group still routes
+    /// it (the proxy then refuses it as not a chat request), as core does;
+    /// it doesn't go out on the key the group routes this app away from.
+    func testARequestWithoutAModelIsRoutedByItsGroup() throws {
+        let claude = credential("anthropic", "Claude")
+        let openai = credential("openai", "OpenAI")
+        let routed = try XCTUnwrap(RoutingResolver.resolve(
+            requestedProviderId: "openai", requestedModel: nil,
+            group: group("anthropic", model: "claude-sonnet-4-6"), credentials: [claude, openai]
+        ))
+        XCTAssertEqual(routed.credential.id, claude.id)
+        XCTAssertEqual(routed.translation?.dstProviderId, "anthropic")
+        XCTAssertEqual(routed.translation?.srcModel, "")
+        // Auto-routing doesn't depend on the model either.
+        let auto = try XCTUnwrap(RoutingResolver.resolve(
+            requestedProviderId: "anthropic", requestedModel: nil, group: nil, credentials: [openai]
+        ))
+        XCTAssertEqual(auto.credential.id, openai.id)
+        XCTAssertEqual(auto.translation?.dstModel, "gpt-5.5")
+    }
+
     // MARK: - Routing models from core (F015, F099, F100)
 
     func testAutoRoutingUsesCoresModel() throws {

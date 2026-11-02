@@ -141,6 +141,26 @@ class RoutingResolverTest {
         assertEquals("k1", RoutingResolver.resolveDirect("anthropic", Group.makeDefault(), listOf(key1))?.credential?.id)
     }
 
+    // ── Requests that name no model are routed too (F041) ────────────────
+
+    /**
+     * A GET or a multipart upload names no model. The group still routes it
+     * (ProxyService then refuses it as not a chat request), as core does; it
+     * doesn't go out on the key the group routes this app away from.
+     */
+    @Test
+    fun aRequestWithoutAModelIsRoutedByItsGroup() {
+        val toClaude = Group(id = "g", name = "Claude", providerId = "anthropic", model = "claude-sonnet-4-6")
+        val routed = RoutingResolver.resolve("openai", null, toClaude, listOf(key1, openai), families)!!
+        assertEquals("k1", routed.credential.id)
+        assertEquals("anthropic", routed.translation?.dstProviderId)
+        assertEquals("", routed.translation?.srcModel)
+        // Auto-routing doesn't depend on the model either.
+        val auto = RoutingResolver.resolve("anthropic", null, null, listOf(openai), families)!!
+        assertEquals("o1", auto.credential.id)
+        assertEquals("gpt-5.5", auto.translation?.dstModel)
+    }
+
     // ── Model-less cross-family groups (F099) ────────────────────────────
 
     @Test

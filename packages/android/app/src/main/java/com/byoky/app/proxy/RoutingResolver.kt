@@ -123,16 +123,12 @@ object RoutingResolver {
 
     /**
      * Whether a request for [providerId] from an app in [group] can be
-     * served at all, and with which key: [resolve] with any model. A connect
-     * request names no model, while the proxy routes every request that
-     * carries one, so availability must not depend on it. Used for the
-     * connect response's per-provider `available` flags.
+     * served at all, and with which key. A connect request names no model,
+     * and routing doesn't depend on one. Used for the connect response's
+     * per-provider `available` flags.
      */
     fun canServe(providerId: String, group: Group?, credentials: List<Credential>, engine: Families): Credential? =
-        resolve(providerId, ANY_MODEL, group, credentials, engine)?.credential
-
-    /** Stand-in source model for [canServe]; never sent anywhere. */
-    private const val ANY_MODEL = "*"
+        resolve(providerId, null, group, credentials, engine)?.credential
 
     /** User-run local servers (core `isLocalServerProvider`). */
     private val LOCAL_SERVER_PROVIDERS = setOf("ollama", "lm_studio")
@@ -150,7 +146,9 @@ object RoutingResolver {
      * The destination model is core's `autoRouteModelFor` for the
      * candidate's provider; providers it names none for (OpenAI-compatible
      * hosts other than OpenAI and OpenRouter, Azure, Ollama, LM Studio) are
-     * skipped. `srcModel` is taken from the inbound request body.
+     * skipped. `srcModel` is the inbound request's model, empty when it
+     * names none: like core, routing doesn't depend on it (`forward`
+     * refuses a request that isn't chat).
      *
      * A request meant for a local server (Ollama, LM Studio) is never
      * auto-routed: the app asked for a model on the user's own machine, so
@@ -167,7 +165,6 @@ object RoutingResolver {
         // guard for callers invoking this method in isolation.
         if (credentials.any { it.providerId == requestedProviderId }) return null
         if (requestedProviderId in LOCAL_SERVER_PROVIDERS) return null
-        if (requestedModel.isNullOrEmpty()) return null
 
         for (cred in autoCandidateOrder(credentials)) {
             if (!engine.shouldTranslate(requestedProviderId, cred.providerId)) continue
@@ -177,7 +174,7 @@ object RoutingResolver {
                 translation = RoutingTranslation(
                     srcProviderId = requestedProviderId,
                     dstProviderId = cred.providerId,
-                    srcModel = requestedModel,
+                    srcModel = requestedModel.orEmpty(),
                     dstModel = dstModel,
                 )
             )
@@ -214,8 +211,13 @@ object RoutingResolver {
 
     /**
      * Cross-family resolution. Returns null if any precondition fails.
-     * Mirrors `resolveCrossFamilyRoute` exactly: the destination model is
-     * the group's, or else core's routing default for the group's provider.
+     * Mirrors `resolveCrossFamilyRoute`: the destination model is the
+     * group's, or else core's routing default for the group's provider.
+     * The request's own model doesn't matter: a request without one (a GET,
+     * a multipart upload) is still routed by the group, and `forward` then
+     * refuses it as not a chat request rather than sending it to the
+     * provider the group routes this app away from. `srcModel` is empty
+     * then.
      */
     private fun tryCrossFamily(
         requestedProviderId: String,
@@ -229,7 +231,6 @@ object RoutingResolver {
         val dstModel = group.model?.takeIf { it.isNotEmpty() }
             ?: engine.autoRouteModel(group.providerId)?.takeIf { it.isNotEmpty() }
             ?: return null
-        if (requestedModel.isNullOrEmpty()) return null
 
         // Family compatibility check via the JS bridge — single source of truth.
         if (!engine.shouldTranslate(requestedProviderId, group.providerId)) return null
@@ -250,7 +251,7 @@ object RoutingResolver {
             translation = RoutingTranslation(
                 srcProviderId = requestedProviderId,
                 dstProviderId = group.providerId,
-                srcModel = requestedModel,
+                srcModel = requestedModel.orEmpty(),
                 dstModel = dstModel,
             )
         )

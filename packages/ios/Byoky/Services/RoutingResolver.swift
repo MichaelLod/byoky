@@ -108,26 +108,27 @@ struct RoutingResolver {
     }
 
     /// Whether a request for `providerId` from an app in `group` can be
-    /// served at all, and with which key: `resolve` with any model. A connect
-    /// request names no model, while the proxy routes every request that
-    /// carries one, so availability must not depend on it. Used for the
-    /// connect response's per-provider `available` flags.
+    /// served at all, and with which key. A connect request names no model,
+    /// and routing doesn't depend on one. Used for the connect response's
+    /// per-provider `available` flags.
     static func canServe(
         providerId: String,
         group: Group?,
         credentials: [Credential],
         engine: TranslationEngine = .shared
     ) -> Credential? {
-        resolve(requestedProviderId: providerId, requestedModel: anyModel, group: group,
+        resolve(requestedProviderId: providerId, requestedModel: nil, group: group,
                 credentials: credentials, engine: engine)?.credential
     }
 
-    /// Stand-in source model for `canServe`; never sent anywhere.
-    private static let anyModel = "*"
-
     /// Cross-family resolution. Returns nil if any precondition fails.
-    /// Mirrors `resolveCrossFamilyRoute` exactly: the destination model is
-    /// the group's, or else core's routing default for the group's provider.
+    /// Mirrors `resolveCrossFamilyRoute`: the destination model is the
+    /// group's, or else core's routing default for the group's provider.
+    /// The request's own model doesn't matter: a request without one (a
+    /// GET, a multipart upload) is still routed by the group, and `route`
+    /// then refuses it as not a chat request rather than sending it to the
+    /// provider the group routes this app away from. `srcModel` is empty
+    /// then.
     private static func tryCrossFamily(
         requestedProviderId: String,
         requestedModel: String?,
@@ -138,7 +139,6 @@ struct RoutingResolver {
         guard let group else { return nil }
         guard group.providerId != requestedProviderId else { return nil }
         guard let dstModel = group.model?.nilIfEmpty ?? engine.autoRouteModel(for: group.providerId) else { return nil }
-        guard let srcModel = requestedModel, !srcModel.isEmpty else { return nil }
 
         // Family compatibility check via the JS bridge — single source of truth.
         guard engine.shouldTranslate(srcProviderId: requestedProviderId, dstProviderId: group.providerId) else {
@@ -163,7 +163,7 @@ struct RoutingResolver {
             translation: RoutingTranslation(
                 srcProviderId: requestedProviderId,
                 dstProviderId: group.providerId,
-                srcModel: srcModel,
+                srcModel: requestedModel ?? "",
                 dstModel: dstModel
             )
         )
@@ -228,8 +228,9 @@ struct RoutingResolver {
     /// The destination model is core's `autoRouteModelFor` for the
     /// candidate's provider; providers it names none for (OpenAI-compatible
     /// hosts other than OpenAI and OpenRouter, Azure, Ollama, LM Studio) are
-    /// skipped. The `srcModel` field of RoutingTranslation is populated from
-    /// the inbound request body when available.
+    /// skipped. The `srcModel` field of RoutingTranslation is the inbound
+    /// request's model, empty when it names none: like core, routing doesn't
+    /// depend on it (`route` refuses a request that isn't chat).
     ///
     /// A request meant for a local server (Ollama, LM Studio) is never
     /// auto-routed: the app asked for a model on the user's own machine, so
@@ -259,14 +260,6 @@ struct RoutingResolver {
             return min(a.createdAt, now) > min(b.createdAt, now)
         }
 
-        guard let srcModel = requestedModel, !srcModel.isEmpty else {
-            // Translation needs a source model to build the outbound body.
-            // The extension extracts it from the request body earlier in the
-            // proxy pipeline; on mobile, missing srcModel → skip auto-route
-            // and surface PROVIDER_UNAVAILABLE so the user notices.
-            return nil
-        }
-
         for cred in sorted {
             guard engine.shouldTranslate(srcProviderId: requestedProviderId, dstProviderId: cred.providerId) else {
                 continue
@@ -277,7 +270,7 @@ struct RoutingResolver {
                 translation: RoutingTranslation(
                     srcProviderId: requestedProviderId,
                     dstProviderId: cred.providerId,
-                    srcModel: srcModel,
+                    srcModel: requestedModel ?? "",
                     dstModel: dstModel
                 )
             )

@@ -105,6 +105,8 @@ interface MobileBridge {
    * `isStreaming` controls how the response/stream paths synthesize ids.
    * `requestId` is byoky's per-request id used by adapters that need to
    * generate destination-dialect ids (e.g. anthropic message ids).
+   * An empty `srcModel` means the request named none: responses then carry
+   * the destination's model, as in the extension.
    */
   buildTranslationContext(
     srcProviderId: string,
@@ -296,7 +298,7 @@ const bridge: MobileBridge = {
     const ctx: TranslationContext = {
       srcFamily,
       dstFamily,
-      srcModel,
+      srcModel: srcModel || undefined,
       dstModel,
       dstProviderId,
       isStreaming,

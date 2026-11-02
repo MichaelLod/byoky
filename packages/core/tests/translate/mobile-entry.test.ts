@@ -41,6 +41,24 @@ describe('mobile bridge buildTranslationContext', () => {
     ) as Record<string, unknown>;
     expect(toGroq.max_tokens).toBe(256);
   });
+
+  it('treats an empty source model as none, so the reply names the destination\'s model', () => {
+    // The native resolvers route a request that names no model (F041) and
+    // pass '' for it; the extension passes undefined.
+    const ctxJson = bridge.buildTranslationContext('openai', 'anthropic', '', 'claude-sonnet-4-6', false, 'r1');
+    expect((JSON.parse(ctxJson) as Record<string, unknown>).srcModel).toBeUndefined();
+    const reply = JSON.parse(
+      (bridge as unknown as { translateResponse(ctxJson: string, body: string): string }).translateResponse(
+        ctxJson,
+        JSON.stringify({
+          id: 'msg_1', type: 'message', role: 'assistant', model: 'claude-sonnet-4-6',
+          content: [{ type: 'text', text: 'hi' }], stop_reason: 'end_turn',
+          usage: { input_tokens: 1, output_tokens: 1 },
+        }),
+      ),
+    ) as Record<string, unknown>;
+    expect(reply.model).toBe('claude-sonnet-4-6');
+  });
 });
 
 describe('mobile bridge translateErrorResponse', () => {

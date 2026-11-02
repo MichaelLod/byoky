@@ -413,6 +413,37 @@ final class NativeBridgeE2ETests: XCTestCase {
         XCTAssertLessThanOrEqual(first.utf8.count, limit + 65_536, "held no more than the limit plus one read")
     }
 
+    /// A request that names no model (a model list, a multipart upload)
+    /// from an app its group routes to another provider is refused, as by
+    /// the extension, and never sent on the key the group routes it away
+    /// from (F041).
+    @MainActor
+    func testGroupRoutedRequestsWithoutAModelAreRefused() async throws {
+        let h = try await BridgeHarness.make(self, provider: "anthropic")
+        try h.wallet.addCredential(providerId: "openai", label: "OpenAI", apiKey: "sk-openai-e2e-0123456789")
+        StubUpstream.script(.init(chunks: [Data("{}".utf8)]))
+        let key = try await h.connect()
+
+        let list = try await h.send([
+            "type": "BYOKY_PROXY_REQUEST", "requestId": "models-1", "sessionKey": key,
+            "providerId": "openai", "url": "https://api.openai.com/v1/models", "method": "GET", "headers": [String: String](),
+        ])
+        let form = #"[{"name":"model","value":"whisper-1","type":"text"},{"name":"file","value":"AAEC","type":"file","filename":"a.mp3","contentType":"audio/mpeg"}]"#
+        let upload = try await h.send([
+            "type": "BYOKY_PROXY_REQUEST", "requestId": "audio-1", "sessionKey": key,
+            "providerId": "openai", "url": "https://api.openai.com/v1/audio/transcriptions", "method": "POST",
+            "headers": [String: String](), "body": form, "bodyEncoding": "formdata",
+        ])
+
+        for replies in [list, upload] {
+            let last = try XCTUnwrap(replies.last)
+            XCTAssertEqual(last.type, "BYOKY_PROXY_RESPONSE_ERROR")
+            XCTAssertEqual(last["status"] as? Int, 400)
+            XCTAssertEqual((last["error"] as? [String: Any])?["code"] as? String, "ROUTING_UNSUPPORTED")
+        }
+        XCTAssertTrue(StubUpstream.requests.isEmpty)
+    }
+
     /// The error-body holder: within the limit it is translated, past it
     /// passed on as sent from the moment it crosses (R2-05).
     func testTranslatedErrorBodyHoldsOnlyUpToItsLimit() {
