@@ -19,8 +19,9 @@ import com.byoky.app.ui.theme.*
 
 /**
  * One-time notice after this phone set aside a wallet it couldn't read (one
- * copied from another device, whose keystore key stayed behind) and started
- * fresh. Renders nothing otherwise. Like [RetiredFeaturesNotice] it shows on
+ * copied from another device, whose keystore key stayed behind, or one the
+ * user gave up on when the Keystore wouldn't open it) and started fresh.
+ * Renders nothing otherwise. Like [RetiredFeaturesNotice] it shows on
  * one launch only: marked seen as soon as it appears, it stays up for that
  * session until dismissed.
  */
@@ -51,7 +52,7 @@ fun UnreadableVaultNotice(
             )
             Spacer(Modifier.height(4.dp))
             Text(
-                "This phone couldn't read a wallet copied from another device, so Byoky started fresh. Restore your keys from a .byoky backup with Import backup in Settings.",
+                "This phone couldn't read its saved wallet (one copied from another device, or one its secure storage won't open), so Byoky started fresh. Restore your keys from a .byoky backup with Import backup in Settings.",
                 fontSize = 13.sp,
                 lineHeight = 18.sp,
                 color = Fog,
