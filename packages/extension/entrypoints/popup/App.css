@@ -1302,7 +1302,7 @@ html.popup .app {
   margin-bottom: 4px;
 }
 
-.allowance-field input[type="number"] {
+.allowance-field input {
   width: 100%;
   padding: 6px 8px;
   background: var(--bg-input);
@@ -1314,12 +1314,22 @@ html.popup .app {
   outline: none;
 }
 
-.allowance-field input[type="number"]:focus {
+.allowance-field input:focus {
   border-color: var(--violet);
   box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
-.allowance-field input[type="number"]::placeholder {
+.allowance-field input::placeholder {
+  color: var(--text-muted);
+}
+
+.allowance-field input[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+.allowance-hint {
+  margin: 0 0 8px;
+  font-size: 11px;
   color: var(--text-muted);
 }
 
@@ -1346,7 +1356,7 @@ html.popup .app {
   min-width: 70px;
 }
 
-.allowance-field-inline input[type="number"] {
+.allowance-field-inline input {
   flex: 1;
 }
 

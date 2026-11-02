@@ -142,6 +142,35 @@ struct TokenAllowance: Codable {
     var providerLimits: [String: Int]?
 }
 
+extension TokenAllowance {
+    /// A token limit field as it keeps it: digits only, so a separator, sign
+    /// or space pasted or typed on a hardware keyboard ("100,000") is dropped
+    /// as it arrives and the field shows what will be saved.
+    static func limitDigits(_ field: String) -> String {
+        field.filter { $0.isASCII && $0.isNumber }
+    }
+
+    /// What a token limit field holds: nil when it has no digits (no limit),
+    /// otherwise the number, 0 blocking the app. Too long for an Int is
+    /// capped at Int.max, never dropped as no limit.
+    static func limit(fromField field: String) -> Int? {
+        let digits = limitDigits(field)
+        guard !digits.isEmpty else { return nil }
+        return Int(digits) ?? Int.max
+    }
+
+    /// The allowance a limit form's fields describe, or nil when every field
+    /// is empty: then there is nothing to limit, and no record should say
+    /// otherwise.
+    static func fromFields(origin: String, total: String, perProvider: [String: String]) -> TokenAllowance? {
+        var allowance = TokenAllowance(origin: origin)
+        allowance.totalLimit = limit(fromField: total)
+        let limits = perProvider.compactMapValues { limit(fromField: $0) }
+        allowance.providerLimits = limits.isEmpty ? nil : limits
+        return allowance.totalLimit == nil && allowance.providerLimits == nil ? nil : allowance
+    }
+}
+
 struct AllowanceCheck {
     let allowed: Bool
     let reason: String?

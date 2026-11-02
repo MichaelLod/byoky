@@ -337,6 +337,40 @@ fun AppsScreen(wallet: WalletStore) {
 private fun displayHostOf(origin: String): String =
     try { java.net.URL(origin).host ?: origin } catch (_: Exception) { origin }
 
+/**
+ * A token limit field as it keeps it: digits only, so a separator, sign or
+ * space typed on the number pad or pasted ("100,000", "1.000.000") is dropped
+ * as it arrives and the field shows what will be saved.
+ */
+internal fun tokenLimitDigits(input: String): String = input.filter { it in '0'..'9' }
+
+/**
+ * What a token limit field holds: null when it has no digits (no limit),
+ * otherwise the number, 0 blocking the app. TokenAllowance holds an Int, so
+ * a limit past Int.MAX_VALUE is capped there rather than dropped as no limit.
+ */
+internal fun parseTokenLimit(field: String): Int? {
+    val digits = tokenLimitDigits(field)
+    if (digits.isEmpty()) return null
+    val significant = digits.trimStart('0')
+    if (significant.length > 10) return Int.MAX_VALUE
+    return (significant.toLongOrNull() ?: 0L).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+}
+
+/**
+ * The allowance the dialog's fields describe, or null when every field is
+ * empty: then there is nothing to limit, and no record should say otherwise.
+ */
+internal fun allowanceFromFields(origin: String, total: String, perProvider: Map<String, String>): TokenAllowance? {
+    val totalLimit = parseTokenLimit(total)
+    val providerLimits = perProvider
+        .mapNotNull { (id, v) -> parseTokenLimit(v)?.let { id to it } }
+        .toMap()
+        .takeIf { it.isNotEmpty() }
+    if (totalLimit == null && providerLimits == null) return null
+    return TokenAllowance(origin = origin, totalLimit = totalLimit, providerLimits = providerLimits)
+}
+
 /** The Disconnect all prompt's title, or null when no app is left to disconnect. */
 internal fun disconnectAllTitle(sessionCount: Int): String? = when {
     sessionCount <= 0 -> null
@@ -581,7 +615,8 @@ private fun AppSessionCard(
 
             if (allowance?.totalLimit != null) {
                 val limit = allowance.totalLimit!!
-                val progress = (tokensUsed.toFloat() / limit).coerceIn(0f, 1f)
+                // A limit of 0 blocks the app: full, not 0/0.
+                val progress = if (limit <= 0) 1f else (tokensUsed.toFloat() / limit).coerceIn(0f, 1f)
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1079,11 +1114,12 @@ private fun AllowanceDialog(
 
                 RetroTextField(
                     value = totalLimit,
-                    onValueChange = { totalLimit = it },
+                    onValueChange = { totalLimit = tokenLimitDigits(it) },
                     label = "Total token limit",
                     placeholder = "Unlimited",
                     mono = true,
                     modifier = Modifier.fillMaxWidth(),
+                    supportingText = "Empty means no limit; 0 blocks the app.",
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 )
 
@@ -1092,7 +1128,7 @@ private fun AllowanceDialog(
                     providers.forEach { id ->
                         RetroTextField(
                             value = providerLimits[id] ?: "",
-                            onValueChange = { providerLimits = providerLimits + (id to it) },
+                            onValueChange = { providerLimits = providerLimits + (id to tokenLimitDigits(it)) },
                             label = Provider.find(id)?.name ?: id,
                             placeholder = "Unlimited",
                             mono = true,
@@ -1105,12 +1141,12 @@ private fun AllowanceDialog(
         },
         confirmButton = {
             DialogButton("Save", onClick = {
-                val total = totalLimit.toIntOrNull()?.takeIf { it > 0 }
-                val pLimits = providerLimits
-                    .mapValues { (_, v) -> v.toIntOrNull() ?: 0 }
-                    .filterValues { it > 0 }
-                    .takeIf { it.isNotEmpty() }
-                onSave(TokenAllowance(origin = origin, totalLimit = total, providerLimits = pLimits))
+                val edited = allowanceFromFields(origin, totalLimit, providerLimits)
+                when {
+                    edited != null -> onSave(edited)
+                    allowance != null -> onRemove()
+                    else -> onDismiss()
+                }
             })
         },
         dismissButton = {

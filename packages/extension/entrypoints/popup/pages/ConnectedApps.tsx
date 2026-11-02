@@ -16,6 +16,7 @@ import {
   autoRouteModelFor,
 } from '@byoky/core';
 import { describeOrigin } from '../utils/origin';
+import { parseTokenLimit } from '../utils/token-limit';
 
 function timeAgo(timestamp: number): string {
   const seconds = Math.floor((Date.now() - timestamp) / 1000);
@@ -149,8 +150,9 @@ export function ConnectedApps() {
     const usage = getOriginUsage(origin);
     const allowance = tokenAllowances.find((a) => a.origin === origin);
     const isEditing = editingOrigin === origin;
-    const pct = allowance?.totalLimit ? Math.min(100, (usage.total / allowance.totalLimit) * 100) : 0;
     const isOver = allowance?.totalLimit != null && usage.total >= allowance.totalLimit;
+    // A limit of 0 blocks the app: always full.
+    const pct = allowance?.totalLimit == null ? 0 : isOver ? 100 : (usage.total / allowance.totalLimit) * 100;
     return (
       <>
         <div className="allowance-section">
@@ -771,20 +773,46 @@ function AllowanceForm({
   );
   // Each app card has its own form, so its ids must not repeat.
   const uid = useId();
+  // Fields that don't hold a whole number of tokens, by 'total' or provider
+  // id, from the last Save; editing one clears it.
+  const [invalid, setInvalid] = useState<string[]>([]);
+  const errorId = `${uid}-error`;
 
+  function edited(field: string) {
+    if (invalid.includes(field)) setInvalid(invalid.filter((f) => f !== field));
+  }
+
+  // A field that doesn't parse never saves as "no limit": the app would run
+  // uncapped. Empty is no limit, 0 blocks the app.
   function handleSave() {
-    const parsed: TokenAllowance = { origin };
-    const total = parseInt(totalLimit, 10);
-    if (!isNaN(total) && total > 0) parsed.totalLimit = total;
+    const total = parseTokenLimit(totalLimit);
+    const perProvider = Object.entries(providerLimits).map(([id, val]) => [id, parseTokenLimit(val)] as const);
+    const bad = [
+      ...(total === 'invalid' ? ['total'] : []),
+      ...perProvider.filter(([, n]) => n === 'invalid').map(([id]) => id),
+    ];
+    setInvalid(bad);
+    if (bad.length > 0) return;
 
+    const parsed: TokenAllowance = { origin };
+    if (typeof total === 'number') parsed.totalLimit = total;
     const pLimits: Record<string, number> = {};
-    for (const [id, val] of Object.entries(providerLimits)) {
-      const n = parseInt(val, 10);
-      if (!isNaN(n) && n > 0) pLimits[id] = n;
-    }
+    for (const [id, n] of perProvider) if (typeof n === 'number') pLimits[id] = n;
     if (Object.keys(pLimits).length > 0) parsed.providerLimits = pLimits;
 
+    // Nothing left to limit: no record that reads as "Edit limit" but holds none.
+    if (parsed.totalLimit === undefined && !parsed.providerLimits) {
+      if (allowance) onRemove();
+      else onCancel();
+      return;
+    }
     onSave(parsed);
+  }
+
+  /** Marks a field that didn't parse and points it at the message. */
+  function fieldError(field: string) {
+    const bad = invalid.includes(field);
+    return { 'aria-invalid': bad, 'aria-describedby': bad ? errorId : undefined };
   }
 
   return (
@@ -793,11 +821,16 @@ function AllowanceForm({
         <label htmlFor={`${uid}-total`}>Total token limit</label>
         <input
           id={`${uid}-total`}
-          type="number"
+          type="text"
+          inputMode="numeric"
+          autoComplete="off"
           placeholder="Unlimited"
           value={totalLimit}
-          onChange={(e) => setTotalLimit(e.target.value)}
-          min="0"
+          onChange={(e) => {
+            setTotalLimit(e.target.value);
+            edited('total');
+          }}
+          {...fieldError('total')}
         />
       </div>
       {providers.length > 0 && (
@@ -808,17 +841,25 @@ function AllowanceForm({
               <span id={`${uid}-provider-${id}`} className="allowance-provider-name">{PROVIDERS[id]?.name ?? id}</span>
               <input
                 aria-labelledby={`${uid}-provider-${id}`}
-                type="number"
+                type="text"
+                inputMode="numeric"
+                autoComplete="off"
                 placeholder="Unlimited"
                 value={providerLimits[id] ?? ''}
-                onChange={(e) => setProviderLimits({ ...providerLimits, [id]: e.target.value })}
-                min="0"
+                onChange={(e) => {
+                  setProviderLimits({ ...providerLimits, [id]: e.target.value });
+                  edited(id);
+                }}
+                {...fieldError(id)}
               />
             </div>
           ))}
         </fieldset>
       )}
-      {error && <FormError>{error}</FormError>}
+      <p className="allowance-hint">Empty means no limit; 0 blocks the app.</p>
+      {invalid.length > 0
+        ? <FormError id={errorId}>Enter a whole number of tokens, or leave it empty for no limit.</FormError>
+        : error && <FormError>{error}</FormError>}
       <div className="allowance-actions">
         <button className="btn btn-primary btn-sm" onClick={handleSave}>Save</button>
         {allowance && (
