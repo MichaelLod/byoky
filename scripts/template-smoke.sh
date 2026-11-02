@@ -6,6 +6,12 @@
 # @types packages), and without the build rewriting the app's own
 # package.json or tsconfig.json. CI's templates job and release.sh run it.
 #
+# With no lockfile, npm install takes the newest versions the templates'
+# ranges allow, so it runs with --ignore-scripts: an install script is how a
+# freshly published, compromised dependency usually reaches ~/.npmrc and
+# other credentials on the machine. No template needs one (esbuild and sharp
+# ship prebuilt platform packages).
+#
 # Usage: scripts/template-smoke.sh <template>...
 #   e.g. scripts/template-smoke.sh chat multi-provider backend-relay
 set -euo pipefail
@@ -42,7 +48,7 @@ smoke() {
     fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n");
   ') || return 1
   (cd "$app" &&
-    npm install --no-audit --no-fund &&
+    npm install --no-audit --no-fund --ignore-scripts &&
     mkdir -p ../before-"$template" && cp package.json tsconfig.json ../before-"$template"/ &&
     CI=1 npm run build --if-present &&
     CI=1 npm run build:client --if-present &&
