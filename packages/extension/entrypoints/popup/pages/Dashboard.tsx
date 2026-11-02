@@ -11,6 +11,7 @@ import { LimitsHoldNotice } from '../components/LimitsHoldNotice';
 import { ProviderIcon } from '../components/ProviderIcon';
 import { Modal } from '../components/Modal';
 import { describeOrigin } from '../utils/origin';
+import { useFormInUse } from '../hooks/useFormInUse';
 
 function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -139,6 +140,7 @@ function CredentialCard({ cred, usage, shared, onOpenStats, onRemove }: Credenti
   // (Firefox doesn't show dialogs from extension popups).
   const [confirmingRemove, setConfirmingRemove] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  useFormInUse(editing);
 
   useEffect(() => {
     if (editing) {

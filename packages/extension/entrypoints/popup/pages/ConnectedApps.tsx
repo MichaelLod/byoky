@@ -15,6 +15,7 @@ import {
   autoRouteModelFor,
 } from '@byoky/core';
 import { describeOrigin } from '../utils/origin';
+import { useFormInUse } from '../hooks/useFormInUse';
 
 function timeAgo(timestamp: number): string {
   const seconds = Math.floor((Date.now() - timestamp) / 1000);
@@ -579,6 +580,7 @@ function GroupForm({
   onSave: (patch: { name: string; providerId: string; credentialId: string | null; model: string | null }) => void;
   onCancel: () => void;
 }) {
+  useFormInUse();
   const [name, setName] = useState(group?.name ?? '');
   const [providerId, setProviderId] = useState(group?.providerId ?? (credentials[0]?.providerId ?? 'anthropic'));
   // Credential pin. Empty string means "no pin — any credential".
@@ -741,6 +743,7 @@ function AllowanceForm({
   onResetUsage?: () => void;
   onCancel: () => void;
 }) {
+  useFormInUse();
   const [totalLimit, setTotalLimit] = useState(
     allowance?.totalLimit != null ? String(allowance.totalLimit) : '',
   );
