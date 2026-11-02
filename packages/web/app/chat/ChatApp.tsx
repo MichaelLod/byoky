@@ -190,7 +190,7 @@ function ConnectScreen({ onConnect, error }: { onConnect: () => void; error: str
   );
 }
 
-function ChatView({ session, onDisconnect }: { session: ByokySession; onDisconnect: () => void }) {
+export function ChatView({ session, onDisconnect }: { session: ByokySession; onDisconnect: () => void }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
