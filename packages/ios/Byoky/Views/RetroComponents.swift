@@ -199,7 +199,8 @@ struct LogoTile: View {
     }
 }
 
-/// The logo tile and the `BYOKY` wordmark.
+/// The logo tile and the `BYOKY` wordmark. The name never breaks, and stops
+/// growing at the first accessibility text size.
 struct Wordmark: View {
     var body: some View {
         HStack(spacing: 9) {
@@ -209,7 +210,10 @@ struct Wordmark: View {
                 .font(.display(18))
                 .tracking(1.4)
                 .foregroundStyle(Theme.bone)
+                .lineLimit(1)
+                .fixedSize()
         }
+        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Byoky")
     }

@@ -332,4 +332,54 @@ final class ConnectedAppsUITests: XCTestCase {
         alert.buttons["Disconnect"].tap()
         XCTAssertFalse(row.waitForExistence(timeout: 2), "the app is still connected")
     }
+
+    /// A pinned dated model id stays on one line instead of breaking
+    /// mid-token ("claude-" / "haiku-4-5-2025100" / "1").
+    func testAGroupHeaderKeepsItsModelIdOnOneLine() {
+        app.buttons["groups.create"].tap()
+        let name = app.textFields["groupEditor.name"]
+        XCTAssertTrue(name.waitForExistence(timeout: 5))
+        name.tap()
+        name.typeText("Coding assistants for work")
+        let model = app.textFields["groupEditor.model"]
+        model.tap()
+        model.typeText("claude-haiku-4-5-20251001")
+        app.buttons["groupEditor.save"].tap()
+
+        let modelPill = app.staticTexts["claude-haiku-4-5-20251001"]
+        let providerPill = app.staticTexts["Anthropic"]
+        XCTAssertTrue(modelPill.waitForExistence(timeout: 5))
+        XCTAssertTrue(providerPill.exists)
+        // One line each: the pills are the same text style.
+        XCTAssertLessThan(modelPill.frame.height, providerPill.frame.height * 1.5,
+                          "model id wrapped: \(modelPill.frame) vs \(providerPill.frame)")
+        let groupName = app.staticTexts["Coding assistants for work"]
+        XCTAssertTrue(groupName.exists)
+        XCTAssertLessThan(groupName.frame.height, providerPill.frame.height * 2,
+                          "group name wrapped: \(groupName.frame)")
+    }
+}
+
+/// At the largest accessibility text size the welcome header stacks: the
+/// wordmark stays on one line ("BYOKY", not "BYOK" / "Y") and the status
+/// goes under it.
+final class OnboardingDynamicTypeUITests: XCTestCase {
+    func testTheWelcomeHeaderStacksAtTheLargestTextSize() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "-byokyResetOnLaunch",
+            "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL",
+        ]
+        app.launch()
+
+        let wordmark = app.staticTexts["Byoky"].firstMatch
+        let status = app.staticTexts["Local only"]
+        XCTAssertTrue(wordmark.waitForExistence(timeout: 10))
+        XCTAssertTrue(status.exists)
+        XCTAssertGreaterThan(wordmark.frame.width, wordmark.frame.height * 2,
+                             "wordmark broke over lines: \(wordmark.frame)")
+        XCTAssertGreaterThanOrEqual(status.frame.minY, wordmark.frame.maxY,
+                                    "status squeezed beside the wordmark: \(status.frame) vs \(wordmark.frame)")
+    }
 }

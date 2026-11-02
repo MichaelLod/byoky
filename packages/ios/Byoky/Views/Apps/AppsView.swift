@@ -219,30 +219,25 @@ struct AppsView: View {
             }
         } header: {
             HStack(spacing: 6) {
-                Text(group.name)
-                    .uppercaseDisplay()
-                    .font(.mono(12, weight: .medium, relativeTo: .callout))
-                    .tracking(1.4)
-                    .foregroundStyle(Theme.bone)
-                if !group.providerId.isEmpty {
-                    Text(provider?.name ?? group.providerId)
-                        .uppercaseDisplay()
-                        .font(.mono(10, relativeTo: .caption2))
-                        .tracking(0.8)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
-                        .background(Theme.violetSoft)
-                        .foregroundStyle(Theme.lilac)
+                // Name and pills on one line when they fit; otherwise the
+                // pills go under the name, and under each other, rather than
+                // breaking a word or a model id mid-way.
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 6) {
+                        groupName(group)
+                        groupPills(group, provider: provider)
+                    }
+                    VStack(alignment: .leading, spacing: 4) {
+                        groupName(group)
+                        ViewThatFits(in: .horizontal) {
+                            HStack(spacing: 6) { groupPills(group, provider: provider) }
+                            VStack(alignment: .leading, spacing: 4) { groupPills(group, provider: provider) }
+                        }
+                    }
                 }
-                if let model = group.model, !model.isEmpty {
-                    Text(model)
-                        .font(.mono(10, relativeTo: .caption2))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .foregroundStyle(Theme.fog)
-                        .overlay(Rectangle().strokeBorder(Theme.seamStrong, lineWidth: 1))
-                }
-                Spacer()
+                .padding(.vertical, 4)
+                .layoutPriority(1)
+                Spacer(minLength: 0)
                 // The default group stays routing-neutral (ensureDefaultGroup
                 // resets it on unlock), so it has nothing to edit or delete.
                 if !isDefault {
@@ -285,6 +280,44 @@ struct AppsView: View {
             }
         }
         .retroRow()
+    }
+
+    private func groupName(_ group: Group) -> some View {
+        Text(group.name)
+            .uppercaseDisplay()
+            .font(.mono(12, weight: .medium, relativeTo: .callout))
+            .tracking(1.4)
+            .foregroundStyle(Theme.bone)
+            .lineLimit(3)
+    }
+
+    /// The group's provider and pinned model.
+    @ViewBuilder
+    private func groupPills(_ group: Group, provider: Provider?) -> some View {
+        if !group.providerId.isEmpty {
+            Text(provider?.name ?? group.providerId)
+                .uppercaseDisplay()
+                .font(.mono(10, relativeTo: .caption2))
+                .tracking(0.8)
+                .lineLimit(1)
+                .fixedSize()
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(Theme.violetSoft)
+                .foregroundStyle(Theme.lilac)
+                .dynamicTypeSize(...DynamicTypeSize.accessibility2)
+        }
+        if let model = group.model, !model.isEmpty {
+            // VoiceOver reads the whole id even when the middle is cut.
+            Text(model)
+                .font(.mono(10, relativeTo: .caption2))
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .foregroundStyle(Theme.fog)
+                .overlay(Rectangle().strokeBorder(Theme.seamStrong, lineWidth: 1))
+        }
     }
 
     private var emptyState: some View {
@@ -429,7 +462,8 @@ private struct AppSessionRow: View {
 
     private var faviconBadge: some View {
         Text(displayHost.first.map { String($0).uppercased() } ?? "?")
-            .font(.display(17, relativeTo: .headline))
+            // A fixed size: it has to fit its tile.
+            .font(.custom(Theme.FontName.displayBold, fixedSize: 17))
             .foregroundStyle(Theme.lilac)
             .frame(width: 34, height: 34)
             .background(Theme.violetSoft)
