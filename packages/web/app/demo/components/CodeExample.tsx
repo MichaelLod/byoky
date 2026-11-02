@@ -314,9 +314,16 @@ const results = await Promise.all(
       'CLI and desktop apps route API calls through the local Byoky Bridge. API keys never leave the extension; a Claude setup token goes to the local bridge, which makes that call from Node.',
     code: `# Install the bridge
 npm install -g @byoky/bridge
-byoky-bridge install
+byoky-bridge install   # registers the bridge; doesn't start the proxy
+byoky-bridge connect   # approve a session; the extension starts the proxy on 127.0.0.1:19280
 
-# The bridge starts an HTTP proxy on localhost
+# More than one provider:
+#   byoky-bridge connect --providers anthropic,openai
+#
+# Run connect again after a browser restart, a wallet lock or the
+# 24 h session expiry. ECONNREFUSED 127.0.0.1:19280 means the proxy
+# isn't running.
+#
 # CLI tools send requests to the bridge instead of the real API:
 #
 #   POST http://127.0.0.1:19280/anthropic/v1/messages
