@@ -230,6 +230,35 @@ describe('login', () => {
     await run;
   });
 
+  // F076: once any browser was registered, one installed later never was,
+  // and a plugin-only user has no `byoky-bridge install` to run.
+  it('registers the native host with a browser installed since, without asking again', async () => {
+    registeredHome();
+    const firefox = getManifestLocations(home, platform()).find((l) => l.browser === 'Firefox')!;
+    mkdirSync(firefox.profileDirs[0], { recursive: true });
+    const notes: string[] = [];
+    const ctx = context();
+    ctx.prompter.note = async (m: string) => { notes.push(m); };
+    ctx.prompter.confirm = async () => { throw new Error('asked again'); };
+    const run = authRuns().byoky(ctx);
+    await expect.poll(() => opened.length).toBe(1);
+    expect(existsSync(firefox.path)).toBe(true);
+    expect(notes).toContain('Registered Byoky Bridge with Firefox too. Restart Firefox if Byoky was already open there.');
+    await post('/callback', { nonce: await pageNonce(), providers: ['openai'] });
+    await run;
+  });
+
+  it('points a user who declines registration at the login, not a command they don\'t have', async () => {
+    const chrome = getManifestLocations(home, platform()).find((l) => l.browser === 'Chrome')!;
+    mkdirSync(chrome.profileDirs[0], { recursive: true });
+    const notes: string[] = [];
+    const ctx = context();
+    ctx.prompter.note = async (m: string) => { notes.push(m); };
+    ctx.prompter.confirm = async () => false;
+    await expect(authRuns().byoky(ctx)).rejects.toThrow('openclaw models auth login --provider byoky');
+    expect(notes.join('\n')).not.toContain('byoky-bridge install');
+  });
+
   it('registers the native host with the browsers that are installed', async () => {
     const brave = getManifestLocations(home, platform()).find((l) => l.browser === 'Brave')!;
     mkdirSync(brave.profileDirs[0], { recursive: true });

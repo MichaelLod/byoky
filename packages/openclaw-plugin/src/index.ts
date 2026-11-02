@@ -543,6 +543,9 @@ async function renderByokyStatus(): Promise<string> {
     lines.push('');
     lines.push(`Registered with: ${reg.registered.join(', ')}`);
   }
+  if (reg.missing.length > 0) {
+    lines.push(`Not registered with: ${reg.missing.join(', ')} (log in again to add it)`);
+  }
   return lines.join('\n');
 }
 
@@ -554,7 +557,23 @@ async function ensureNativeHostRegistered(
   const reg = getRegistrationStatus();
   // A registration whose host can't start (a shim, a package since
   // removed) is no registration.
-  if (reg.registered.length > 0 && reg.broken.length === 0) return true;
+  if (reg.registered.length > 0 && reg.broken.length === 0) {
+    // A browser installed since the host was registered gets it too, without
+    // asking again. Plugin users have no `byoky-bridge install` to run.
+    if (reg.missing.length > 0) {
+      try {
+        const added = registerHost().browsers.filter((b) => reg.missing.includes(b));
+        if (added.length > 0) {
+          await ctx.prompter.note(
+            `Registered Byoky Bridge with ${added.join(', ')} too. Restart ${added.length > 1 ? 'those browsers' : added[0]} if Byoky was already open there.`,
+          );
+        }
+      } catch {
+        // The browsers registered before still work.
+      }
+    }
+    return true;
+  }
 
   const ok = await ctx.prompter.confirm({
     message: reg.broken.length > 0
@@ -564,7 +583,7 @@ async function ensureNativeHostRegistered(
   });
   if (!ok) {
     await ctx.prompter.note(
-      'Skipped. You can register later with `byoky-bridge install`.',
+      'Skipped. Run `openclaw models auth login --provider byoky` again to register it.',
     );
     return false;
   }
@@ -602,7 +621,7 @@ async function runProviderAuth(
   const ok = await ensureNativeHostRegistered(ctx);
   if (!ok) {
     throw new Error(
-      'Byoky Bridge native messaging host is not registered. Run `byoky-bridge install` and try again.',
+      'Byoky Bridge native messaging host is not registered. Run `openclaw models auth login --provider byoky` again and accept the registration.',
     );
   }
 

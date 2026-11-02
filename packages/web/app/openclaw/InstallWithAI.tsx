@@ -24,7 +24,7 @@ Your job — run these commands on my machine and report each step:
    (or byoky-openai/gpt-5.5, byoky-gemini/gemini-3.8-flash — \`openclaw models list --all\` shows every option.)
 
 4. Verify the bridge is up and lists the connected providers (the token is passed via substitution, not pasted):
-     curl -H "x-api-key: $(byoky-bridge token)" http://127.0.0.1:19283/health
+     curl -H "x-api-key: $(cat ~/.byoky-bridge/token)" http://127.0.0.1:19283/health
    Expected: {"status":"ok","providers":[...]}
 
 5. Inside OpenClaw I can run /byoky anytime to see bridge status and connected providers.

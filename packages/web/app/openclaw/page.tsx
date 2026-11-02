@@ -117,7 +117,7 @@ export default function OpenClawTutorial() {
           </p>
           <p>Verify the bridge:</p>
           <Code>
-            {`curl -H "x-api-key: $(byoky-bridge token)" http://127.0.0.1:19283/health
+            {`curl -H "x-api-key: $(cat ~/.byoky-bridge/token)" http://127.0.0.1:19283/health
 # → {"status":"ok","providers":["anthropic","openai",...]}`}
           </Code>
           <p className="oc-note oc-note-muted">

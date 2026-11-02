@@ -28,7 +28,7 @@ This opens your browser. Unlock your Byoky wallet and approve the connection. Th
 
 ```bash
 # Verify the bridge is running
-curl -H "x-api-key: $(byoky-bridge token)" http://127.0.0.1:19283/health
+curl -H "x-api-key: $(cat ~/.byoky-bridge/token)" http://127.0.0.1:19283/health
 # → {"status":"ok","providers":["anthropic"]}
 ```
 
