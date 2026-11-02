@@ -900,7 +900,10 @@ verify pnpm --filter @byoky/extension exec wxt prepare
 verify pnpm typecheck
 verify pnpm test
 verify node --test scripts/tests/*.test.mjs
-verify bash scripts/template-smoke.sh chat multi-provider backend-relay
+# The templates install the newest versions their ranges allow, with no
+# lockfile, and run those packages' builds: none of that sees the store
+# credentials or provider keys.
+verify without_secrets bash scripts/template-smoke.sh chat multi-provider backend-relay
 if [ "$SKIP_NATIVE_TESTS" = true ]; then
   echo "  WARN: --skip-native-tests: the Android and iOS unit tests didn't run"
 else

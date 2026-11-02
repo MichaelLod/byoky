@@ -744,16 +744,19 @@ test('--hold-macos ships everything but the Mac app while macOS 1.1.0 is in revi
   assert.match(r.out, /App Store \(macOS\): HELD \(--hold-macos\): dist\/byoky-macos-v1\.1\.2\.pkg not uploaded/)
 })
 
-test('xcodebuild and Gradle never see the variables .env and .env.local set', MAC_ONLY, (t) => {
+test('xcodebuild, Gradle and the template smoke never see the variables .env and .env.local set', MAC_ONLY, (t) => {
   const s = sandbox({ android: true, real: ['store-status.mjs', 'submit-appstore.mjs'] })
   t.after(s.cleanup)
-  // xcodebuild keeps its whole environment in DerivedData's build records.
+  // xcodebuild keeps its whole environment in DerivedData's build records;
+  // the template smoke runs npm install and builds without a lockfile.
   write(join(s.work, '.env'), 'BYOKY_PROBE_ENV=from-env\n')
   write(join(s.work, '.env.local'), 'export BYOKY_PROBE_LOCAL=from-local\n')
   const probe = (tool) => `echo "env-seen ${tool} [\${BYOKY_PROBE_ENV:-}\${BYOKY_PROBE_LOCAL:-}]" >> "$CALLS"\n`
-  for (const shim of [join(s.base, 'bin/xcodebuild'), join(s.work, 'packages/android/gradlew')]) {
+  const shims = { xcodebuild: join(s.base, 'bin/xcodebuild'), gradlew: join(s.work, 'packages/android/gradlew'),
+    'template-smoke.sh': join(s.work, 'scripts/template-smoke.sh') }
+  for (const [tool, shim] of Object.entries(shims)) {
     const [shebang, ...rest] = readFileSync(shim, 'utf8').split('\n')
-    write(shim, [shebang, probe(shim.endsWith('gradlew') ? 'gradlew' : 'xcodebuild'), ...rest].join('\n'), 0o755)
+    write(shim, [shebang, probe(tool), ...rest].join('\n'), 0o755)
   }
   // The AAB a real bundleRelease leaves behind.
   write(join(s.work, 'packages/android/gradlew'), readFileSync(join(s.work, 'packages/android/gradlew'), 'utf8') +
@@ -763,7 +766,8 @@ test('xcodebuild and Gradle never see the variables .env and .env.local set', MA
   for (const step of [/^gradlew :app:testDebugUnitTest/m, /^xcodebuild test /m, /^gradlew bundleRelease/m,
     /^xcodebuild archive .*-scheme Byoky /m, /^xcodebuild -exportArchive /m]) assert.match(r.calls, step)
   const seen = r.calls.split('\n').filter((l) => l.startsWith('env-seen '))
-  assert.ok(seen.length >= 6, r.calls)
+  assert.ok(seen.length >= 7, r.calls)
+  for (const tool of Object.keys(shims)) assert.ok(seen.some((l) => l.startsWith(`env-seen ${tool} `)), `${tool} never ran:\n${r.calls}`)
   assert.deepEqual(seen.filter((l) => !l.endsWith(' []')), [])
 })
 
