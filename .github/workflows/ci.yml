@@ -173,9 +173,15 @@ jobs:
         working-directory: ${{ runner.temp }}/smoke-app
         run: |
           npm install --no-audit --no-fund
+          # The build must not have to rewrite the app's own files: Next
+          # installs a missing @types package into package.json (or, with CI
+          # set, fails) and reshapes a tsconfig.json it disagrees with.
+          mkdir -p ../before && cp package.json tsconfig.json ../before/
           npm run build --if-present
           npm run build:client --if-present
           npx tsc --noEmit
+          diff -u ../before/package.json package.json
+          diff -u ../before/tsconfig.json tsconfig.json
 
   # Fake-provider Playwright run: the real extension, headless, no keys.
   e2e:

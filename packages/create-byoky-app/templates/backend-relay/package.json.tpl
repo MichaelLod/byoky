@@ -15,7 +15,8 @@
     "ws": "^8.18.0"
   },
   "devDependencies": {
-    "@types/express": "^5.0.0",
+    "@types/express": "^4.17.21",
+    "@types/node": "^22",
     "@types/ws": "^8.5.0",
     "concurrently": "^9.1.0",
     "tsx": "^4.19.0",
