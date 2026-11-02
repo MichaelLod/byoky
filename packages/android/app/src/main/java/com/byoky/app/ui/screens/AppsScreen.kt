@@ -365,6 +365,7 @@ private fun ConfirmDestructiveDialog(
  * pin, body lists the connected apps, footer is empty placeholder when nothing's
  * assigned. Tap an app to move it.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun GroupBucket(
     group: Group,
@@ -396,31 +397,36 @@ private fun GroupBucket(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    CapsText(
-                        group.name,
-                        style = HeadingStyle.copy(fontSize = 16.sp),
-                        color = Bone,
-                        maxLines = 1,
-                        modifier = Modifier.weight(1f, fill = false),
-                    )
-                    if (group.providerId.isNotEmpty()) {
-                        Spacer(Modifier.width(8.dp))
-                        Tag(provider?.name ?: group.providerId)
-                    }
-                    if (!group.model.isNullOrEmpty()) {
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            group.model!!,
-                            color = Fog,
-                            style = MonoStyle.copy(fontSize = 10.sp),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier
-                                .weight(1f, fill = false)
-                                .border(1.dp, Seam)
-                                .padding(horizontal = 6.dp, vertical = 2.dp),
-                        )
+                // The name and the pinned model are what this screen is for:
+                // each gets the full width and wraps, instead of sharing one
+                // line with the provider and ending up as a few letters.
+                CapsText(
+                    group.name,
+                    style = HeadingStyle.copy(fontSize = 16.sp),
+                    color = Bone,
+                    maxLines = 3,
+                )
+                if (group.providerId.isNotEmpty() || !group.model.isNullOrEmpty()) {
+                    Spacer(Modifier.height(6.dp))
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        if (group.providerId.isNotEmpty()) {
+                            Tag(provider?.name ?: group.providerId)
+                        }
+                        if (!group.model.isNullOrEmpty()) {
+                            Text(
+                                group.model!!,
+                                color = Fog,
+                                style = MonoStyle.copy(fontSize = 10.sp),
+                                maxLines = 3,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier
+                                    .border(1.dp, Seam)
+                                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                            )
+                        }
                     }
                 }
                 Spacer(Modifier.height(4.dp))
