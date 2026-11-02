@@ -1281,8 +1281,8 @@ function Errors() {
             ['INVALID_KEY', <>Only from <code>listModels()</code>: the models endpoint answered 401 or 403. Proxied requests never carry it; a provider&apos;s 401 reaches you as the provider sent it.</>, 'Prompt the user to check the credential in their wallet.'],
             ['TOKEN_EXPIRED', 'Reserved; no wallet sends it. An expired Claude setup token comes back as Anthropic\'s own 401 response.', 'Nothing to handle. On a 401 from the provider, ask the user to replace the credential in their wallet.'],
             ['PROXY_ERROR', <>Generic proxy-layer failure: the provider couldn&apos;t be reached, the extension crashed, a native message was dropped (HTTP 502), or a request got no response headers within <code>requestTimeout</code>.</>, 'Safe to retry once. Surface a generic error if it repeats.'],
-            ['RELAY_CONNECTION_FAILED', 'Your backend relay WebSocket could not reach the browser.', 'Check your relay URL and that the user\'s tab is still open; retry with backoff.'],
-            ['RELAY_DISCONNECTED', 'Relay peer disconnected mid-request (user closed tab, network drop).', <>Reopen the relay via <code>session.createRelay(url)</code>.</>],
+            ['RELAY_CONNECTION_FAILED', <>Server side, from <code>handleConnection()</code>: the browser&apos;s relay socket closed, or sent no <code>relay:hello</code> within <code>helloTimeout</code>.</>, <>Catch it in your <code>connection</code> listener (an unhandled rejection ends the Node process) and drop that socket. Check the relay URL the page passes to <code>session.createRelay()</code>.</>],
+            ['RELAY_DISCONNECTED', <>Server side: the browser went away mid-request (user closed the tab, network drop). Relay fetches and their response bodies reject with it.</>, <>Catch it like any failed fetch. The page reopens the relay with <code>session.createRelay(url)</code>.</>],
             ['UNKNOWN', 'Anything that doesn\'t map to a specific code (last-resort fallback).', 'Log the original message and surface a generic error. Treat as transient.'],
           ].map(([code, meaning, action]) => (
             <tr key={code as string}>
