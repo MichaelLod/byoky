@@ -195,6 +195,9 @@ describe('probeBridgeSession', () => {
     [502, '{"error":"Session not found or wallet locked"}', 'stale'],
     [502, '{"error":"Unauthorized session key"}', 'stale'],
     [502, '{"error":"upstream exploded"}', 'ok'],
+    // The wallet refused the request, but the session is live (F017).
+    [429, '{"error":"Token allowance exceeded","code":"QUOTA_EXCEEDED"}', 'ok'],
+    [403, '{"error":"Provider not available in this session","code":"PROVIDER_UNAVAILABLE"}', 'ok'],
     [200, '{"data":[]}', 'ok'],
   ])('maps %s %s to %s', async (status, body, expected) => {
     const { server, port } = await bridge(status, body);

@@ -84,6 +84,8 @@ Once running, the HTTP surface is:
 - **Health check:** `GET http://127.0.0.1:19280/health` → `{"status":"ok"}`; with the token, `{"status":"ok","providers":[...]}`
 - **API proxy:** `POST http://127.0.0.1:19280/<provider>/...` (token required)
 
+A request the wallet refuses comes back with the wallet's status and code, e.g. 429 `QUOTA_EXCEEDED` when the app's spending cap is used up, or 403 `PROVIDER_UNAVAILABLE` for a provider the session doesn't have, and with `x-should-retry: false`, so the Anthropic and OpenAI SDKs don't send it again.
+
 Example:
 
 ```bash

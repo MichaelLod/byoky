@@ -2495,8 +2495,22 @@ export default defineBackground(() => {
   }
 
   /**
+   * A request checkAndReserveAllowance refused (spending limit, the limits
+   * hold, or no wallet key), with the status the page path gives it. A
+   * refusal without a status reaches the client as a 502, which CLI tools
+   * retry.
+   */
+  function allowanceRefusal(requestId: string, reason: string): Record<string, unknown> {
+    return masterPassword
+      ? { type: 'proxy_http_error', requestId, status: 429, code: 'QUOTA_EXCEEDED', error: reason }
+      : { type: 'proxy_http_error', requestId, status: 423, code: 'WALLET_LOCKED', error: reason };
+  }
+
+  /**
    * `signal` aborts when the bridge reports that the client hung up, or the
-   * connection ends. Every reply goes back on `conn`.
+   * connection ends. Every reply goes back on `conn`. A refusal carries a
+   * status and code; only a failure along the way is left to the bridge's
+   * 502.
    */
   async function handleBridgeProxyRequest(
     msg: Record<string, unknown>,
@@ -2574,6 +2588,8 @@ export default defineBackground(() => {
       conn.reply({
         type: 'proxy_http_error',
         requestId,
+        status: 403,
+        code: 'PROVIDER_UNAVAILABLE',
         error: 'Provider not available in this session',
       });
       return;
@@ -2593,6 +2609,8 @@ export default defineBackground(() => {
       conn.reply({
         type: 'proxy_http_error',
         requestId,
+        status: 403,
+        code: 'INVALID_URL',
         error: 'Request URL does not match the provider\'s registered base URL',
       });
       return;
@@ -2610,6 +2628,8 @@ export default defineBackground(() => {
       conn.reply({
         type: 'proxy_http_error',
         requestId,
+        status: 403,
+        code: 'PROVIDER_UNAVAILABLE',
         error: message,
       });
       return;
@@ -2625,6 +2645,8 @@ export default defineBackground(() => {
       conn.reply({
         type: 'proxy_http_error',
         requestId,
+        status: 403,
+        code: 'PROVIDER_UNAVAILABLE',
         error: `The key this app is routed to is not a ${effectiveProviderId} key`,
       });
       return;
@@ -2641,6 +2663,8 @@ export default defineBackground(() => {
         conn.reply({
           type: 'proxy_http_error',
           requestId,
+          status: 403,
+          code: 'INVALID_URL',
           error: 'Request URL does not match the credential\'s registered base URL',
         });
         return;
@@ -2687,9 +2711,12 @@ export default defineBackground(() => {
         try {
           translatedBody = applyRequestTranslation(translation, body, requestId, url);
         } catch (err) {
+          // The request can't be put in the destination's dialect.
           conn.reply({
             type: 'proxy_http_error',
             requestId,
+            status: 400,
+            code: err instanceof TranslationError ? err.code : 'TRANSLATION_FAILED',
             error: err instanceof Error ? err.message : 'Translation failed',
           });
           return;
@@ -2700,6 +2727,8 @@ export default defineBackground(() => {
           conn.reply({
             type: 'proxy_http_error',
             requestId,
+            status: 400,
+            code: 'ROUTING_UNSUPPORTED',
             error: `Cannot rewrite URL for destination provider ${translation.dstProviderId}`,
           });
           return;
@@ -2713,6 +2742,8 @@ export default defineBackground(() => {
           conn.reply({
             type: 'proxy_http_error',
             requestId,
+            status: 400,
+            code: 'ROUTING_UNSUPPORTED',
             error: `Cannot rewrite URL for destination provider ${swap.dstProviderId}`,
           });
           return;
@@ -2765,6 +2796,8 @@ export default defineBackground(() => {
           conn.reply({
             type: 'proxy_http_error',
             requestId,
+            status: 400,
+            code: 'TRANSLATION_NOT_SUPPORTED',
             error: 'Cross-family translation is not supported on the bridge OAuth path. Bind this app to an Anthropic credential or remove the OAuth requirement.',
           });
           return;
@@ -2794,7 +2827,7 @@ export default defineBackground(() => {
 
         const reservation = await checkAndReserveAllowance(session.appOrigin, providerId, appRequest);
         if (!reservation.allowed) {
-          conn.reply({ type: 'proxy_http_error', requestId, error: reservation.reason });
+          conn.reply(allowanceRefusal(requestId, reservation.reason));
           return;
         }
         // The client already hung up, or the connection is gone: don't start
@@ -2871,7 +2904,7 @@ export default defineBackground(() => {
       // as on the page path.
       const reservation = await checkAndReserveAllowance(session.appOrigin, providerId, appRequest);
       if (!reservation.allowed) {
-        conn.reply({ type: 'proxy_http_error', requestId, error: reservation.reason });
+        conn.reply(allowanceRefusal(requestId, reservation.reason));
         return;
       }
       let logEntryId: string | undefined;

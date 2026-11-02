@@ -8,6 +8,7 @@ import {
   type FakeNativeConnection,
   type Harness,
 } from './helpers/background-harness';
+import { ROUTING_MAC_KEY } from '../lib/routing-state';
 
 // The bridge HTTP proxy (CLI tools through `byoky-bridge`): what happens to
 // the requests of a bridge connection that ends.
@@ -171,5 +172,99 @@ describe('background: an API-key request streaming to the bridge', () => {
     await h.until(() => usage(h, 'openai') > 0, 5_000, 'the partial usage charged');
     await h.settle(20);
     expect(second.fromExtension.filter((m) => m.requestId === 'r1')).toEqual([]);
+  });
+});
+
+// --- Refusals ---
+
+/** Sends one request on `bridge`; resolves with the extension's first answer to it. */
+async function bridgeAnswer(h: Harness, bridge: FakeNativeConnection, sessionKey: string, req: Record<string, unknown>) {
+  const requestId = crypto.randomUUID();
+  bridgeRequest(bridge, sessionKey, requestId, req);
+  await h.until(() => bridge.fromExtension.some((m) => m.requestId === requestId), 5_000, 'the answer');
+  return bridge.fromExtension.find((m) => m.requestId === requestId);
+}
+
+const OPENAI_CHAT = { providerId: 'openai', url: OPENAI_URL, body: JSON.stringify({ model: 'gpt-5.5', max_tokens: 10, messages: [] }) };
+const ANTHROPIC_CHAT = { providerId: 'anthropic', url: ANTHROPIC_URL, body: JSON.stringify({ model: 'claude-x', max_tokens: 10, messages: [] }) };
+
+async function bridgeApp(local: Record<string, unknown>, providers: string[]) {
+  const h = await startBackground({ local });
+  await h.unlock();
+  const { payload } = await connectApproved(h, APP, { providers: providers.map((id) => ({ id })) });
+  const bridge = await startBridge(h, payload.sessionKey);
+  return { h, bridge, sessionKey: payload.sessionKey as string };
+}
+
+const OPENAI_KEY = [{ id: 'o1', providerId: 'openai', key: 'sk-o' }];
+/** An app calling `src`, routed by its group to `dst`'s key. */
+const routedTo = (dst: string) => ({
+  groups: [
+    { id: 'default', name: 'Default', providerId: '', createdAt: 1 },
+    { id: 'g', name: 'g', providerId: dst, model: dst === 'openai' ? 'gpt-5.5' : 'claude-x', createdAt: 1 },
+  ],
+  appGroups: { [APP]: 'g' },
+});
+
+// F017: these went to the bridge with no status, which it answers with a
+// 502, and CLI tools retry a 502. The page path answers them 429 or 403.
+describe('background: refusals on the bridge carry a status and code', () => {
+  it('a spending limit reached: 429 QUOTA_EXCEEDED, as on the page path', async () => {
+    const { h, bridge, sessionKey } = await bridgeApp(await walletStorage(OPENAI_KEY, {
+      tokenAllowances: [{ origin: APP, totalLimit: 10 }],
+      usageTotals: { [APP]: { openai: 50 } },
+    }), ['openai']);
+    expect(await bridgeAnswer(h, bridge, sessionKey, OPENAI_CHAT)).toMatchObject({
+      type: 'proxy_http_error', status: 429, code: 'QUOTA_EXCEEDED', error: expect.stringMatching(/allowance/i),
+    });
+    const page = await h.proxy(APP, { sessionKey, ...OPENAI_CHAT }).result;
+    expect(page.error).toMatchObject({ status: 429, error: { code: 'QUOTA_EXCEEDED' } });
+    expect(h.fetch).not.toHaveBeenCalled();
+  });
+
+  it('a spending limit reached by a setup-token request: 429 QUOTA_EXCEEDED', async () => {
+    const { h, bridge, sessionKey } = await bridgeApp(await walletStorage(SETUP_TOKEN, {
+      tokenAllowances: [{ origin: APP, totalLimit: 10 }],
+      usageTotals: { [APP]: { anthropic: 50 } },
+    }), ['anthropic']);
+    expect(await bridgeAnswer(h, bridge, sessionKey, ANTHROPIC_CHAT)).toMatchObject({
+      type: 'proxy_http_error', status: 429, code: 'QUOTA_EXCEEDED',
+    });
+    expect(bridge.fromExtension.some((m) => m.type === 'proxy_direct_fetch')).toBe(false);
+  });
+
+  it('apps paused after the limits were tampered with: 429 QUOTA_EXCEEDED, as on the page path', async () => {
+    const local = await walletStorage(OPENAI_KEY, { tokenAllowances: [{ origin: APP, totalLimit: 1000 }] });
+    delete local[ROUTING_MAC_KEY];
+    const { h, bridge, sessionKey } = await bridgeApp(local, ['openai']);
+    expect(await bridgeAnswer(h, bridge, sessionKey, OPENAI_CHAT)).toMatchObject({
+      type: 'proxy_http_error', status: 429, code: 'QUOTA_EXCEEDED', error: expect.stringMatching(/paused/),
+    });
+  });
+
+  it('a provider the session doesn\'t have: 403 PROVIDER_UNAVAILABLE', async () => {
+    const { h, bridge, sessionKey } = await bridgeApp(await walletStorage(OPENAI_KEY), ['openai']);
+    expect(await bridgeAnswer(h, bridge, sessionKey, {
+      providerId: 'gemini', url: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-x:generateContent', body: '{}',
+    })).toMatchObject({ type: 'proxy_http_error', status: 403, code: 'PROVIDER_UNAVAILABLE' });
+  });
+
+  it('a URL off the provider\'s host: 403 INVALID_URL', async () => {
+    const { h, bridge, sessionKey } = await bridgeApp(await walletStorage(OPENAI_KEY), ['openai']);
+    expect(await bridgeAnswer(h, bridge, sessionKey, { ...OPENAI_CHAT, url: 'https://evil.example/v1/chat/completions' }))
+      .toMatchObject({ type: 'proxy_http_error', status: 403, code: 'INVALID_URL' });
+  });
+
+  it('a request that can\'t be translated for the routed provider: 400 with the translation\'s code', async () => {
+    const { h, bridge, sessionKey } = await bridgeApp(await walletStorage(OPENAI_KEY, routedTo('openai')), ['anthropic']);
+    expect(await bridgeAnswer(h, bridge, sessionKey, { ...ANTHROPIC_CHAT, body: 'not json' }))
+      .toMatchObject({ type: 'proxy_http_error', status: 400, code: 'INVALID_JSON' });
+    expect(h.fetch).not.toHaveBeenCalled();
+  });
+
+  it('a translated request to a setup token: 400 TRANSLATION_NOT_SUPPORTED', async () => {
+    const { h, bridge, sessionKey } = await bridgeApp(await walletStorage(SETUP_TOKEN, routedTo('anthropic')), ['openai']);
+    expect(await bridgeAnswer(h, bridge, sessionKey, OPENAI_CHAT))
+      .toMatchObject({ type: 'proxy_http_error', status: 400, code: 'TRANSLATION_NOT_SUPPORTED' });
   });
 });
