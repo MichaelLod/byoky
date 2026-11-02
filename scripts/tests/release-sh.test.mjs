@@ -410,6 +410,15 @@ test('a release from main bumps, commits, pushes main and the tag together, and 
   assert.match(r.out, /Firefox Add-ons: skipped \(credentials not configured\)/)
   assert.doesNotMatch(unzipList(join(s.work, 'dist/byoky-chrome-v1.1.2.zip')), /old-chunk\.js/)
   assert.match(unzipList(join(s.work, 'dist/byoky-source-v1.1.2.zip')), /tsconfig\.base\.json[\s\S]*BUILD-FIREFOX\.md/)
+  const note = execFileSync('unzip', ['-p', join(s.work, 'dist/byoky-source-v1.1.2.zip'), 'BUILD-FIREFOX.md'], { encoding: 'utf8' })
+  assert.ok(note.includes(`built with Node.js ${process.versions.node}.`), note)
+})
+
+test("BUILD-FIREFOX.md asks AMO's reviewers for the Node.js that package.json's engines require", () => {
+  const note = readFileSync(join(SCRIPTS, 'release.sh'), 'utf8').match(/Requirements: Node\.js (\d+) or newer/)
+  assert.ok(note, 'amo_build_note names no Node.js version')
+  const { engines } = JSON.parse(readFileSync(join(SCRIPTS, '..', 'package.json'), 'utf8'))
+  assert.equal(`>=${note[1]}`, engines.node)
 })
 
 test('--allow-branch pushes the release commit to main', MAC_ONLY, (t) => {

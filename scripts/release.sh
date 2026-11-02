@@ -84,12 +84,13 @@ status_field() {
 }
 
 # How AMO's reviewers rebuild the add-on; BUILD-FIREFOX.md in the source zip.
+# The Node.js it asks for is package.json's engines.node.
 amo_build_note() {
   cat <<'EOF'
 # Building the Byoky Firefox add-on from this source
 
-Requirements: Node.js 20 or newer and pnpm 9.15.9 (`corepack enable` picks the
-version up from package.json), on macOS or Linux.
+Requirements: Node.js 22 or newer (tested with 22 and 24) and pnpm 9.15.9
+(`corepack enable` picks the version up from package.json), on macOS or Linux.
 
     pnpm install --frozen-lockfile
     pnpm build:core
@@ -99,6 +100,7 @@ version up from package.json), on macOS or Linux.
 The add-on is then in packages/extension/.output/firefox-mv2, file for file
 the same as the submitted package.
 EOF
+  echo "The submitted package was built with Node.js $(node -p 'process.versions.node')."
 }
 
 # Unzips the AMO source zip into a temporary directory, builds the add-on
