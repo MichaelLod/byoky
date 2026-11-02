@@ -57,6 +57,7 @@ import com.byoky.app.ui.components.UnreadableVaultNotice
 import com.byoky.app.ui.components.RetroBottomSheet
 import com.byoky.app.ui.components.RetroDialog
 import com.byoky.app.ui.components.RetroTextField
+import com.byoky.app.ui.components.SecretDialogProperties
 import com.byoky.app.ui.components.SectionLabel
 import com.byoky.app.ui.components.StatusPill
 import com.byoky.app.ui.components.bottomSeam
@@ -357,6 +358,7 @@ private fun EditEndpointDialog(
     RetroDialog(
         onDismissRequest = onDismiss,
         title = if (isAzure) "Azure endpoint" else "Server URL",
+        properties = SecretDialogProperties,
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(credential.label, color = Bone, style = MonoStyle.copy(fontSize = 13.sp))
@@ -633,6 +635,8 @@ internal fun AddCredentialSheet(wallet: WalletStore, onDismiss: () -> Unit) {
     RetroBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        // The key is typed (or pasted) here: keep it out of screenshots and recents.
+        secure = true,
     ) {
         Column(
             modifier = Modifier

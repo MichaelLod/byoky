@@ -1,5 +1,6 @@
 package com.byoky.app
 
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
@@ -30,6 +31,11 @@ class MainActivity : ComponentActivity() {
             statusBarStyle = SystemBarStyle.dark(Void.toArgb()),
             navigationBarStyle = SystemBarStyle.dark(Void.toArgb()),
         )
+        // Recents shows a blank card, not a snapshot of whatever was on
+        // screen (an app's chats, a revealed password). Screenshots still
+        // work; the screens that show a secret block those themselves
+        // (SecureWindow). Older Android has no such switch.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) setRecentsScreenshotEnabled(false)
 
         val app = application as ByokyApp
         val wallet = app.walletStore

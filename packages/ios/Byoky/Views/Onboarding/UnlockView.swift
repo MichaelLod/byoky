@@ -3,6 +3,7 @@ import SwiftUI
 
 struct UnlockView: View {
     @EnvironmentObject var wallet: WalletStore
+    @Environment(\.scenePhase) private var scenePhase
     @State private var password = ""
     @State private var error: String?
     @State private var isShaking = false
@@ -49,6 +50,10 @@ struct UnlockView: View {
         }
         .onAppear {
             updateLockoutState()
+        }
+        // A revealed password is hidden again once the app leaves the screen.
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active { showPassword = false }
         }
     }
 
