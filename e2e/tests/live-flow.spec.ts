@@ -34,7 +34,6 @@ async function addCredential(w: Wallet, providerId: string, label: string, apiKe
   await w.popup.bringToFront();
   await w.popup.click('button[title="Wallet"]');
   await w.popup.click('button.fab-button');
-  await w.popup.click('.fab-menu button:has-text("Add credential")');
   await w.popup.waitForSelector('#provider');
   await w.popup.selectOption('#provider', providerId);
   // Anthropic's oauth path uses "setup tokens" (sk-ant-oat01-...) issued by

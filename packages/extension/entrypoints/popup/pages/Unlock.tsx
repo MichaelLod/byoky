@@ -90,11 +90,25 @@ export function Unlock() {
           </button>
         </>
       ) : (
-        <div className="center-body">
-          <div className="dialog-title danger">
+        // Replaces the focused "Forgot password?", so focus moves to Cancel
+        // here rather than falling to the page; Escape cancels, and the
+        // password field takes focus again.
+        <div
+          className="center-body"
+          role="group"
+          aria-labelledby="reset-title"
+          aria-describedby="reset-text"
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') {
+              e.preventDefault();
+              setShowReset(false);
+            }
+          }}
+        >
+          <div id="reset-title" className="dialog-title danger">
             Reset Wallet?
           </div>
-          <div className="dialog-text">
+          <div id="reset-text" className="dialog-text">
             This will permanently delete all API keys, sessions, and settings. This cannot be undone.
           </div>
           <div className="dialog-actions">
@@ -102,6 +116,7 @@ export function Unlock() {
               type="button"
               className="btn"
               onClick={() => setShowReset(false)}
+              autoFocus
             >
               Cancel
             </button>

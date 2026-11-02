@@ -19,8 +19,9 @@ interface DialogFocusOptions {
 /**
  * Focus handling for a modal dialog: move focus into it on open, keep Tab
  * and Shift+Tab inside it, close it on Escape, and on close give focus back
- * to what opened it, or to the + button when that is gone (the add menu's
- * item unmounts as the dialog opens). The dialog element needs tabIndex={-1}.
+ * to what opened it, or to the + button when that is gone (the + button
+ * unmounts while the add credential sheet is open). The dialog element
+ * needs tabIndex={-1}.
  */
 export function useDialogFocus(ref: RefObject<HTMLElement | null>, { onEscape, initialFocus }: DialogFocusOptions) {
   // Read while rendering, before the dialog mounts and takes focus.

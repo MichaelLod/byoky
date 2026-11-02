@@ -2192,7 +2192,7 @@ html.popup .app {
   color: var(--text-muted);
 }
 
-/* ── Floating action menu ── */
+/* ── Floating add button ── */
 
 .fab-root {
   position: fixed;
@@ -2227,66 +2227,6 @@ html.popup .app {
 
 .fab-button:active {
   transform: translateY(1px);
-}
-
-.fab-root.open .fab-button svg {
-  transform: rotate(45deg);
-  transition: transform 0.2s ease;
-}
-
-.fab-button svg {
-  transition: transform 0.2s ease;
-}
-
-.fab-menu {
-  background: var(--bg-hover);
-  border: 1px solid var(--seam-strong);
-  padding: 4px;
-  min-width: 180px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  animation: fab-menu-in 0.16s ease;
-  transform-origin: bottom right;
-}
-
-@keyframes fab-menu-in {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.fab-menu-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 9px 12px;
-  background: transparent;
-  border: none;
-  color: var(--text);
-  font-family: inherit;
-  font-size: 13px;
-  font-weight: 500;
-  text-align: left;
-  cursor: pointer;
-  transition: background 0.12s;
-}
-
-.fab-menu-item:hover {
-  background: var(--violet-soft);
-}
-
-.fab-menu-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  color: var(--phosphor);
 }
 
 /* Reserve room at the bottom of scrollable content so the FAB doesn't overlap
