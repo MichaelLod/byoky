@@ -194,6 +194,17 @@ const OPENAI_MODELS: ModelDef[] = [
 
 const GEMINI_MODELS: ModelDef[] = [
   {
+    // Byoky's Gemini default (core DEFAULT_MODELS): 3.8 Flash failed every
+    // call on 2 Nov 2026. Same prices as 3.8 Flash, doubling on 2027-01-01.
+    id: 'gemini-3.6-flash',
+    name: 'Gemini 3.6 Flash',
+    reasoning: true,
+    input: ['text', 'image'],
+    cost: { input: 0.75, output: 3.75, cacheRead: 0.075, cacheWrite: 0 },
+    contextWindow: 1_048_576,
+    maxTokens: 65_536,
+  },
+  {
     // Google's prices for 3.8 Flash double on 2027-01-01 ($1.50 / $7.50,
     // cache $0.15).
     id: 'gemini-3.8-flash',
