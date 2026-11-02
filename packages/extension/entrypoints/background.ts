@@ -528,6 +528,11 @@ export default defineBackground(() => {
   const connectRateLimit = new Map<string, number[]>();
   const CONNECT_RATE_LIMIT = 10; // max requests per window
   const CONNECT_RATE_WINDOW = 60_000; // 1 minute
+  // How long a connect request waits for the user, and how many may wait:
+  // in all, and from one tab (whose frames may be any number of origins).
+  const APPROVAL_TIMEOUT_MS = 120_000;
+  const MAX_QUEUED_APPROVALS = 5;
+  const MAX_QUEUED_APPROVALS_PER_TAB = 2;
 
   function checkConnectRateLimit(origin: string): { limited: true; retryAfter: number } | { limited: false } {
     const now = Date.now();
@@ -1360,10 +1365,27 @@ export default defineBackground(() => {
       // a request the user is being asked about. One still checked against
       // the trusted sites shows it if it comes to asking, and one being
       // approved needs nothing.
-      if (inFlight.askedUser && !settlingApprovals.has(inFlight)) openWalletUI(sender.tab?.id, panelOpened);
+      if (inFlight.askedUser && !settlingApprovals.has(inFlight)) openWalletUI(sender.tab, panelOpened);
       return new Promise((resolve) => {
         inFlight.waiters.push({ message: { id: message.id, payload: request }, sender, resolve });
       });
+    }
+
+    // Only so many requests wait for the user, per tab and in all: each
+    // subdomain a page frames has a rate limit of its own. A site trusted to
+    // connect without a prompt (as far as the last trust read knows) isn't
+    // held back by the others.
+    const queueFull = masterPassword && silentTrustSnapshot.has(origin) ? null : approvalQueueFull(sender.tab?.id);
+    if (queueFull) {
+      return {
+        type: 'BYOKY_ERROR',
+        requestId: message.id,
+        payload: {
+          code: 'RATE_LIMITED',
+          message: 'Too many connection requests are waiting. Answer them in Byoky, or try again later.',
+          retryAfter: queueFull.retryAfter,
+        },
+      };
     }
 
     // An app with a session that now asks for more providers is asked about
@@ -1392,7 +1414,7 @@ export default defineBackground(() => {
       // for one a trusted site gets approved without a prompt.
       const askUser = () => {
         queued.askedUser = true;
-        openWalletUI(sender.tab?.id, panelOpened);
+        openWalletUI(sender.tab, panelOpened);
         browser.runtime.sendMessage({ type: 'BYOKY_INTERNAL', action: 'newPendingApproval' }).catch(() => {});
       };
 
@@ -1430,8 +1452,23 @@ export default defineBackground(() => {
           pendingApprovals.delete(approval.id);
           rejectPending(entry, 'Connection request timed out');
         }
-      }, 120_000);
+      }, APPROVAL_TIMEOUT_MS);
     });
+  }
+
+  /**
+   * Whether the queue has no room for another request from `tabId`, and if
+   * so, in how many seconds the oldest request in the way times out.
+   */
+  function approvalQueueFull(tabId: number | undefined): { retryAfter: number } | null {
+    const queued = [..._pendingMap.values()];
+    const fromTab = tabId === undefined ? [] : queued.filter((e) => e.tabId === tabId);
+    const blocking = queued.length >= MAX_QUEUED_APPROVALS
+      ? queued
+      : fromTab.length >= MAX_QUEUED_APPROVALS_PER_TAB ? fromTab : null;
+    if (!blocking) return null;
+    const oldest = Math.min(...blocking.map((e) => e.approval.timestamp));
+    return { retryAfter: Math.max(1, Math.ceil((oldest + APPROVAL_TIMEOUT_MS - Date.now()) / 1000)) };
   }
 
   /** Whether `session` already has every provider in `providers` approved. */
@@ -1653,6 +1690,8 @@ export default defineBackground(() => {
           ensureWalletUpgraded().catch(() => {});
           // Count what finished while the wallet was locked.
           if (Object.keys(pendingUsage).length > 0) commitPendingUsage().catch(() => {});
+          // Other open wallet views leave their unlock screen.
+          browser.runtime.sendMessage({ type: 'BYOKY_INTERNAL', action: 'sessionChanged' }).catch(() => {});
           processPendingAfterUnlock();
           return { success: true };
         }
@@ -3026,22 +3065,49 @@ export default defineBackground(() => {
   }
 
   /**
-   * Show the wallet for a request that needs the user. Chrome: the side
-   * panel (opened in the page's gesture if `panelOpened` says so; without
-   * a gesture Chrome refuses it), else the action popup, unless a wallet
-   * view is already open. Firefox and Safari, and Chrome's last resort: the
-   * popup in a window of its own.
+   * Show the wallet for a request that needs the user, from the requesting
+   * `tab`. Chrome: the side panel (opened in the page's gesture if
+   * `panelOpened` says so; without a gesture Chrome refuses it), else the
+   * action popup, unless a wallet view is already open. Firefox: nothing
+   * more when the wallet's sidebar is open in the tab's window. Firefox and
+   * Safari, and Chrome's last resort: the popup in a window of its own.
    */
-  function openWalletUI(tabId?: number, panelOpened?: Promise<boolean>) {
+  function openWalletUI(tab?: { id?: number; windowId?: number }, panelOpened?: Promise<boolean>) {
+    const tabId = tab?.id;
     void (async () => {
       if (typeof chrome !== 'undefined' && chrome.sidePanel && tabId) {
         if (await panelOpened) return;
         if (await chrome.sidePanel.open({ tabId }).then(() => true, () => false)) return;
         if (await walletViewOpen()) return;
         if (await chrome.action?.openPopup?.().then(() => true, () => false)) return;
+      } else if (await sidebarOpen(tab?.windowId)) {
+        return;
       }
-      openPopupWindow();
+      await openPopupWindow();
     })().catch(() => {});
+  }
+
+  /** Firefox: whether the wallet's sidebar is open in `windowId` (the topmost window if unknown). */
+  async function sidebarOpen(windowId?: number): Promise<boolean> {
+    try {
+      return (await browser.sidebarAction?.isOpen(windowId === undefined ? {} : { windowId })) === true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Firefox and Safari: whether a wallet page other than a sidebar is open
+   * (a wallet tab or window, Safari's toolbar popover); it shows the queue.
+   * A sidebar only counts in the requesting tab's window (sidebarOpen).
+   */
+  function walletPageOpen(): boolean {
+    try {
+      const popup = new URL(browser.runtime.getURL('/popup.html')).pathname;
+      return (browser.extension?.getViews?.() ?? []).some((view) => view.location.pathname === popup);
+    } catch {
+      return false;
+    }
   }
 
   /** Whether a popup, side panel or popup window of the wallet is open (Chrome 116+). */
@@ -3055,14 +3121,45 @@ export default defineBackground(() => {
     }
   }
 
-  function openPopupWindow() {
-    const popupUrl = browser.runtime.getURL('/popup.html');
-    browser.windows.create({
-      url: popupUrl,
+  // The window openPopupWindow opened for the wallet, while it is open: the
+  // next request focuses it rather than opening another. Kept in
+  // storage.session too, since Safari's background page restarts.
+  let walletWindowId: number | undefined;
+  let walletWindowShowing: Promise<void> | null = null;
+
+  browser.windows?.onRemoved?.addListener((windowId: number) => {
+    if (windowId !== walletWindowId) return;
+    walletWindowId = undefined;
+    if (hasSessionStorage) browser.storage.session.remove('_walletWindow').catch(() => {});
+  });
+
+  /** Show the wallet in a window of its own: the one already open, else a new one. Concurrent calls share one. */
+  function openPopupWindow(): Promise<void> {
+    walletWindowShowing ??= showWalletWindow().finally(() => { walletWindowShowing = null; });
+    return walletWindowShowing;
+  }
+
+  async function showWalletWindow(): Promise<void> {
+    if (walletWindowId === undefined && hasSessionStorage) {
+      const stored = await browser.storage.session.get('_walletWindow').catch(() => ({} as Record<string, unknown>));
+      if (typeof stored._walletWindow === 'number') walletWindowId = stored._walletWindow;
+    }
+    if (walletWindowId !== undefined) {
+      // Rejected once the window is gone.
+      if (await browser.windows.update(walletWindowId, { focused: true }).then(() => true, () => false)) return;
+      walletWindowId = undefined;
+    }
+    if (walletPageOpen()) return;
+    const created = await browser.windows.create({
+      url: browser.runtime.getURL('/popup.html'),
       type: 'popup',
       width: 400,
       height: 600,
-    }).catch(() => {});
+    });
+    walletWindowId = created?.id;
+    if (hasSessionStorage && walletWindowId !== undefined) {
+      browser.storage.session.set({ _walletWindow: walletWindowId }).catch(() => {});
+    }
   }
 
   async function getStoredCredentials(): Promise<Credential[]> {

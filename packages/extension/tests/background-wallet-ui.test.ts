@@ -199,6 +199,113 @@ describe('background: showing the wallet for a connect request', () => {
   });
 });
 
+// F004: on Firefox and Safari every request opened another wallet window,
+// even with the sidebar or a wallet window open, and a page could frame any
+// number of its own subdomains, each queueing a prompt of its own.
+describe('background: the wallet window on Firefox and Safari (F004)', () => {
+  async function firefoxWallet(): Promise<Harness> {
+    const h = await startBackground({ firefox: true, local: await walletStorage([{ id: 'o1', providerId: 'openai', key: 'sk-o' }]) });
+    await h.unlock();
+    return h;
+  }
+
+  const prompts = (h: Harness) => h.broadcasts.filter((b) => b.action === 'newPendingApproval').length;
+  const pendingCount = async (h: Harness) => (await h.internal('getPendingApprovals')).approvals.length;
+
+  it('opens one window, and focuses it for the requests that follow', async () => {
+    const h = await firefoxWallet();
+    h.connect(APP, OPENAI);
+    await h.until(() => h.browser.windows.create.mock.calls.length === 1, 5_000, 'the wallet window');
+    // The app asks again (a second click, a second tab), and another app asks.
+    h.connect(APP, OPENAI, { tabId: 2 });
+    h.connect('https://other.example', OPENAI, { tabId: 3 });
+    await h.until(() => h.browser.windows.update.mock.calls.length === 2, 5_000, 'the window focused again');
+    expect(h.browser.windows.create).toHaveBeenCalledTimes(1);
+    expect(h.browser.windows.update).toHaveBeenCalledWith(99, { focused: true });
+    expect(await pendingCount(h)).toBe(2);
+  });
+
+  it('opens one window for requests that arrive together', async () => {
+    const h = await firefoxWallet();
+    h.connect(APP, OPENAI, { tabId: 1 });
+    h.connect('https://other.example', OPENAI, { tabId: 2 });
+    h.connect('https://third.example', OPENAI, { tabId: 3 });
+    await h.until(() => prompts(h) === 3, 5_000, 'three prompts');
+    await h.settle();
+    expect(h.browser.windows.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens a new window once the user closed it', async () => {
+    const h = await firefoxWallet();
+    h.connect(APP, OPENAI);
+    await h.until(() => h.browser.windows.create.mock.calls.length === 1, 5_000, 'the wallet window');
+    await h.browser.windows.remove(99);
+    h.connect('https://other.example', OPENAI, { tabId: 2 });
+    await h.until(() => h.browser.windows.create.mock.calls.length === 2, 5_000, 'a new window');
+  });
+
+  it('opens nothing when the wallet sidebar is open in the requesting window', async () => {
+    const h = await firefoxWallet();
+    h.browser.sidebarAction.isOpen.mockResolvedValue(true);
+    h.connect(APP, OPENAI);
+    await h.until(() => prompts(h) === 1, 5_000, 'the prompt');
+    await h.settle();
+    expect(h.browser.sidebarAction.isOpen).toHaveBeenCalled();
+    expect(h.browser.windows.create).not.toHaveBeenCalled();
+  });
+
+  it('opens nothing when a wallet page is already open', async () => {
+    const h = await firefoxWallet();
+    h.browser.extension = { getViews: () => [{ location: { pathname: '/sidepanel.html' } }, { location: { pathname: '/popup.html' } }] };
+    h.connect(APP, OPENAI);
+    await h.until(() => prompts(h) === 1, 5_000, 'the prompt');
+    await h.settle();
+    expect(h.browser.windows.create).not.toHaveBeenCalled();
+  });
+
+  it('lets two requests per tab and five in all wait for the user; the rest are rate-limited', async () => {
+    const h = await firefoxWallet();
+    // One page framing 40 of its own subdomains.
+    const framed = Array.from({ length: 40 }, (_, i) => h.connect(`https://x${i}.evil.example`, OPENAI, { tabId: 1 }));
+    await h.until(() => framed.filter((c) => c.port.received.length > 0).length === 38, 5_000, 'the refusals');
+    await h.settle();
+    expect(await pendingCount(h)).toBe(2);
+    for (const c of framed.filter((x) => x.port.received.length > 0)) {
+      const reply = c.port.received[0];
+      expect(reply.payload.code).toBe('RATE_LIMITED');
+      expect(reply.payload.retryAfter).toBeGreaterThan(100);
+      expect(reply.payload.retryAfter).toBeLessThanOrEqual(120);
+    }
+    expect(h.browser.windows.create).toHaveBeenCalledTimes(1);
+
+    // Other tabs fill the queue up to five.
+    const others = Array.from({ length: 6 }, (_, i) => h.connect(`https://app${i}.example`, OPENAI, { tabId: 10 + i }));
+    await h.until(() => others.filter((c) => c.port.received.length > 0).length === 3, 5_000, 'the refusals');
+    await h.settle();
+    expect(await pendingCount(h)).toBe(5);
+    for (const c of [...framed, ...others]) c.response.catch(() => {});
+  });
+
+  it('still lets a request wait on one its origin already queued', async () => {
+    const h = await firefoxWallet();
+    h.connect('https://one.example', OPENAI, { tabId: 1 });
+    h.connect('https://two.example', OPENAI, { tabId: 1 });
+    await h.until(async () => (await pendingCount(h)) === 2);
+    const again = h.connect('https://one.example', OPENAI, { tabId: 1 });
+    await h.settle();
+    expect(again.port.received).toEqual([]);
+    const approval = (await h.internal('getPendingApprovals')).approvals.find((a: { appOrigin: string }) => a.appOrigin === 'https://one.example');
+    await h.internal('approveConnect', { approvalId: approval.id, trust: false });
+    expect((await again.response).type).toBe('BYOKY_CONNECT_RESPONSE');
+  });
+
+  it('tells other wallet views when the wallet is unlocked', async () => {
+    const h = await startBackground({ firefox: true, local: await walletStorage([{ id: 'o1', providerId: 'openai', key: 'sk-o' }]) });
+    await h.unlock();
+    expect(h.broadcasts.map((b) => b.action)).toContain('sessionChanged');
+  });
+});
+
 describe('background: the toolbar badge counts waiting requests (F055)', () => {
   // The MV2 builds (Firefox, Safari) have browserAction and no action, so
   // the badge call threw there and the error was swallowed.

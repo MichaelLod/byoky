@@ -99,3 +99,49 @@ describe('a locked wallet says an app is waiting (F119)', () => {
     expect(view.container.querySelector('.unlock-pending')?.textContent).toContain('app.example');
   });
 });
+
+// F004: unlocking in one wallet view (the window a request opened) left the
+// others, the Firefox sidebar say, on the unlock screen asking for the
+// password again.
+describe('a locked view follows an unlock in another wallet view (F004)', () => {
+  it('goes to the waiting request', async () => {
+    bg.state.approvals = [req('a1', 'https://app.example')];
+    view = await mount(App);
+    expect(useWalletStore.getState().currentPage).toBe('unlock');
+    bg.state.unlocked = true;
+    await bg.broadcast('sessionChanged');
+    expect(useWalletStore.getState().isUnlocked).toBe(true);
+    expect(useWalletStore.getState().currentPage).toBe('approval');
+    expect(view.container.querySelector('.approval-origin')?.textContent).toBe('app.example');
+  });
+
+  it('goes to the dashboard when nothing waits', async () => {
+    view = await mount(App);
+    bg.state.unlocked = true;
+    await bg.broadcast('sessionChanged');
+    expect(useWalletStore.getState().currentPage).toBe('dashboard');
+  });
+
+  it('follows it on a new request too', async () => {
+    view = await mount(App);
+    bg.state.unlocked = true;
+    bg.state.approvals = [req('a1', 'https://app.example')];
+    await bg.broadcast('newPendingApproval');
+    expect(useWalletStore.getState().currentPage).toBe('approval');
+  });
+
+  it('leaves this view\'s own unlock alone while it runs', async () => {
+    let finish: (r: unknown) => void = () => {};
+    bg.handlers.unlock = () => new Promise((resolve) => { finish = resolve; });
+    view = await mount(App);
+    typeInto(view.container.querySelector<HTMLInputElement>('#password')!, 'right');
+    await run(() => {});
+    await run(() => view!.container.querySelector<HTMLButtonElement>('button[type=submit]')!.click());
+    expect(useWalletStore.getState().submitting).toBe(true);
+    bg.state.unlocked = true;
+    await bg.broadcast('sessionChanged');
+    expect(useWalletStore.getState().currentPage).toBe('unlock');
+    await run(() => finish({ success: true }));
+    expect(useWalletStore.getState().currentPage).toBe('dashboard');
+  });
+});

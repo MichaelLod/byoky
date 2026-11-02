@@ -272,11 +272,18 @@ export const useWalletStore = create<WalletState>((set, get) => ({
   setLockedUntil: (lockedUntil) => set({ lockedUntil }),
 
   // The background also locks on its own (auto-lock after idle) and only
-  // announces it as a session change, so the popup has to ask.
+  // announces it as a session change, so the popup has to ask. The same
+  // goes for an unlock in another wallet view: this one follows it, to the
+  // waiting request if there is one. Not while this view's own unlock runs;
+  // it lands on its own.
   syncLockState: async () => {
     const { unlocked } = await sendInternal('isUnlocked');
     if (!unlocked && get().isUnlocked) {
       set({ ...LOCKED_STATE, error: null });
+    } else if (unlocked && !get().isUnlocked && get().isInitialized && !get().submitting) {
+      set({ isUnlocked: true, currentPage: 'dashboard', error: null, lockedUntil: null });
+      await get().refreshData();
+      if (get().pendingApprovals.length > 0) set({ currentPage: 'approval' });
     }
     return unlocked === true;
   },

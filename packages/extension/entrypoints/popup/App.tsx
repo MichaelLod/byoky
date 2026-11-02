@@ -33,9 +33,13 @@ export default function App() {
       const msg = message as Record<string, string> | null;
       if (!msg || msg.type !== 'BYOKY_INTERNAL') return;
       if (msg.action === 'newPendingApproval') {
-        // While locked, the unlock screen lists what is waiting instead.
+        // While locked, the unlock screen lists what is waiting instead,
+        // unless the wallet was unlocked in another view: then this one
+        // follows it (syncLockState).
         if (!useWalletStore.getState().isUnlocked) {
-          useWalletStore.getState().refreshPending();
+          useWalletStore.getState().syncLockState().then((unlocked) => {
+            if (!unlocked) useWalletStore.getState().refreshPending();
+          });
           return;
         }
         useWalletStore.getState().refreshData().then(() => {

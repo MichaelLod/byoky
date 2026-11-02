@@ -317,15 +317,35 @@ export async function startBackground(opts: HarnessOptions = {}): Promise<Harnes
     }),
   };
 
+  // Windows the background opened, by id (the first is 99), until closed.
+  const openWindows = new Set<number>();
+  let nextWindowId = 99;
+  const windows = {
+    create: vi.fn(async () => {
+      const id = nextWindowId++;
+      openWindows.add(id);
+      return { id };
+    }),
+    update: vi.fn(async (id: number) => {
+      if (!openWindows.has(id)) throw new Error(`Invalid window ID: ${id}`);
+      return { id };
+    }),
+    /** The user closes a window: onRemoved fires. */
+    remove: vi.fn(async (id: number) => {
+      if (openWindows.delete(id)) windows.onRemoved.emit(id);
+    }),
+    onRemoved: new FakeEvent(),
+  };
+
   const browser: any = {
     runtime,
     storage: { local, ...(session ? { session } : {}) },
-    windows: { create: vi.fn(async () => ({ id: 99 })) },
+    windows,
     alarms: { create: vi.fn(), clear: vi.fn(async () => true), onAlarm: new FakeEvent() },
   };
   if (opts.firefox) {
     // MV2: browserAction, and no action.
-    browser.sidebarAction = { toggle: vi.fn() };
+    browser.sidebarAction = { toggle: vi.fn(), isOpen: vi.fn(async () => false) };
     browser.browserAction = { onClicked: new FakeEvent(), setBadgeText: vi.fn(), setBadgeBackgroundColor: vi.fn() };
   } else {
     browser.action = { setBadgeText: vi.fn(), setBadgeBackgroundColor: vi.fn() };
