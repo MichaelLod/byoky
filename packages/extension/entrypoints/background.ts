@@ -3130,8 +3130,11 @@ export default defineBackground(() => {
    * Apps and the bridge know only the registry's placeholder host for a
    * provider without a fixed one (Azure's YOUR_RESOURCE, the local servers'
    * default ports). A request they send there goes to the credential's own
-   * host, same path and query. Null when `url` names another host (validated
-   * as it is) or the credential has no usable base URL.
+   * origin, same path and query: the placeholder has no path, so the app's
+   * path is already whole, and a credential's own path (LM Studio's
+   * `http://localhost:1234/v1`) is not put in front of it again. Null when
+   * `url` names another host (validated as it is), already names the
+   * credential's origin, or the credential has no usable base URL.
    */
   function rebaseOntoCredential(providerId: string, url: string, credentialBaseUrl: string | undefined): string | null {
     const placeholder = PROVIDERS[providerId]?.baseUrl;
@@ -3139,8 +3142,9 @@ export default defineBackground(() => {
     if (!placeholder || !base) return null;
     try {
       const target = new URL(url);
-      if (target.origin !== new URL(placeholder).origin) return null;
-      return `${base.replace(/\/$/, '')}${target.pathname}${target.search}`;
+      const origin = new URL(base).origin;
+      if (target.origin !== new URL(placeholder).origin || target.origin === origin) return null;
+      return `${origin}${target.pathname}${target.search}`;
     } catch {
       return null;
     }

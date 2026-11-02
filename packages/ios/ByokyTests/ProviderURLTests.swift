@@ -91,6 +91,19 @@ final class ProviderURLTests: XCTestCase {
             Provider.rebasedOntoCredential("http://localhost:1234/v1/models", for: "lm_studio", credentialBaseUrl: "http://127.0.0.1:1234"),
             "http://127.0.0.1:1234/v1/models"
         )
+        // Only the credential's origin: LM Studio's docs give OpenAI clients
+        // http://localhost:1234/v1, and the app's path already carries the /v1.
+        XCTAssertEqual(
+            Provider.rebasedOntoCredential("http://localhost:1234/v1/chat/completions?x=1", for: "lm_studio", credentialBaseUrl: "http://127.0.0.1:1234/v1"),
+            "http://127.0.0.1:1234/v1/chat/completions?x=1"
+        )
+        XCTAssertEqual(
+            Provider.rebasedOntoCredential("http://localhost:11434/api/tags", for: "ollama", credentialBaseUrl: "http://[::1]:11500/"),
+            "http://[::1]:11500/api/tags"
+        )
+        // A request already on the credential's origin goes out unchanged.
+        XCTAssertNil(Provider.rebasedOntoCredential("http://localhost:1234/v1/chat/completions", for: "lm_studio", credentialBaseUrl: "http://localhost:1234/v1"))
+        XCTAssertNotNil(Provider.validateUrl("http://localhost:1234/v1/chat/completions", for: "lm_studio", credentialBaseUrl: "http://localhost:1234/v1"))
         // Another host is checked as it is (and refused by validateUrl).
         XCTAssertNil(Provider.rebasedOntoCredential("https://evil.openai.azure.com/openai/models", for: "azure_openai", credentialBaseUrl: "https://myres.openai.azure.com"))
         XCTAssertNil(Provider.rebasedOntoCredential("http://127.0.0.1:11434/api/tags", for: "ollama", credentialBaseUrl: "http://localhost:11500"))

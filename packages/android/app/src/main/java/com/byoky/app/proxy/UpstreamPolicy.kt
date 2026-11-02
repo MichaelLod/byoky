@@ -60,19 +60,23 @@ object UpstreamPolicy {
     )
 
     /**
-     * [url] on the credential's own server when it names the placeholder
+     * [url] on the credential's own origin when it names the placeholder
      * host of a provider without a fixed one (an app knows no other), path
-     * and query as they were; null for any other URL (checked by [target]
-     * as it is) or a credential without a usable base URL. Mirrors the
-     * extension's `rebaseOntoCredential` and iOS.
+     * and query as they were: the placeholder has no path, so the app's path
+     * is already whole, and a credential's own path (LM Studio's
+     * `http://localhost:1234/v1`) is not put in front of it again. Null for
+     * any other URL (checked by [target] as it is), one already on the
+     * credential's origin, or a credential without a usable base URL.
+     * Mirrors the extension's `rebaseOntoCredential` and iOS.
      */
     fun rebase(provider: Provider, url: HttpUrl, credentialBaseUrl: String?): HttpUrl? {
         if (!provider.requiresCustomBaseUrl) return null
         val placeholder = PLACEHOLDER_BASE_URLS[provider.id]?.toHttpUrlOrNull() ?: return null
         if (originOf(url) != originOf(placeholder)) return null
-        val base = CredentialBaseUrl.normalize(provider.id, credentialBaseUrl) ?: return null
+        val origin = CredentialBaseUrl.originOf(provider.id, credentialBaseUrl) ?: return null
+        if (originOf(url) == origin) return null
         val query = url.encodedQuery?.let { "?$it" } ?: ""
-        return "$base${url.encodedPath}$query".toHttpUrlOrNull()
+        return "$origin${url.encodedPath}$query".toHttpUrlOrNull()
     }
 
     /** Base URL to hand to `rewriteProxyUrl` when routing to [dstProviderId]. */

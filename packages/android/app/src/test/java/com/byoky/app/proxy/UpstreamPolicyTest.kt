@@ -108,6 +108,24 @@ class UpstreamPolicyTest {
             "http://127.0.0.1:1234/v1/models",
             UpstreamPolicy.rebase(Provider.find("lm_studio")!!, "http://localhost:1234/v1/models".toHttpUrl(), "http://127.0.0.1:1234").toString(),
         )
+        // Only the credential's origin: LM Studio's docs give OpenAI clients
+        // http://localhost:1234/v1, and the app's path already carries the /v1.
+        val lmStudio = Provider.find("lm_studio")!!
+        assertEquals(
+            "http://127.0.0.1:1234/v1/chat/completions?x=1",
+            UpstreamPolicy.rebase(lmStudio, "http://localhost:1234/v1/chat/completions?x=1".toHttpUrl(), "http://127.0.0.1:1234/v1").toString(),
+        )
+        assertEquals(
+            "http://[::1]:11500/api/tags",
+            UpstreamPolicy.rebase(ollama, "http://localhost:11434/api/tags".toHttpUrl(), "http://[::1]:11500/").toString(),
+        )
+        // A request already on the credential's origin goes out unchanged.
+        val onCredential = "http://localhost:1234/v1/chat/completions".toHttpUrl()
+        assertNull(UpstreamPolicy.rebase(lmStudio, onCredential, "http://localhost:1234/v1"))
+        assertEquals(
+            UpstreamPolicy.Target.Allowed("http://localhost:1234/v1/chat/completions"),
+            UpstreamPolicy.target(lmStudio, onCredential, "http://localhost:1234/v1"),
+        )
         // Another host is checked as it is (and refused by target).
         assertNull(UpstreamPolicy.rebase(azure, "https://evil.openai.azure.com/openai/models".toHttpUrl(), "https://myres.openai.azure.com"))
         assertNull(UpstreamPolicy.rebase(ollama, "http://127.0.0.1:11434/api/tags".toHttpUrl(), "http://localhost:11500"))
