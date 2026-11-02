@@ -619,6 +619,26 @@ describe('anthropicAdapter — structured outputs (output_config.format)', () =>
       properties: { a: { $ref: '#/$defs/Point' }, b: { $ref: '#/$defs/Point' } },
       additionalProperties: false,
     });
+
+    // A root $ref keeps the definitions it points at (zod-to-json-schema
+    // with a name gives this shape); Claude answers 400 without them.
+    const record = { type: 'object', properties: { id: { type: 'string', maxLength: 8 } } };
+    const fittedRecord = {
+      type: 'object',
+      properties: { id: { type: 'string', description: '{maxLength: 8}' } },
+      additionalProperties: false,
+    };
+    for (const kind of ['definitions', '$defs']) {
+      const rootRef = serialize({
+        $schema: 'http://json-schema.org/draft-07/schema#',
+        $ref: `#/${kind}/Record`,
+        [kind]: { Record: record },
+      });
+      expect((rootRef.output_config as { format: { schema: unknown } }).format.schema).toEqual({
+        [kind]: { Record: fittedRecord },
+        $ref: `#/${kind}/Record`,
+      });
+    }
   });
 
   it('refuses what Claude cannot express, without naming another provider', () => {

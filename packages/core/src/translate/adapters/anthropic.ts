@@ -559,9 +559,9 @@ function fitClaudeSchema(node: unknown): Record<string, unknown> {
     return value;
   };
   for (const key of SCHEMA_METADATA) delete rest[key];
-  const ref = take('$ref');
-  if (typeof ref === 'string') return { $ref: ref };
 
+  // Read before a $ref returns: a root {$ref, definitions} (zod-to-json-schema
+  // with a name) needs its definitions, or Claude finds none to point at.
   const out: Record<string, unknown> = {};
   for (const kind of ['$defs', 'definitions']) {
     const defs = take(kind);
@@ -569,6 +569,8 @@ function fitClaudeSchema(node: unknown): Record<string, unknown> {
       out[kind] = Object.fromEntries(Object.entries(defs).map(([name, def]) => [name, fitClaudeSchema(def)]));
     }
   }
+  const ref = take('$ref');
+  if (typeof ref === 'string') return { ...out, $ref: ref };
 
   const type = take('type');
   const anyOf = take('anyOf');
