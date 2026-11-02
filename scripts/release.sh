@@ -209,6 +209,24 @@ release_notes() {
 STORE_RESULTS=()
 store_result() { STORE_RESULTS+=("$1: $2"); }
 
+# The GitHub release's word on each store, from what this run did there: a
+# store that was skipped isn't listed, and one held back or not reached
+# isn't claimed as submitted.
+store_footer() {
+  local r label lines=()
+  for r in ${STORE_RESULTS[@]+"${STORE_RESULTS[@]}"}; do
+    label="${r%%: *}"
+    case "${r#*: }" in
+      skipped*) ;;
+      "submitted for review"*|uploaded*) lines+=("- **${label}**: submitted for review") ;;
+      *) lines+=("- **${label}**: not submitted yet") ;;
+    esac
+  done
+  [ ${#lines[@]} -gt 0 ] || return 0
+  printf '\n\n### Stores\n\n'
+  printf '%s\n' "${lines[@]}"
+}
+
 # Uploads an .ipa (ios) or .pkg (macos) to App Store Connect, and notes the
 # upload in build/asc-uploads/: App Store Connect lists a build only some
 # minutes after the upload, and refuses a second upload of the same build
@@ -304,6 +322,12 @@ if [ "${1:-}" = "retry" ]; then
   STORE_NOTES_FILE="$BUILD_DIR/store-notes.txt"
   PREV_TAG=$(git tag --list 'v*' --sort=-version:refname | sed -n '2p')
   write_store_notes "$CURRENT" "$PREV_TAG" "$STORE_NOTES_FILE"
+  if [ ! -f "docs/release-notes/v${CURRENT}.txt" ] && \
+     { [ -n "${ASC_KEY_ID:-}" ] || [ -n "${GOOGLE_PLAY_SERVICE_ACCOUNT_JSON:-}" ]; }; then
+    echo "WARN: docs/release-notes/v${CURRENT}.txt is missing: an App Store submission or Google Play"
+    echo "      upload below gets notes generated from feat:/fix: commits"
+    echo ""
+  fi
 
   # Where each store stands, from the same check the release runs. A store
   # with a submission in review is left alone: an upload would replace the
@@ -522,6 +546,7 @@ ALLOW_BRANCH=false
 ALLOW_DIRTY=false
 SKIP_NATIVE_TESTS=false
 ALLOW_RED_CI=false
+ALLOW_GENERATED_NOTES=false
 NEW_VERSION=""
 
 for arg in "$@"; do
@@ -536,6 +561,7 @@ for arg in "$@"; do
     --allow-dirty) ALLOW_DIRTY=true ;;
     --skip-native-tests) SKIP_NATIVE_TESTS=true ;;
     --allow-red-ci) ALLOW_RED_CI=true ;;
+    --allow-generated-notes) ALLOW_GENERATED_NOTES=true ;;
     *)         NEW_VERSION="$arg" ;;
   esac
 done
@@ -545,6 +571,7 @@ if [ -z "$NEW_VERSION" ]; then
   echo "Usage: ./scripts/release.sh <new-version> [--dry] [--skip-mobile] [--skip-store-uploads] [--yes]"
   echo "                                           [--allow-pending] [--hold-macos] [--allow-branch]"
   echo "                                           [--allow-dirty] [--skip-native-tests] [--allow-red-ci]"
+  echo "                                           [--allow-generated-notes]"
   echo "       ./scripts/release.sh status"
   echo "       ./scripts/release.sh retry [--allow-pending] [--hold-macos] [--allow-red-ci]"
   echo ""
@@ -573,6 +600,11 @@ if [ -z "$NEW_VERSION" ]; then
   echo "  --allow-red-ci         Release although GitHub Actions hasn't passed on HEAD"
   echo "                         (failed, still running, or never ran because HEAD isn't"
   echo "                         pushed). With retry: on the tagged commit"
+  echo "  --allow-generated-notes"
+  echo "                         Upload to the App Store and Google Play without"
+  echo "                         docs/release-notes/v<version>.txt: they then show notes"
+  echo "                         generated from feat:/fix: commits, usually just"
+  echo "                         \"Bug fixes and improvements.\""
   echo ""
   echo "Releases go out from main: fast-forward main to the work, release from the main"
   echo "checkout. The release commit and tag v<version> are pushed to origin main."
@@ -725,6 +757,27 @@ STORES_SKIPPED=()
 [ -n "${GOOGLE_PLAY_SERVICE_ACCOUNT_JSON:-}" ] \
   && STORES_CONFIGURED+=("Google Play") \
   || STORES_SKIPPED+=("Google Play (GOOGLE_PLAY_SERVICE_ACCOUNT_JSON)")
+
+# The App Store's "What's New" and Google Play's release notes are
+# docs/release-notes/v<version>.txt. Without it they're generated from
+# feat:/fix: commit prefixes, which this repo doesn't use, so the stores would
+# show "Bug fixes and improvements."; neither can be changed once submitted.
+# Google Play takes 500 characters.
+NOTES_FILE="docs/release-notes/v${NEW_VERSION}.txt"
+if [ "$SKIP_STORE_UPLOADS" = false ] && \
+   { { [ "$SKIP_IOS" = false ] && [ -n "${ASC_KEY_ID:-}" ] && [ -n "${ASC_ISSUER_ID:-}" ]; } || \
+     { [ "$SKIP_ANDROID" = false ] && [ -n "${GOOGLE_PLAY_SERVICE_ACCOUNT_JSON:-}" ]; }; }; then
+  if [ -f "$NOTES_FILE" ]; then
+    NOTES_LENGTH=$(node -p 'require("fs").readFileSync(process.argv[1], "utf8").trimEnd().length' "$NOTES_FILE")
+    if [ "$NOTES_LENGTH" -gt 500 ]; then
+      ERRORS+=("${NOTES_FILE} has ${NOTES_LENGTH} characters; Google Play takes 500 and would cut it off")
+    fi
+  elif [ "$ALLOW_GENERATED_NOTES" = true ]; then
+    WARNINGS+=("${NOTES_FILE} is missing (--allow-generated-notes): the App Store and Google Play get notes generated from feat:/fix: commits")
+  else
+    ERRORS+=("${NOTES_FILE} is missing: the App Store and Google Play would show \"Bug fixes and improvements.\" Write it (500 characters at most, plain text) and commit it, or pass --allow-generated-notes")
+  fi
+fi
 
 if [ "$HOLD_MACOS" = true ] && [ "$SKIP_IOS" = false ] && [ "$SKIP_STORE_UPLOADS" = false ]; then
   WARNINGS+=("--hold-macos: the Mac app is built but not uploaded or submitted; ./scripts/release.sh retry does that once the macOS version in review is through")
@@ -1325,7 +1378,7 @@ for f in dist/byoky-*-v${NEW_VERSION}.*; do
   [ -f "$f" ] && RELEASE_ASSETS+=("$f")
 done
 
-github_release "$NEW_VERSION" "$RELEASE_NOTES"
+github_release "$NEW_VERSION" "${RELEASE_NOTES}$(store_footer)"
 STAGE=released
 
 # ============================================================
@@ -1334,12 +1387,19 @@ STAGE=released
 step "Discord notification"
 
 if [ -n "${DISCORD_WEBHOOK_URL:-}" ]; then
+  # The hand-written notes when there are any: the commits here don't use
+  # the feat: prefix the generated notes' Features section collects.
+  if [ -f "docs/release-notes/v${NEW_VERSION}.txt" ]; then
+    DISCORD_CHANGES=$(cat "docs/release-notes/v${NEW_VERSION}.txt")
+  else
+    DISCORD_CHANGES=$(echo "$RELEASE_NOTES" | sed -n '/^### Features/,/^### [^F]/{ /^### [^F]/!p; }' | head -15)
+  fi
   # Build a concise Discord message (markdown supported)
   DISCORD_MSG="**byoky v${NEW_VERSION}** released
 
 **npm:** \`${NEW_VERSION}\` | **Native:** \`${NEW_NATIVE_VERSION}\` (${NEW_VERSION_CODE})
 
-$(echo "$RELEASE_NOTES" | sed -n '/^### Features/,/^### [^F]/{ /^### [^F]/!p; }' | head -15)
+${DISCORD_CHANGES}
 
 **Links:**
 - [GitHub Release](https://github.com/MichaelLod/byoky/releases/tag/v${NEW_VERSION})

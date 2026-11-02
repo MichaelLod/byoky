@@ -46,11 +46,14 @@ const plist = (version, build) => `<?xml version="1.0" encoding="UTF-8"?>
 // package names), gh (STUB_GH_RELEASE_MISSING=1: no release yet; `gh run list`
 // answers STUB_GH_RUNS, green by default, and `gh run view` STUB_GH_JOBS), xcrun,
 // xcodebuild (an export leaves an .ipa, or a .pkg for the macOS archive).
+// curl (answers 204, for the Discord webhook).
 // The submit-appstore.mjs stub exits STUB_ASC_<IOS|MAC_OS>_QUICK for retry's
 // first look (ASC_BUILD_WAIT_MIN=0) and STUB_ASC_<platform>_WAIT otherwise.
+// `notes` commits docs/release-notes/v1.1.2.txt, the stores' "What's New".
 // `real` names scripts copied from scripts/ instead of stubbed; run them
 // with run(args, env, routes) to give them a stubbed fetch (fetch-stub.mjs).
-function sandbox({ version = '1.1.1', versionCode = 30, android = false, real = [] } = {}) {
+const STORE_NOTES = 'Fixes and a security update.\n'
+function sandbox({ version = '1.1.1', versionCode = 30, android = false, real = [], notes = true } = {}) {
   const base = mkdtempSync(join(tmpdir(), 'byoky-release-sh-'))
   const work = join(base, 'work')
   const bin = join(base, 'bin')
@@ -81,6 +84,7 @@ function sandbox({ version = '1.1.1', versionCode = 30, android = false, real = 
     write(join(work, 'packages/extension/.output', out, 'manifest.json'), JSON.stringify({ version }) + '\n')
   }
   for (const f of ['pnpm-lock.yaml', 'pnpm-workspace.yaml', 'tsconfig.base.json', 'README.md']) write(join(work, f), '\n')
+  if (notes) write(join(work, 'docs/release-notes/v1.1.2.txt'), STORE_NOTES)
   write(join(work, '.gitignore'), 'node_modules/\ndist/\n.output/\nbuild/\n.env\n.env.local\n')
   mkdirSync(join(work, 'scripts/tests'), { recursive: true })
   copyFileSync(join(SCRIPTS, 'release.sh'), join(work, 'scripts/release.sh'))
@@ -126,6 +130,7 @@ esac
   "simctl create"*) echo UDID-1 ;;
 esac
 `, 0o755)
+  write(join(bin, 'curl'), logArgs('curl') + 'printf 204\n', 0o755)
   write(join(bin, 'npx'), logArgs('npx') + `if [ "$1" = chrome-webstore-upload ]; then
   echo "npx-env PUBLISHER_ID=\${PUBLISHER_ID:-} CLIENT_ID=\${CLIENT_ID:-} CLIENT_SECRET=\${CLIENT_SECRET:+set} REFRESH_TOKEN=\${REFRESH_TOKEN:+set}" >> "$CALLS"
   [ -n "\${STUB_NPX_REAL:-}" ] && shift && exec node "${CWS_CLI}" "$@"
@@ -309,6 +314,44 @@ test('a pending review or an unreadable review state (store-status exit 3) stops
   const allowed = s.run(['1.1.2', '--dry', '--allow-pending'], { STUB_STATUS_CODE: '3' })
   assert.equal(allowed.code, 0, allowed.out)
   assert.match(allowed.out, /WARN: a review is pending, or a store's review state is unknown \(above\); --allow-pending releases anyway/)
+})
+
+// --- store notes ---
+
+test("an App Store or Google Play release needs docs/release-notes/v<version>.txt, unless --allow-generated-notes", (t) => {
+  const s = sandbox({ notes: false })
+  t.after(s.cleanup)
+  const r = s.run(['1.1.2', '--dry'], FAKE_ASC_ENV)
+  assert.equal(r.code, 1, r.out)
+  assert.match(r.out, /ERROR: docs\/release-notes\/v1\.1\.2\.txt is missing: the App Store and Google Play would show "Bug fixes and improvements\." .*--allow-generated-notes/)
+  assert.doesNotMatch(r.calls, /pnpm install/)
+
+  const generated = s.run(['1.1.2', '--dry', '--allow-generated-notes'], FAKE_ASC_ENV)
+  assert.equal(generated.code, 0, generated.out)
+  assert.match(generated.out, /WARN: docs\/release-notes\/v1\.1\.2\.txt is missing \(--allow-generated-notes\)/)
+
+  // No App Store or Google Play upload, no notes needed.
+  assert.equal(s.run(['1.1.2', '--dry']).code, 0)
+  assert.equal(s.run(['1.1.2', '--dry', '--skip-store-uploads'], FAKE_ASC_ENV).code, 0)
+  assert.equal(s.run(['1.1.2', '--dry', '--skip-mobile'], FAKE_ASC_ENV).code, 0)
+
+  // Google Play keeps 500 characters (not bytes).
+  write(join(s.work, 'docs/release-notes/v1.1.2.txt'), '•'.repeat(500) + '\n')
+  s.git('add', '-A')
+  s.git('commit', '-q', '-m', 'notes')
+  s.git('push', '-q', 'origin', 'main')
+  assert.equal(s.run(['1.1.2', '--dry'], FAKE_ASC_ENV).code, 0)
+  write(join(s.work, 'docs/release-notes/v1.1.2.txt'), '•'.repeat(501) + '\n')
+  const long = s.run(['1.1.2', '--dry', '--allow-dirty'], FAKE_ASC_ENV)
+  assert.equal(long.code, 1, long.out)
+  assert.match(long.out, /ERROR: docs\/release-notes\/v1\.1\.2\.txt has 501 characters; Google Play takes 500/)
+})
+
+test('retry warns when the hand-written store notes are missing', (t) => {
+  const s = released(t, { notes: false })
+  const r = s.run(['retry'], { ASC_KEY_ID: 'TESTKEY', ASC_ISSUER_ID: 'test-issuer' })
+  assert.match(r.out, /WARN: docs\/release-notes\/v1\.1\.2\.txt is missing/)
+  assert.doesNotMatch(s.run(['retry']).out, /release-notes/)
 })
 
 // --- branch, origin and tags ---
@@ -539,12 +582,17 @@ test('a release from main bumps, commits, pushes main and the tag together, and 
   write(join(s.work, 'packages/core/node_modules/dep/index.js'), 'dep')
   write(join(s.work, 'packages/sdk/dist/index.js'), 'built')
 
-  const r = s.run(['1.1.2', '--yes', '--skip-mobile'], { STUB_GH_RELEASE_MISSING: '1' })
+  const r = s.run(['1.1.2', '--yes', '--skip-mobile'], { STUB_GH_RELEASE_MISSING: '1', DISCORD_WEBHOOK_URL: 'https://discord.test/hook' })
   assert.equal(r.code, 0, r.out)
   assert.equal(s.origin('log', '-1', '--format=%s', 'main').trim(), 'Bump to v1.1.2 (native 1.1.2/31)')
   assert.equal(s.origin('rev-parse', 'v1.1.2^{commit}'), s.origin('rev-parse', 'main'))
   assert.equal((r.calls.match(/^pnpm publish --access public --no-git-checks$/gm) ?? []).length, 5, r.calls)
   assert.match(r.calls, /^gh release create v1\.1\.2 .*--verify-tag/m)
+  // The GitHub release lists the stores this run submitted to, and only those.
+  assert.match(r.calls, /--notes Fixes and a security update\.\n\nnotes\n\n### Stores\n\n- \*\*Chrome Web Store\*\*: submitted for review\n/)
+  assert.doesNotMatch(r.calls, /Firefox Add-ons\*\*|App Store|Google Play\*\*/)
+  // Discord gets the hand-written notes.
+  assert.match(r.calls, /^curl .*"content":"\*\*byoky v1\.1\.2\*\* released[^"]*Fixes and a security update\./m)
   assert.match(r.out, /Chrome Web Store: uploaded, publishes after review/)
   assert.match(r.out, /Firefox Add-ons: skipped \(credentials not configured\)/)
   assert.doesNotMatch(unzipList(join(s.work, 'dist/byoky-chrome-v1.1.2.zip')), /old-chunk\.js/)
@@ -682,8 +730,10 @@ test('--hold-macos ships everything but the Mac app while macOS 1.1.0 is in revi
   assert.match(chrome.out, /App Store \(macOS\) v1\.1\.0 WAITING_FOR_REVIEW {2}\[ignored: not counted\]/)
   assert.doesNotMatch(chrome.calls, /pnpm install/)
 
-  const r = s.run([...args, '--hold-macos'], ASC_ENV, storesWithMacInReview())
+  const r = s.run([...args, '--hold-macos'], { ...ASC_ENV, STUB_GH_RELEASE_MISSING: '1' }, storesWithMacInReview())
   assert.equal(r.code, 0, r.out)
+  // The GitHub release doesn't claim the held Mac app was submitted.
+  assert.match(r.calls, /- \*\*App Store \(iOS\)\*\*: submitted for review\n- \*\*App Store \(macOS\)\*\*: not submitted yet\n/)
   assert.match(r.calls, /^xcodebuild archive .*-scheme Byoky \(macOS\) /m)
   assert.ok(existsSync(join(s.work, 'dist/byoky-macos-v1.1.2.pkg')), 'the Mac build is kept for retry')
   assert.doesNotMatch(r.calls, /altool --upload-app --file dist\/byoky-macos/)

@@ -104,11 +104,7 @@ parts.push('')
 parts.push('```bash')
 parts.push(`npm install @byoky/sdk@${version}`)
 parts.push('```')
-parts.push('')
-parts.push('- **Chrome**: auto-updated via Chrome Web Store')
-parts.push('- **Firefox**: submitted for review on AMO')
-parts.push('- **Safari (macOS)**: submitted to Mac App Store')
-parts.push('- **iOS**: submitted to App Store')
-parts.push('- **Android**: submitted to Google Play')
+// Where each store stands is release.sh's to say: it appends a "Stores"
+// section from what its run did there.
 
 console.log(parts.join('\n'))
