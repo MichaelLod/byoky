@@ -115,6 +115,109 @@ final class NativeBridgeE2ETests: XCTestCase {
         XCTAssertEqual(received, audio)
     }
 
+    // MARK: - Large replies (F009)
+
+    /// Reply bodies are read off the main actor: read byte by byte on it,
+    /// a 1 MiB reply took 12 s and 4 MiB of audio a minute.
+    @MainActor
+    func testALargeJSONReplyArrivesQuickly() async throws {
+        let h = try await BridgeHarness.make(self)
+        let body = #"{"id":"c1","choices":[{"message":{"role":"assistant","content":""# + Self.filler(1 << 20) + #""}}]}"#
+        StubUpstream.script(.init(chunks: Self.pieces(Data(body.utf8))))
+
+        let start = ContinuousClock.now
+        let replies = try await h.proxy(body: #"{"model":"gpt-5.5","messages":[]}"#, timeoutMs: 60_000)
+        let elapsed = ContinuousClock.now - start
+
+        XCTAssertEqual(replies.last?.type, "BYOKY_PROXY_RESPONSE_DONE")
+        XCTAssertEqual(BridgeHarness.text(of: replies), body)
+        XCTAssertLessThan(elapsed, .seconds(2), "1 MiB took \(elapsed)")
+    }
+
+    @MainActor
+    func testALargeBinaryReplyArrivesQuickly() async throws {
+        let h = try await BridgeHarness.make(self)
+        let audio = Data((0..<(4 << 20)).map { UInt8(truncatingIfNeeded: $0 &* 31 &+ $0 >> 9) })
+        StubUpstream.script(.init(headers: ["Content-Type": "audio/mpeg"], chunks: Self.pieces(audio)))
+
+        let start = ContinuousClock.now
+        let replies = try await h.proxy(
+            url: "https://api.openai.com/v1/audio/speech",
+            body: #"{"model":"gpt-4o-mini-tts","input":"hi","voice":"alloy"}"#,
+            timeoutMs: 120_000
+        )
+        let elapsed = ContinuousClock.now - start
+
+        XCTAssertEqual(replies.last?.type, "BYOKY_PROXY_RESPONSE_DONE")
+        let received = replies.filter { $0.type == "BYOKY_PROXY_RESPONSE_CHUNK" }.reduce(into: Data()) { out, chunk in
+            XCTAssertEqual(chunk["chunkEncoding"] as? String, "base64")
+            out.append(Data(base64Encoded: chunk["chunk"] as? String ?? "") ?? Data("!".utf8))
+        }
+        XCTAssertEqual(received, audio)
+        XCTAssertLessThan(elapsed, .seconds(2), "4 MiB took \(elapsed)")
+    }
+
+    /// The translated paths read the same way: a 1 MB reply, whole and as
+    /// a stream, from Anthropic to an OpenAI app.
+    @MainActor
+    func testALargeTranslatedReplyArrivesQuickly() async throws {
+        let h = try await BridgeHarness.make(self, provider: "anthropic")
+        let text = Self.filler(1 << 20)
+        let reply = #"{"id":"msg_1","type":"message","role":"assistant","model":"claude-sonnet-4-6","content":[{"type":"text","text":""# + text + #""}],"stop_reason":"end_turn","usage":{"input_tokens":3,"output_tokens":2}}"#
+        StubUpstream.script(.init(chunks: Self.pieces(Data(reply.utf8))))
+
+        let start = ContinuousClock.now
+        let replies = try await h.proxy(body: #"{"model":"gpt-5.5","messages":[{"role":"user","content":"hi"}]}"#, timeoutMs: 60_000)
+        let elapsed = ContinuousClock.now - start
+
+        XCTAssertEqual(replies.last?.type, "BYOKY_PROXY_RESPONSE_DONE")
+        let translated = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(BridgeHarness.text(of: replies).utf8)) as? [String: Any])
+        let message = (translated["choices"] as? [[String: Any]])?.first?["message"] as? [String: Any]
+        XCTAssertEqual(message?["content"] as? String, text)
+        XCTAssertLessThan(elapsed, .seconds(2), "1 MB took \(elapsed)")
+    }
+
+    @MainActor
+    func testALargeTranslatedStreamArrivesQuickly() async throws {
+        let h = try await BridgeHarness.make(self, provider: "anthropic")
+        let deltas = (0..<64).map { _ in Self.filler(16_384) }
+        func event(_ name: String, _ json: String) -> String { "event: \(name)\ndata: \(json)\n\n" }
+        var stream = event("message_start", #"{"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","model":"claude-sonnet-4-6","content":[],"stop_reason":null,"usage":{"input_tokens":3,"output_tokens":1}}}"#)
+        stream += event("content_block_start", #"{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}"#)
+        for delta in deltas {
+            stream += event("content_block_delta", #"{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":""# + delta + #""}}"#)
+        }
+        stream += event("content_block_stop", #"{"type":"content_block_stop","index":0}"#)
+        stream += event("message_delta", #"{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":2}}"#)
+        stream += event("message_stop", #"{"type":"message_stop"}"#)
+        StubUpstream.script(.init(headers: ["Content-Type": "text/event-stream"], chunks: Self.pieces(Data(stream.utf8))))
+
+        let start = ContinuousClock.now
+        let replies = try await h.proxy(body: #"{"model":"gpt-5.5","stream":true,"messages":[{"role":"user","content":"hi"}]}"#, timeoutMs: 60_000)
+        let elapsed = ContinuousClock.now - start
+
+        XCTAssertEqual(replies.last?.type, "BYOKY_PROXY_RESPONSE_DONE")
+        let content = BridgeHarness.text(of: replies).split(separator: "\n").compactMap { line -> String? in
+            guard line.hasPrefix("data: "), line != "data: [DONE]",
+                  let json = try? JSONSerialization.jsonObject(with: Data(line.dropFirst(6).utf8)) as? [String: Any],
+                  let delta = (json["choices"] as? [[String: Any]])?.first?["delta"] as? [String: Any] else { return nil }
+            return delta["content"] as? String
+        }.joined()
+        XCTAssertEqual(content, deltas.joined())
+        XCTAssertLessThan(elapsed, .seconds(2), "1 MB stream took \(elapsed)")
+    }
+
+    /// `count` bytes of ASCII text with no newline or JSON escapes.
+    private static func filler(_ count: Int) -> String {
+        let alphabet = Array("abcdefghijklmnopqrstuvwxyz0123456789 ")
+        return String((0..<count).map { alphabet[$0 % alphabet.count] })
+    }
+
+    /// `data` in 64 KiB pieces, as a network delivers it.
+    private static func pieces(_ data: Data) -> [Data] {
+        stride(from: 0, to: data.count, by: 65_536).map { data.subdata(in: $0..<min($0 + 65_536, data.count)) }
+    }
+
     func testTextContentTypes() {
         for type in ["application/json", "text/event-stream; charset=utf-8", "text/plain", "application/problem+json",
                      "application/xml", "application/javascript", "application/x-www-form-urlencoded", ""] {

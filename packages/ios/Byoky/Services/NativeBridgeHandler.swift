@@ -622,13 +622,11 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
                 // that; a longer one goes out as it arrives.
                 var errorBody = TranslatedErrorBody(limit: maxTranslatedErrorBytes)
                 var chunk = Data()
-                for try await byte in bytes {
-                    chunk.append(byte)
-                    if chunk.count >= 65_536 {
-                        meter.consume(chunk)
-                        deliverChunk(requestId, errorBody.append(chunk))
-                        chunk.removeAll(keepingCapacity: true)
-                    }
+                var reader = bytes.makeAsyncIterator()
+                while try await Self.readChunk(into: &chunk, from: &reader, limit: 65_536) {
+                    meter.consume(chunk)
+                    deliverChunk(requestId, errorBody.append(chunk))
+                    chunk.removeAll(keepingCapacity: true)
                 }
                 meter.consume(chunk)
                 meter.markComplete()
@@ -653,13 +651,11 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
                     guard !text.isEmpty else { return }
                     try translateAndDeliver(toolNameRewriter?.process(text) ?? text)
                 }
-                for try await byte in bytes {
-                    buffer.append(byte)
-                    if buffer.count >= 4096 || byte == 0x0A {
-                        meter.consume(buffer)
-                        try rewriteAndTranslate(decoder.decode(buffer))
-                        buffer.removeAll(keepingCapacity: true)
-                    }
+                var reader = bytes.makeAsyncIterator()
+                while try await Self.readChunk(into: &buffer, from: &reader, limit: 4096, splitOnNewline: true) {
+                    meter.consume(buffer)
+                    try rewriteAndTranslate(decoder.decode(buffer))
+                    buffer.removeAll(keepingCapacity: true)
                 }
                 meter.consume(buffer)
                 meter.markComplete()
@@ -676,13 +672,11 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
                 // counts what arrived.
                 var accumulated = Data()
                 var chunk = Data()
-                for try await byte in bytes {
-                    chunk.append(byte)
-                    if chunk.count >= 65_536 {
-                        meter.consume(chunk)
-                        accumulated.append(chunk)
-                        chunk.removeAll(keepingCapacity: true)
-                    }
+                var reader = bytes.makeAsyncIterator()
+                while try await Self.readChunk(into: &chunk, from: &reader, limit: 65_536) {
+                    meter.consume(chunk)
+                    accumulated.append(chunk)
+                    chunk.removeAll(keepingCapacity: true)
                 }
                 meter.consume(chunk)
                 accumulated.append(chunk)
@@ -1007,14 +1001,12 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
             deliverChunk(requestId, rewriter?.process(text) ?? text)
         }
         var failure: Error?
+        var reader = bytes.makeAsyncIterator()
         do {
-            for try await byte in bytes {
-                buffer.append(byte)
-                if buffer.count >= 4096 || (!binary && byte == 0x0A) {
-                    meter.consume(buffer)
-                    emit(buffer)
-                    buffer.removeAll(keepingCapacity: true)
-                }
+            while try await Self.readChunk(into: &buffer, from: &reader, limit: 4096, splitOnNewline: !binary) {
+                meter.consume(buffer)
+                emit(buffer)
+                buffer.removeAll(keepingCapacity: true)
             }
             meter.markComplete()
         } catch {
@@ -1030,6 +1022,27 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
             }
         }
         return failure
+    }
+
+    /// Reads the response body on into `buffer` until it holds `limit`
+    /// bytes or, with `splitOnNewline`, a line. True when a chunk is ready;
+    /// false once the body ended (`buffer` keeps any rest). Nonisolated, so
+    /// the byte-by-byte reading runs off the main actor in the same task
+    /// (cancellation and URLSession's backpressure unchanged) and only each
+    /// chunk comes back to it: read byte by byte on the main actor, a reply
+    /// moved at about 75 KB/s. `buffer` is inout so the bytes read before a
+    /// connection drops stay with the caller to deliver and meter.
+    nonisolated static func readChunk(
+        into buffer: inout Data,
+        from reader: inout URLSession.AsyncBytes.AsyncIterator,
+        limit: Int,
+        splitOnNewline: Bool = false
+    ) async throws -> Bool {
+        while let byte = try await reader.next() {
+            buffer.append(byte)
+            if buffer.count >= limit || (splitOnNewline && byte == 0x0A) { return true }
+        }
+        return false
     }
 
     // MARK: - Bridge delivery
