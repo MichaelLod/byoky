@@ -748,3 +748,43 @@ describe('cross-family dispatch — refusals and blocked prompts', () => {
     expect(out).toContain('Prompt blocked: SAFETY');
   });
 });
+
+describe('cross-family dispatch — errors in the middle of a Gemini stream', () => {
+  it('a bare Gemini error object reaches an Anthropic app as event: error, not a clean end_turn', () => {
+    const t = createStreamTranslator({ ...ctx('anthropic', 'gemini'), isStreaming: true });
+    const out =
+      t.process('data: {"candidates":[{"content":{"parts":[{"text":"Hel"}],"role":"model"}}]}\r\n\r\n') +
+      t.process('{"error":{"code":503,"message":"The model is overloaded.","status":"UNAVAILABLE"}}\r\n') +
+      t.flush();
+    expect(out).toContain('event: error');
+    expect(out).toContain('"type":"overloaded_error"');
+    expect(out).not.toContain('end_turn');
+    expect(out).not.toContain('message_stop');
+  });
+
+  it('a bare Gemini error object reaches an OpenAI app as an error chunk, not finish_reason stop', () => {
+    const t = createStreamTranslator({ ...ctx('openai', 'gemini'), isStreaming: true });
+    const out =
+      t.process('data: {"candidates":[{"content":{"parts":[{"text":"Hel"}],"role":"model"}}]}\r\n\r\n') +
+      t.process('{\r\n  "error": {\r\n    "code": 503,\r\n    "message": "busy",\r\n    "status": "UNAVAILABLE"\r\n  }\r\n}\r\n') +
+      t.flush();
+    expect(out).toContain('"error":{');
+    expect(out).not.toContain('"finish_reason":"stop"');
+  });
+
+  it('an Anthropic mid-stream error reaches a Gemini app as a bare JSON error object', () => {
+    const t = createStreamTranslator({ ...ctx('gemini', 'anthropic'), isStreaming: true });
+    const out =
+      t.process(
+        'event: message_start\ndata: {"type":"message_start","message":{"id":"m1","model":"claude-sonnet-4-6","usage":{"input_tokens":3,"output_tokens":0}}}\n\n' +
+          'event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}\n\n' +
+          'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hel"}}\n\n',
+      ) +
+      t.process('event: error\ndata: {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}\n\n') +
+      t.flush();
+    const frames = out.split('\n\n');
+    expect(frames[0].startsWith('data: ')).toBe(true);
+    expect(frames[frames.length - 1]).toBe('{"error":{"code":529,"message":"Overloaded","status":"UNAVAILABLE"}}');
+    expect(out).not.toContain('data: {"error"');
+  });
+});

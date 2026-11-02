@@ -714,3 +714,73 @@ describe('geminiAdapter — blocked prompts', () => {
     expect(events.find((e) => e.type === 'message_delta')).toMatchObject({ stopReason: 'refusal' });
   });
 });
+
+describe('geminiAdapter — an error in a 200 stream', () => {
+  const TEXT_FRAME = 'data: {"candidates":[{"content":{"parts":[{"text":"Hel"}],"role":"model"}}],"responseId":"r1"}\r\n\r\n';
+  const ERROR = { code: 503, message: 'The model is overloaded.', status: 'UNAVAILABLE' };
+
+  function parse(chunks: string[]): IRStreamEvent[] {
+    const parser = geminiAdapter.createStreamParser();
+    const events: IRStreamEvent[] = [];
+    for (const c of chunks) events.push(...parser.process(c));
+    events.push(...parser.flush());
+    return events;
+  }
+
+  function expectEndsInError(events: IRStreamEvent[]): void {
+    expect(events.map((e) => e.type)).not.toContain('message_delta');
+    expect(events.map((e) => e.type)).not.toContain('message_stop');
+    expect(events[events.length - 1]).toEqual({
+      type: 'error',
+      error: { type: 'UNAVAILABLE', message: 'The model is overloaded.', status: 503 },
+    });
+  }
+
+  it('reads a bare compact error object, with no data: prefix, as an error', () => {
+    expectEndsInError(parse([TEXT_FRAME + JSON.stringify({ error: ERROR }) + '\r\n\r\n']));
+  });
+
+  it('reads a pretty-printed error object with CRLF line ends', () => {
+    const pretty = JSON.stringify({ error: ERROR }, null, 2).replace(/\n/g, '\r\n');
+    expectEndsInError(parse([TEXT_FRAME, pretty + '\r\n\r\n']));
+  });
+
+  it('reads an error object left unterminated at the end of the stream', () => {
+    expectEndsInError(parse([TEXT_FRAME, JSON.stringify({ error: ERROR }, null, 2).replace(/\n/g, '\r\n') + '\r\n']));
+    expectEndsInError(parse([TEXT_FRAME, JSON.stringify({ error: ERROR })]));
+  });
+
+  it('reads an error wrapped in an array', () => {
+    expectEndsInError(parse([TEXT_FRAME, JSON.stringify([{ error: ERROR }])]));
+  });
+
+  it('keeps a last data: frame that has no blank line after it', () => {
+    const events = parse([
+      TEXT_FRAME,
+      'data: {"candidates":[{"content":{"parts":[{"text":"lo"}],"role":"model"},"finishReason":"MAX_TOKENS"}]}',
+    ]);
+    const text = events.flatMap((e) => (e.type === 'text_delta' ? [e.text] : [])).join('');
+    expect(text).toBe('Hello');
+    expect(events.find((e) => e.type === 'message_delta')).toMatchObject({ stopReason: 'max_tokens' });
+    expect(events[events.length - 1].type).toBe('message_stop');
+  });
+
+  it('ignores a non-JSON frame without a data: line', () => {
+    const events = parse([TEXT_FRAME, ': keep-alive\r\n\r\n']);
+    expect(events.map((e) => e.type)).not.toContain('error');
+    expect(events[events.length - 1].type).toBe('message_stop');
+  });
+
+  it('the serializer sends an error the way Google does: a bare JSON object', () => {
+    const serializer = geminiAdapter.createStreamSerializer(ctx({ isStreaming: true }));
+    const out = serializer.process([
+      { type: 'message_start', id: 'm1', usage: {} },
+      { type: 'content_block_start', index: 0, block: { type: 'text' } },
+      { type: 'text_delta', index: 0, text: 'Hel' },
+      { type: 'error', error: { type: 'overloaded_error', message: 'Overloaded' } },
+    ]) + serializer.flush();
+    expect(out.startsWith('data: ')).toBe(true);
+    const tail = out.slice(out.lastIndexOf('\n\n') + 2);
+    expect(tail).toBe('{"error":{"code":529,"message":"Overloaded","status":"UNAVAILABLE"}}');
+  });
+});

@@ -946,6 +946,14 @@ function createStreamParser(): IRStreamParser {
     flush(): IRStreamEvent[] {
       if (state.done) return [];
       const events: IRStreamEvent[] = [];
+      // A last frame without its closing blank line: a data: frame, or the
+      // bare error object Google ends a failed stream with.
+      const rest = state.buffer;
+      state.buffer = '';
+      if (rest.trim().length > 0) {
+        processGeminiFrame(rest, state, events);
+        if (state.done) return events;
+      }
       if (state.textBlockOpen && state.textBlockIndex != null) {
         events.push({ type: 'content_block_stop', index: state.textBlockIndex });
         state.textBlockOpen = false;
@@ -986,7 +994,15 @@ function processGeminiFrame(
   events: IRStreamEvent[],
 ): void {
   const dataLine = extractGeminiDataLine(frame);
-  if (dataLine == null) return;
+  if (dataLine == null) {
+    // An error in the middle of a 200 stream comes as a bare JSON object,
+    // compact or pretty-printed, with no data: prefix (the official SDKs
+    // raise on it: @google/genai parses each raw chunk, google-genai for
+    // Python gathers non-data lines by brace balance).
+    const error = bareStreamError(frame);
+    if (error) pushGeminiStreamError(error, state, events);
+    return;
+  }
 
   let data: GeminiResponse;
   try {
@@ -996,15 +1012,7 @@ function processGeminiFrame(
   }
 
   if (data.error) {
-    state.done = true;
-    events.push({
-      type: 'error',
-      error: {
-        type: data.error.status ?? 'api_error',
-        message: data.error.message ?? 'Gemini stream error',
-        ...(typeof data.error.code === 'number' ? { status: data.error.code } : {}),
-      },
-    });
+    pushGeminiStreamError(data.error, state, events);
     return;
   }
 
@@ -1091,6 +1099,39 @@ function processGeminiFrame(
   if (candidate.finishReason) {
     state.pendingFinish = mapGeminiFinishToIR(candidate.finishReason, state.hasToolUse);
   }
+}
+
+/** Ends the stream with the error Gemini sent: no made-up finish follows. */
+function pushGeminiStreamError(
+  error: NonNullable<GeminiResponse['error']>,
+  state: GeminiParseState,
+  events: IRStreamEvent[],
+): void {
+  state.done = true;
+  events.push({
+    type: 'error',
+    error: {
+      type: error.status ?? 'api_error',
+      message: error.message ?? 'Gemini stream error',
+      ...(typeof error.code === 'number' ? { status: error.code } : {}),
+    },
+  });
+}
+
+/**
+ * The error of a frame that is a bare JSON error object, or one wrapped in
+ * an array as Gemini's non-SSE bodies are; null for anything else.
+ */
+function bareStreamError(frame: string): NonNullable<GeminiResponse['error']> | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(frame.trim());
+  } catch {
+    return null;
+  }
+  if (Array.isArray(parsed) && parsed.length === 1) parsed = parsed[0];
+  if (!isJsonObject(parsed) || !isJsonObject(parsed.error)) return null;
+  return parsed.error as NonNullable<GeminiResponse['error']>;
 }
 
 function extractGeminiDataLine(frame: string): string | null {
@@ -1217,10 +1258,17 @@ function createStreamSerializer(ctx: TranslationContext): IRStreamSerializer {
             });
             state.done = true;
             break;
-          case 'error':
-            out += emitFrame({ error: { ...geminiError(event.error), message: event.error.message } });
+          case 'error': {
+            // Google's own wire format for an error in a 200 stream: a bare
+            // JSON object, no data: prefix and no blank line after it.
+            // @google/genai raises ApiError on that chunk (and, should it
+            // arrive joined to earlier frames, on the unterminated segment
+            // at the end); a data: frame it would yield as an empty chunk.
+            const { code, status } = geminiError(event.error);
+            out += JSON.stringify({ error: { code, message: event.error.message, status } });
             state.done = true;
             break;
+          }
         }
       }
       return out;
