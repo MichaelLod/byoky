@@ -57,6 +57,36 @@ export function openAICompatErrorMessage(body: unknown): string | undefined {
   return undefined;
 }
 
+/**
+ * The model a chat sends for a provider: the saved pick while `models`
+ * still offers it, the first of `models` otherwise. A pick the list no
+ * longer has (a retired model) would go out with every request while the
+ * model select, which has no option for it, shows the first model.
+ */
+export function pickModel(models: readonly string[], saved: string | undefined): string {
+  return saved && models.includes(saved) ? saved : (models[0] ?? '');
+}
+
+/**
+ * The saved per-provider model picks (parsed from storage) that `catalog`
+ * still offers. Everything else is dropped, so a retired id isn't stored
+ * again.
+ */
+export function offeredModelPicks(
+  saved: unknown,
+  catalog: Record<string, { models: readonly string[] }>,
+): Record<string, string> {
+  const picks: Record<string, string> = {};
+  const s = asRecord(saved);
+  if (!s || Array.isArray(s)) return picks;
+  for (const [providerId, model] of Object.entries(s)) {
+    if (typeof model !== 'string') continue;
+    if (!Object.prototype.hasOwnProperty.call(catalog, providerId)) continue;
+    if (catalog[providerId].models.includes(model)) picks[providerId] = model;
+  }
+  return picks;
+}
+
 // Cohere's v2 chat API isn't OpenAI-shaped: it takes `max_tokens`, streams
 // `content-delta` events and returns the reply as `message.content[]`.
 

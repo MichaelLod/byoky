@@ -6,8 +6,10 @@ import {
   cohereErrorMessage,
   cohereResponseText,
   cohereStreamText,
+  offeredModelPicks,
   openAICompatErrorMessage,
   outputCapField,
+  pickModel,
 } from '../app/components/chat-providers';
 import { isAllowedProxyRequest, validateProxyUrl } from '../../core/src/proxy-utils';
 import { createStreamTranslator, translateResponse } from '../../core/src/translate/index';
@@ -129,5 +131,24 @@ describe('openAICompatErrorMessage', () => {
     expect(openAICompatErrorMessage('Bad Gateway')).toBeUndefined();
     expect(openAICompatErrorMessage({ error: {} })).toBeUndefined();
     expect(openAICompatErrorMessage({ message: { detail: [] } })).toBeUndefined();
+  });
+});
+
+describe('saved model picks', () => {
+  const catalog = { openai: { models: ['gpt-a', 'gpt-b'] }, cohere: { models: ['command-a'] } };
+
+  it('pickModel keeps a pick the list offers and falls back to its first model otherwise', () => {
+    expect(pickModel(catalog.openai.models, 'gpt-b')).toBe('gpt-b');
+    expect(pickModel(catalog.openai.models, 'retired-model')).toBe('gpt-a');
+    expect(pickModel(catalog.openai.models, undefined)).toBe('gpt-a');
+    expect(pickModel([], 'gpt-b')).toBe('');
+  });
+
+  it('offeredModelPicks drops retired ids, unknown providers and junk', () => {
+    expect(offeredModelPicks({ openai: 'gpt-b', cohere: 'retired-model', gone: 'x', groq: 7 }, catalog)).toEqual({ openai: 'gpt-b' });
+    expect(offeredModelPicks({ constructor: 'x', __proto__: 'y', toString: 'gpt-a' }, catalog)).toEqual({});
+    expect(offeredModelPicks(null, catalog)).toEqual({});
+    expect(offeredModelPicks(['gpt-a'], catalog)).toEqual({});
+    expect(offeredModelPicks('gpt-a', catalog)).toEqual({});
   });
 });

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, Fragment } from 'react';
 import { Byoky, ByokyErrorCode, type ByokySession } from '@byoky/sdk';
-import { cohereErrorMessage, cohereStreamText, openAICompatErrorMessage, outputCapField } from '../components/chat-providers';
+import { cohereErrorMessage, cohereStreamText, offeredModelPicks, openAICompatErrorMessage, outputCapField, pickModel } from '../components/chat-providers';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -195,15 +195,17 @@ function ChatView({ session, onDisconnect }: { session: ByokySession; onDisconne
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [selectedProvider, setSelectedProvider] = useState('');
+  // Saved picks of models this page no longer offers are dropped, so they
+  // are neither sent nor stored again.
   const [selectedModels, setSelectedModels] = useState<Record<string, string>>(() => {
     if (typeof window === 'undefined') return {};
-    try { return JSON.parse(localStorage.getItem('byoky-chat-models') || '{}'); } catch { return {}; }
+    try { return offeredModelPicks(JSON.parse(localStorage.getItem('byoky-chat-models') || '{}'), providers); } catch { return {}; }
   });
   const [attachedImage, setAttachedImage] = useState<{ file: File; preview: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
   const supportsVision = visionProviders.has(selectedProvider);
-  const currentModel = selectedProvider ? (selectedModels[selectedProvider] ?? providers[selectedProvider].models[0]) : '';
+  const currentModel = selectedProvider ? pickModel(providers[selectedProvider].models, selectedModels[selectedProvider]) : '';
 
   useEffect(() => { const el = messagesRef.current; if (el) el.scrollTop = el.scrollHeight; }, [messages]);
 
