@@ -222,7 +222,7 @@ const session = await byoky.connect({
 | `USER_REJECTED` | The user denied the request in the wallet, or it timed out. With `modal: true`, closing the modal rejects with `WALLET_NOT_INSTALLED` (no wallet found) or a plain `Error('User cancelled')`. |
 | `QUOTA_EXCEEDED` | HTTP 429: the spending cap the user set for your app ran out. |
 | `ENDPOINT_NOT_ALLOWED` | HTTP 403: the endpoint isn't an inference or model-list endpoint (Files, Batches, Assistants, admin APIs). |
-| `SESSION_EXPIRED` | HTTP 401: the session was revoked, the wallet locked, or it expired. Connect again. |
+| `SESSION_EXPIRED` | HTTP 401: the session was revoked, the wallet locked, or it expired. A `createFetch` request first renews the session and retries (the wallet asks the user to unlock or approve, or approves a trusted site silently), for a session from `tryReconnect()` too; you get the 401 only when that fails, and `onDisconnect` fires. Connect again. |
 
 The full list is at [byoky.com/docs#errors](https://byoky.com/docs#errors).
 

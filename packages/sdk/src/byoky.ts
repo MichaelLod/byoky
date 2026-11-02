@@ -13,14 +13,21 @@ import { walletError } from './wallet-error.js';
 // --- Session persistence helpers ---
 
 const EXT_SESSION_KEY = 'byoky:session';
+// What the app asked connect() for, saved with the session: a session
+// restored after a reload needs it to connect again once the wallet has
+// dropped the session (a lock), and to list the providers it didn't get.
+const EXT_REQUEST_KEY = 'byoky:request';
 
 function hasSessionStorage(): boolean {
   try { return typeof sessionStorage !== 'undefined'; } catch { return false; }
 }
 
-function saveExtSession(response: ConnectResponse): void {
+function saveExtSession(response: ConnectResponse, request: ConnectRequest | undefined): void {
   if (!hasSessionStorage()) return;
-  try { sessionStorage.setItem(EXT_SESSION_KEY, JSON.stringify(response)); } catch {}
+  try {
+    sessionStorage.setItem(EXT_SESSION_KEY, JSON.stringify(response));
+    if (request) sessionStorage.setItem(EXT_REQUEST_KEY, JSON.stringify(savedRequest(request)));
+  } catch {}
 }
 
 function loadExtSession(): ConnectResponse | null {
@@ -34,9 +41,38 @@ function loadExtSession(): ConnectResponse | null {
   } catch { return null; }
 }
 
+function loadExtRequest(): ConnectRequest | null {
+  if (!hasSessionStorage()) return null;
+  try {
+    const raw = sessionStorage.getItem(EXT_REQUEST_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw) as ConnectRequest;
+    if (!data || typeof data !== 'object' || (data.providers !== undefined && !Array.isArray(data.providers))) return null;
+    return savedRequest(data);
+  } catch { return null; }
+}
+
 function clearExtSession(): void {
   if (!hasSessionStorage()) return;
-  try { sessionStorage.removeItem(EXT_SESSION_KEY); } catch {}
+  try {
+    sessionStorage.removeItem(EXT_SESSION_KEY);
+    sessionStorage.removeItem(EXT_REQUEST_KEY);
+  } catch {}
+}
+
+/** The part of a connect request worth sending again: the providers, with their `required` hints. */
+function savedRequest(request: ConnectRequest): ConnectRequest {
+  if (!request.providers) return {};
+  return {
+    providers: request.providers
+      .filter((p) => typeof p?.id === 'string')
+      .map(({ id, required }) => (required === undefined ? { id } : { id, required })),
+  };
+}
+
+/** A request for the providers a session has, for one restored without the request that made it. */
+function requestFor(response: ConnectResponse): ConnectRequest {
+  return { providers: Object.keys(response.providers).map((id) => ({ id })) };
 }
 
 export interface ByokySession extends ConnectResponse {
@@ -79,7 +115,8 @@ export class Byoky {
   private requestTimeout: number | undefined;
   // Snapshot of the last user-initiated connect request, so reconnects can
   // fall back from `reconnectOnly` to a full connect when the wallet has
-  // dropped the session (browser restart / extension reload).
+  // dropped the session (lock / browser restart / extension reload). A
+  // restored session takes it from sessionStorage (restoreRequest).
   private lastConnectRequest?: ConnectRequest;
   // Releases the notify port of the session this instance built last. A
   // new session replaces that one, so connecting again without disconnect()
@@ -153,7 +190,7 @@ export class Byoky {
     // 1. Try the wallet's live session (covers SW still running)
     try {
       const response = await this.sendConnectRequest({ reconnectOnly: true });
-      saveExtSession(response);
+      this.restoreRequest(response);
       return this.buildSession(response);
     } catch (err) {
       // Byoky was updated while this page was open: nothing is reachable
@@ -167,7 +204,10 @@ export class Byoky {
     if (saved) {
       try {
         const connected = await this.querySessionStatus(saved.sessionKey);
-        if (connected) return this.buildSession(saved);
+        if (connected) {
+          this.restoreRequest(saved);
+          return this.buildSession(saved);
+        }
       } catch {}
       clearExtSession();
     }
@@ -186,7 +226,19 @@ export class Byoky {
     const connected = await this.querySessionStatus(savedResponse.sessionKey);
     if (!connected) return null;
 
+    this.restoreRequest(savedResponse);
     return this.buildSession(savedResponse);
+  }
+
+  /**
+   * For a session restored rather than connected on this instance (a page
+   * reload): the request connect() made it with, saved in sessionStorage, or
+   * else one for the providers it has. A request then renews it once the
+   * wallet has dropped it (locked), as for a session from connect(), and
+   * the requested providers it lacks read unavailable.
+   */
+  private restoreRequest(response: ConnectResponse): void {
+    this.lastConnectRequest ??= loadExtRequest() ?? requestFor(response);
   }
 
   /**
@@ -248,7 +300,7 @@ export class Byoky {
       sessionKeyRef.current = newResponse.sessionKey;
       session.sessionKey = newResponse.sessionKey;
       session.providers = withRequested(newResponse.providers);
-      saveExtSession(newResponse);
+      saveExtSession(newResponse, this.lastConnectRequest);
       for (const cb of providersUpdatedCallbacks) cb(session.providers);
     };
 
@@ -379,7 +431,7 @@ export class Byoky {
       });
     }
 
-    saveExtSession(response);
+    saveExtSession(response, this.lastConnectRequest);
     return session;
   }
 

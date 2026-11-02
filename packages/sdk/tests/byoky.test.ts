@@ -1022,6 +1022,119 @@ describe('Byoky', () => {
     });
   });
 
+  // A page reload: a new Byoky instance restores the session that one
+  // connected before, with only sessionStorage carried over.
+  describe('restored sessions', () => {
+    const tick = () => new Promise((r) => setTimeout(r, 10));
+    const ofType = (type: string) => postedMessages.filter((m) => m.data.type === type);
+    const answer = (entry: { data: Record<string, unknown>; port?: MessagePort }, msg: Record<string, unknown>) =>
+      entry.port!.postMessage({ ...msg, requestId: entry.data.requestId });
+    const connected = (sessionKey: string, providers: Record<string, unknown>) =>
+      ({ type: 'BYOKY_CONNECT_RESPONSE', payload: { sessionKey, proxyUrl: 'extension-proxy', providers } });
+    const api = { available: true, authMethod: 'api_key' };
+    const fullConnects = () => ofType('BYOKY_CONNECT_REQUEST')
+      .filter((m) => !(m.data.payload as Record<string, unknown>).reconnectOnly);
+
+    async function connectThenReload(providers: Array<{ id: string; required?: boolean }>, granted: Record<string, unknown>) {
+      const first = new Byoky().connect({ providers });
+      await tick();
+      answer(ofType('BYOKY_CONNECT_REQUEST')[0], connected('byk_page1', granted));
+      await first;
+      postedMessages.length = 0;
+    }
+
+    /** The wallet locked: the next request finds the session gone, and so does the probe. */
+    async function lockAndRequest(session: ByokySession) {
+      const onDisconnect = vi.fn();
+      session.onDisconnect(onDisconnect);
+      const fetchPromise = session.createFetch('anthropic')('https://api.anthropic.com/v1/messages', { method: 'POST', body: '{}' });
+      await tick();
+      answer(ofType('BYOKY_PROXY_REQUEST')[0], {
+        type: 'BYOKY_PROXY_RESPONSE_ERROR', status: 401,
+        error: { code: 'SESSION_EXPIRED', message: 'Invalid or expired session' },
+      });
+      await tick();
+      const probe = ofType('BYOKY_CONNECT_REQUEST').at(-1)!;
+      expect(probe.data.payload).toEqual({ reconnectOnly: true });
+      answer(probe, { type: 'BYOKY_ERROR', payload: { code: 'NO_SESSION', message: 'No active session' } });
+      await tick();
+      return { fetchPromise, onDisconnect };
+    }
+
+    async function approveAndFinish(fetchPromise: Promise<Response>) {
+      answer(ofType('BYOKY_CONNECT_REQUEST').at(-1)!, connected('byk_renewed', { anthropic: api }));
+      await tick();
+      const retry = ofType('BYOKY_PROXY_REQUEST')[1];
+      expect(retry.data.sessionKey).toBe('byk_renewed');
+      answer(retry, { type: 'BYOKY_PROXY_RESPONSE_META', status: 200, statusText: 'OK', headers: {} });
+      answer(retry, { type: 'BYOKY_PROXY_RESPONSE_DONE' });
+      return fetchPromise;
+    }
+
+    it('connects again with the original request when tryReconnect\'s session finds the wallet locked', async () => {
+      await connectThenReload([{ id: 'anthropic', required: true }, { id: 'openai' }], { anthropic: api, openai: api });
+
+      const restoring = new Byoky().tryReconnect();
+      await tick();
+      answer(ofType('BYOKY_CONNECT_REQUEST')[0], connected('byk_page1', { anthropic: api, openai: api }));
+      const session = (await restoring)!;
+
+      const { fetchPromise, onDisconnect } = await lockAndRequest(session);
+      const full = fullConnects();
+      expect(full.length).toBe(1);
+      expect(full[0].data.payload).toEqual({ providers: [{ id: 'anthropic', required: true }, { id: 'openai' }] });
+
+      expect((await approveAndFinish(fetchPromise)).status).toBe(200);
+      expect(onDisconnect).not.toHaveBeenCalled();
+      expect(session.sessionKey).toBe('byk_renewed');
+      expect(JSON.parse(sessionStorage.getItem('byoky:session')!).sessionKey).toBe('byk_renewed');
+    });
+
+    it('connects again for the providers a session from reconnect(saved) has', async () => {
+      // Saved by the app itself, in another tab: no request in this tab's sessionStorage.
+      const saved = { sessionKey: 'byk_saved', proxyUrl: 'extension-proxy', providers: { anthropic: api } };
+
+      const restoring = new Byoky().reconnect(saved as never);
+      await tick();
+      answer(ofType('BYOKY_SESSION_STATUS')[0], { type: 'BYOKY_SESSION_STATUS_RESPONSE', payload: { connected: true } });
+      const session = (await restoring)!;
+
+      const { fetchPromise, onDisconnect } = await lockAndRequest(session);
+      const full = fullConnects();
+      expect(full.length).toBe(1);
+      expect(full[0].data.payload).toEqual({ providers: [{ id: 'anthropic' }] });
+
+      expect((await approveAndFinish(fetchPromise)).status).toBe(200);
+      expect(onDisconnect).not.toHaveBeenCalled();
+    });
+
+    it('lists a requested provider the wallet left out of the restored session as unavailable', async () => {
+      await connectThenReload([{ id: 'anthropic', required: true }, { id: 'openai' }], { openai: api });
+
+      const restoring = new Byoky().tryReconnect();
+      await tick();
+      // The mobile wallets answer a probe with the providers they hold keys for.
+      answer(ofType('BYOKY_CONNECT_REQUEST')[0], connected('byk_page1', { openai: api }));
+      const session = (await restoring)!;
+
+      expect(session.providers.anthropic).toEqual({ available: false, authMethod: 'api_key' });
+      expect(session.providers.openai.available).toBe(true);
+    });
+
+    it('forgets the request on disconnect()', async () => {
+      await connectThenReload([{ id: 'anthropic' }], { anthropic: api });
+      expect(JSON.parse(sessionStorage.getItem('byoky:request')!)).toEqual({ providers: [{ id: 'anthropic' }] });
+
+      const restoring = new Byoky().tryReconnect();
+      await tick();
+      answer(ofType('BYOKY_CONNECT_REQUEST')[0], connected('byk_page1', { anthropic: api }));
+      (await restoring)!.disconnect();
+
+      expect(sessionStorage.getItem('byoky:session')).toBeNull();
+      expect(sessionStorage.getItem('byoky:request')).toBeNull();
+    });
+  });
+
   describe('connect modal', () => {
     function modalCard(): HTMLElement | null {
       for (const el of Array.from(document.body.children)) {
