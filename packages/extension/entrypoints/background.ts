@@ -1064,8 +1064,10 @@ export default defineBackground(() => {
 
         // Decide streaming vs single-shot from the response Content-Type.
         // Translation activates a per-chunk SSE rewriter for streaming
-        // responses, or a one-shot JSON translator for non-streaming.
-        const isStreamingResponse = (respHeaders['content-type'] ?? '').includes('text/event-stream');
+        // responses, or a one-shot JSON translator for non-streaming. Only a
+        // success streams: Gemini sends its errors as plain JSON labelled
+        // text/event-stream, which the stream translator would drop (F010).
+        const isStreamingResponse = response.ok && (respHeaders['content-type'] ?? '').includes('text/event-stream');
         const sseRewriter = translation && isStreamingResponse
           ? buildResponseStreamRewriter(translation, msg.requestId, msg.body, msg.url)
           : undefined;
@@ -2168,7 +2170,8 @@ export default defineBackground(() => {
           status = response.status ?? 0;
           const respHeaders = response.headers ?? {};
           contentType = respHeaders['content-type'] ?? '';
-          isStreamingResponse = (respHeaders['content-type'] ?? '').includes('text/event-stream');
+          // Only a success streams; an error is translated whole at the end.
+          isStreamingResponse = status >= 200 && status < 300 && (respHeaders['content-type'] ?? '').includes('text/event-stream');
           send({
             type: 'BYOKY_PROXY_RESPONSE_META',
             requestId: msg.requestId,
@@ -2847,8 +2850,9 @@ export default defineBackground(() => {
 
         logEntryId = await logRequest(session, appRequest, response.status);
 
-        // Translation: stream rewriter for SSE responses, one-shot for JSON.
-        const isStreamingResponse = (responseHeaders['content-type'] ?? '').includes('text/event-stream');
+        // Translation: stream rewriter for SSE responses, one-shot for JSON
+        // and for any error (Gemini labels its JSON errors text/event-stream).
+        const isStreamingResponse = response.ok && (responseHeaders['content-type'] ?? '').includes('text/event-stream');
         const sseRewriter = translation && isStreamingResponse
           ? buildResponseStreamRewriter(translation, requestId, body, url)
           : undefined;
