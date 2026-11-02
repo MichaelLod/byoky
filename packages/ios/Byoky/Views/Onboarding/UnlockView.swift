@@ -190,6 +190,9 @@ struct UnlockView: View {
             lockoutRemaining = seconds
             error = nil
             password = ""
+        } catch is KeychainError {
+            // Not a wrong password: the keychain wouldn't hand over the wallet.
+            self.error = "Couldn't read the wallet from this device's keychain. Try again in a moment."
         } catch {
             self.error = "Wrong password"
             password = ""

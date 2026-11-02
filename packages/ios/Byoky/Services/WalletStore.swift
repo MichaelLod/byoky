@@ -95,11 +95,19 @@ final class WalletStore: ObservableObject {
     // MARK: - Initialization
 
     private func checkInitialized() {
+        status = Self.initialStatus { try keychain.exists(key: passwordHashKey) }
+    }
+
+    /// Locked when a wallet exists, uninitialized when none does. When the
+    /// keychain can't tell (the app launched while the device was locked,
+    /// say) the wallet counts as there: onboarding would replace its
+    /// password and salt, and every stored key would be lost. Unlocking
+    /// reads the keychain again.
+    static func initialStatus(hasPasswordHash: () throws -> Bool) -> WalletStatus {
         do {
-            _ = try keychain.loadString(key: passwordHashKey)
-            status = .locked
+            return try hasPasswordHash() ? .locked : .uninitialized
         } catch {
-            status = .uninitialized
+            return .locked
         }
     }
 

@@ -132,6 +132,29 @@ final class WalletLockTests: XCTestCase {
         XCTAssertTrue(wallet.credentials.isEmpty)
     }
 
+    // MARK: - Launch
+
+    /// A keychain that can't be read at launch (the device was locked) must
+    /// not make an existing wallet look new: onboarding would replace its
+    /// password and salt and lose every key. The lock screen shows instead.
+    @MainActor
+    func testAKeychainReadErrorAtLaunchShowsTheLockScreenNotOnboarding() {
+        XCTAssertEqual(WalletStore.initialStatus { throw KeychainError.readFailed(errSecInteractionNotAllowed) }, .locked)
+        XCTAssertEqual(WalletStore.initialStatus { true }, .locked)
+        XCTAssertEqual(WalletStore.initialStatus { false }, .uninitialized)
+    }
+
+    /// The keychain tells "not there" apart from "can't read it".
+    func testKeychainExistsTellsMissingFromPresent() throws {
+        let keychain = KeychainService.shared
+        let key = "walletLockTests.exists"
+        try? keychain.delete(key: key)
+        XCTAssertFalse(try keychain.exists(key: key))
+        try keychain.saveString(key: key, value: "x")
+        defer { try? keychain.delete(key: key) }
+        XCTAssertTrue(try keychain.exists(key: key))
+    }
+
     // MARK: - Built-in browser data
 
     private func cookie(_ name: String, domain: String) throws -> HTTPCookie {
