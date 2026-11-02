@@ -746,8 +746,17 @@ export default defineBackground(() => {
       if (!portOpen) return;
       try { port.postMessage(message); } catch { portOpen = false; }
     };
+    // Closes the port once its request is over, however it ended, so
+    // finished ports don't pile up for the life of the worker or the tab
+    // (F062). What was posted before still arrives, and closing from this
+    // side doesn't fire our own onDisconnect, so nothing is aborted.
+    const close = () => {
+      if (!portOpen) return;
+      portOpen = false;
+      try { port.disconnect(); } catch { /* already gone */ }
+    };
 
-    port.onMessage.addListener(async (raw: unknown) => {
+    const handleRequest = async (raw: unknown) => {
       await sessionsRestored;
       const msg = raw as ProxyRequest;
       if (msg.sessionKey == null) return;
@@ -1182,6 +1191,14 @@ export default defineBackground(() => {
           }
         } catch { /* usage bookkeeping must not break the response */ }
         reservation.release();
+      }
+    };
+
+    port.onMessage.addListener(async (raw: unknown) => {
+      try {
+        await handleRequest(raw);
+      } finally {
+        close();
       }
     });
   });
