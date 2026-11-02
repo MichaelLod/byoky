@@ -6,6 +6,8 @@ import {
   cohereErrorMessage,
   cohereResponseText,
   cohereStreamText,
+  openAICompatErrorMessage,
+  outputCapField,
 } from '../app/components/chat-providers';
 import { isAllowedProxyRequest, validateProxyUrl } from '../../core/src/proxy-utils';
 import { createStreamTranslator, translateResponse } from '../../core/src/translate/index';
@@ -90,5 +92,42 @@ describe('Cohere v2 helpers', () => {
     expect(cohereErrorMessage({ message: 'invalid api token' })).toBe('invalid api token');
     expect(cohereErrorMessage({ error: { code: 'QUOTA_EXCEEDED', message: 'Token allowance used up' } })).toBe('Token allowance used up');
     expect(cohereErrorMessage(null)).toBeUndefined();
+  });
+});
+
+describe('outputCapField', () => {
+  // The same rule as core's translator: max_completion_tokens is OpenAI's
+  // field; Mistral answers 422 to it, and the other hosts document max_tokens.
+  it('is max_completion_tokens on OpenAI and max_tokens on every other host of the dialect', () => {
+    expect(outputCapField('openai')).toBe('max_completion_tokens');
+    for (const id of ['groq', 'deepseek', 'xai', 'mistral', 'together', 'fireworks', 'perplexity', 'openrouter']) {
+      expect(outputCapField(id), id).toBe('max_tokens');
+    }
+  });
+});
+
+describe('openAICompatErrorMessage', () => {
+  it('reads the error shapes of the OpenAI-dialect hosts and the wallet', () => {
+    expect(openAICompatErrorMessage({ error: { message: 'Incorrect API key', type: 'invalid_request_error' } })).toBe('Incorrect API key');
+    expect(openAICompatErrorMessage({ error: { code: 'PROVIDER_UNAVAILABLE', message: 'No mistral API key found.' } })).toBe('No mistral API key found.');
+    expect(openAICompatErrorMessage({ error: 'model not found' })).toBe('model not found');
+    expect(openAICompatErrorMessage({ object: 'error', message: 'Unauthorized', type: 'unauthorized' })).toBe('Unauthorized');
+    // Mistral's 422 for a field it doesn't take.
+    expect(openAICompatErrorMessage({
+      object: 'error',
+      message: { detail: [{ type: 'extra_forbidden', loc: ['body', 'max_completion_tokens'], msg: 'Extra inputs are not permitted', input: 4096 }] },
+      type: 'invalid_request_error',
+      param: null,
+      code: null,
+    })).toBe('Extra inputs are not permitted');
+    expect(openAICompatErrorMessage({ detail: [{ msg: 'field required' }, { msg: 'value is not a valid integer' }] })).toBe('field required; value is not a valid integer');
+    expect(openAICompatErrorMessage({ detail: 'Not Found' })).toBe('Not Found');
+  });
+
+  it('gives nothing for a body without a message', () => {
+    expect(openAICompatErrorMessage(null)).toBeUndefined();
+    expect(openAICompatErrorMessage('Bad Gateway')).toBeUndefined();
+    expect(openAICompatErrorMessage({ error: {} })).toBeUndefined();
+    expect(openAICompatErrorMessage({ message: { detail: [] } })).toBeUndefined();
   });
 });

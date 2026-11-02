@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, Fragment } from 'react';
 import { Byoky, ByokyErrorCode, type ByokySession } from '@byoky/sdk';
-import { cohereErrorMessage, cohereStreamText } from '../components/chat-providers';
+import { cohereErrorMessage, cohereStreamText, openAICompatErrorMessage, outputCapField } from '../components/chat-providers';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -289,8 +289,8 @@ function ChatView({ session, onDisconnect }: { session: ByokySession; onDisconne
       } else if (selectedProvider in providers) {
         const allMessages = [...prevMessages, userMessage].map(m => ({ role: m.role, content: m.content }));
         const config = providers[selectedProvider];
-        const response = await proxyFetch(config.url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: currentModel, messages: allMessages, max_completion_tokens: 4096, stream: true }) });
-        if (!response.ok) { const err = (await response.json()).error; throw new Error(err?.message || `API error: ${response.status}`); }
+        const response = await proxyFetch(config.url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: currentModel, messages: allMessages, [outputCapField(selectedProvider)]: 4096, stream: true }) });
+        if (!response.ok) { const body = await response.json().catch(() => null); throw new Error(openAICompatErrorMessage(body) || `API error: ${response.status}`); }
         if (response.body) { for await (const event of parseSSE(response)) { const e = event as { choices?: Array<{ delta?: { content?: string } }> }; if (e.choices?.[0]?.delta?.content) appendToken(e.choices[0].delta.content); } }
       }
 

@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef, Fragment } from 'react';
 import type { ByokySession } from '@byoky/sdk';
-import { cohereErrorMessage, cohereResponseText, cohereStreamText } from '../../components/chat-providers';
+import { cohereErrorMessage, cohereResponseText, cohereStreamText, openAICompatErrorMessage, outputCapField } from '../../components/chat-providers';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -109,7 +109,7 @@ const response = await fetch('${p.url}', {
   body: JSON.stringify({
     model: '${model}',
     messages: [{ role: 'user', content: '${msg}' }],
-    max_completion_tokens: 1024,
+    ${outputCapField(providerId)}: 1024,
     stream: true,
   }),
 });`;
@@ -521,11 +521,11 @@ export function Chat({ session, initialProvider }: Props) {
         const response = await proxyFetch(config.url, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ model: currentModel, messages: allMessages, max_completion_tokens: 1024, ...(useStream && { stream: true }) }),
+          body: JSON.stringify({ model: currentModel, messages: allMessages, [outputCapField(selectedProvider)]: 1024, ...(useStream && { stream: true }) }),
         });
         if (!response.ok) {
-          const err = (await response.json()).error;
-          throw new Error(err?.message || `API error: ${response.status}`);
+          const body = await response.json().catch(() => null);
+          throw new Error(openAICompatErrorMessage(body) || `API error: ${response.status}`);
         }
 
         if (useStream && response.body) {
