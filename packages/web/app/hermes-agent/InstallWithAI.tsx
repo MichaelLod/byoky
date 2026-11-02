@@ -8,7 +8,7 @@ Context:
 - Byoky is a local BYOK wallet ("the MetaMask for API keys"). The browser extension holds my API keys (or a Claude Pro/Max setup token) and proxies every LLM request so keys never leave the wallet. Byoky runs no servers.
 - The Byoky bridge is a tiny local HTTP proxy on 127.0.0.1:19280. Hermes talks to the bridge, which forwards through native messaging to the extension, which calls the upstream provider (Anthropic in this guide).
 - I already have the Byoky browser extension installed (Chrome or Firefox) with an Anthropic credential loaded. Do not worry about that side.
-- IMPORTANT: Hermes's built-in \`anthropic\` provider goes direct to api.anthropic.com and ignores ANTHROPIC_BASE_URL. To route through byoky, you have to register the bridge as a custom_providers entry in ~/.hermes/config.yaml and switch model.provider to it. Env-vars alone do nothing.
+- IMPORTANT: Hermes's built-in \`anthropic\` provider goes direct to api.anthropic.com and ignores ANTHROPIC_BASE_URL. To route through Byoky, you have to register the bridge as a custom_providers entry in ~/.hermes/config.yaml and switch model.provider to it. Env-vars alone do nothing.
 
 Your job — run these commands on my machine and report each step:
 
@@ -46,7 +46,7 @@ Your job — run these commands on my machine and report each step:
      hermes chat -q "ping" -Q
    On success: a one-line answer prints. On failure: see Troubleshooting below.
 
-7. Confirm the routing actually went through byoky:
+7. Confirm the routing actually went through Byoky:
      hermes status | grep -E "Provider|Model"
    Expected output contains "Provider: custom" and the byoky-anthropic endpoint. If it shows "Provider: anthropic" or "Endpoint: api.anthropic.com", step 5 didn't take effect — re-check config.yaml.
 
