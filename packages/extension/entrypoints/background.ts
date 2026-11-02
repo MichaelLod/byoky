@@ -164,17 +164,28 @@ export default defineBackground(() => {
   }
 
   type ConnectMessage = { id: string; payload: ConnectRequest };
+  type Waiter = {
+    message: ConnectMessage;
+    sender: Runtime.MessageSender;
+    resolve: (response: unknown) => void;
+    /** Aborts once the page that sent it is gone (closed, reloaded, navigated away). */
+    gone?: AbortSignal;
+  };
   type PendingEntry = {
     approval: PendingApproval;
     originalMessageId: string;
     resolve: (response: unknown) => void;
     tabId?: number;
+    /** Aborts once the page that sent the request is gone. */
+    gone?: AbortSignal;
+    /** The auto-reject after APPROVAL_TIMEOUT_MS. */
+    timer?: ReturnType<typeof setTimeout>;
     /**
      * Later connects from the same origin, waiting for this one's outcome.
      * Once it is approved they run again (and mostly reuse the session);
      * if it is rejected or times out, so are they.
      */
-    waiters: Array<{ message: ConnectMessage; sender: Runtime.MessageSender; resolve: (response: unknown) => void }>;
+    waiters: Waiter[];
     /**
      * Set once the request is left for the user (not trusted, or the wallet
      * is locked) and the wallet was shown for it. Until then it is still
@@ -533,6 +544,9 @@ export default defineBackground(() => {
   const APPROVAL_TIMEOUT_MS = 120_000;
   const MAX_QUEUED_APPROVALS = 5;
   const MAX_QUEUED_APPROVALS_PER_TAB = 2;
+  // How long a request whose page went away is kept for the page to come
+  // back (a reload connects again) before it is dropped.
+  const REQUESTER_GRACE_MS = 1_500;
 
   function checkConnectRateLimit(origin: string): { limited: true; retryAfter: number } | { limited: false } {
     const now = Date.now();
@@ -697,6 +711,10 @@ export default defineBackground(() => {
     }
 
     if (port.name === 'byoky-message') {
+      // The page's end closes when its tab is closed, reloaded or navigated
+      // away: a connect it left waiting for the user is then dropped.
+      const requesterGone = new AbortController();
+      port.onDisconnect.addListener(() => requesterGone.abort());
       // Handle connect/disconnect/status/usage via port so the message doesn't
       // broadcast to the side-panel's onMessage listener (which can interfere
       // in Chrome MV3 when multiple listeners exist).
@@ -715,7 +733,7 @@ export default defineBackground(() => {
         let response: unknown;
 
         if (message.type === 'BYOKY_CONNECT_REQUEST') {
-          response = await handleConnect(message as { id: string; payload: ConnectRequest }, sender, panelOpened);
+          response = await handleConnect(message as { id: string; payload: ConnectRequest }, sender, panelOpened, requesterGone.signal);
         } else if (message.type === 'BYOKY_DISCONNECT') {
           const { sessionKey } = message.payload as { sessionKey: string };
           const session = sessions.get(sessionKey);
@@ -1293,12 +1311,14 @@ export default defineBackground(() => {
   /**
    * `panelOpened` is the side panel the port listener tried to open inside
    * the page's gesture (Chrome), if it did; the wallet is shown some other
-   * way when that didn't work.
+   * way when that didn't work. `gone` aborts once the requesting page is
+   * gone, which drops a request left waiting for the user.
    */
   async function handleConnect(
     message: { id: string; payload: ConnectRequest },
     sender: Runtime.MessageSender,
     panelOpened?: Promise<boolean>,
+    gone?: AbortSignal,
   ): Promise<unknown> {
     const origin = resolveOrigin(sender);
     const refuse = (code: string, text: string) => ({
@@ -1357,6 +1377,9 @@ export default defineBackground(() => {
       };
     }
 
+    // The page went away before its request got this far: nobody to ask for.
+    if (gone?.aborted) return refuse('USER_REJECTED', 'The page that asked to connect is gone');
+
     // A request from this origin is already waiting for the user (or being
     // approved right now): wait for its outcome.
     const inFlight = pendingFor(origin);
@@ -1367,7 +1390,16 @@ export default defineBackground(() => {
       // approved needs nothing.
       if (inFlight.askedUser && !settlingApprovals.has(inFlight)) openWalletUI(sender.tab, panelOpened);
       return new Promise((resolve) => {
-        inFlight.waiters.push({ message: { id: message.id, payload: request }, sender, resolve });
+        const waiter: Waiter = { message: { id: message.id, payload: request }, sender, resolve, gone };
+        inFlight.waiters.push(waiter);
+        // A waiting page that goes away stops waiting; the request is
+        // dropped once nobody waits for it.
+        gone?.addEventListener('abort', () => {
+          const i = inFlight.waiters.indexOf(waiter);
+          if (i < 0) return;
+          inFlight.waiters.splice(i, 1);
+          dropIfAbandoned(inFlight);
+        }, { once: true });
       });
     }
 
@@ -1406,9 +1438,19 @@ export default defineBackground(() => {
         originalMessageId: message.id,
         resolve,
         tabId: sender.tab?.id,
+        gone,
         waiters: [],
       };
       pendingApprovals.set(approval.id, queued);
+
+      // The page that asked is gone (closed, reloaded, navigated away). If
+      // another page of the app waits on the request, it is now that page's;
+      // otherwise it is dropped, unless the page comes back (a reload).
+      gone?.addEventListener('abort', () => {
+        if (pendingApprovals.get(approval.id) !== queued) return;
+        if (queued.waiters.length > 0) queued.tabId = queued.waiters[0].sender.tab?.id;
+        dropIfAbandoned(queued);
+      }, { once: true });
 
       // The wallet is shown only for a request that waits for the user, not
       // for one a trusted site gets approved without a prompt.
@@ -1446,7 +1488,7 @@ export default defineBackground(() => {
       }
 
       // Auto-reject after 2 minutes
-      setTimeout(() => {
+      queued.timer = setTimeout(() => {
         const entry = pendingApprovals.get(approval.id);
         if (entry) {
           pendingApprovals.delete(approval.id);
@@ -1454,6 +1496,24 @@ export default defineBackground(() => {
         }
       }, APPROVAL_TIMEOUT_MS);
     });
+  }
+
+  /**
+   * Drop a queued request that no page waits for any more (the one that
+   * sent it and every one waiting on it are gone), after a grace period in
+   * which a reloaded page can connect again and keep it. The queue's change
+   * takes it off the wallet's approval screen.
+   */
+  function dropIfAbandoned(entry: PendingEntry) {
+    if (pendingApprovals.get(entry.approval.id) !== entry) return;
+    if (!entry.gone?.aborted || entry.waiters.length > 0) return;
+    setTimeout(() => {
+      if (pendingApprovals.get(entry.approval.id) !== entry || entry.waiters.length > 0) return;
+      clearTimeout(entry.timer);
+      pendingApprovals.delete(entry.approval.id);
+      // Only frees what awaits it: the ports it would answer are closed.
+      rejectPending(entry, 'The page that asked to connect is gone');
+    }, REQUESTER_GRACE_MS);
   }
 
   /**
@@ -1524,7 +1584,7 @@ export default defineBackground(() => {
     // Each waiter runs again: one the session covers reuses it at once, one
     // asking for more providers is queued for those.
     for (const w of entry.waiters) {
-      handleConnect(w.message, w.sender).then(w.resolve, () => {
+      handleConnect(w.message, w.sender, undefined, w.gone).then(w.resolve, () => {
         w.resolve({ type: 'BYOKY_ERROR', requestId: w.message.id, payload: { code: 'UNKNOWN', message: 'Could not connect' } });
       });
     }
