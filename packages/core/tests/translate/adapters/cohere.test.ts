@@ -190,6 +190,32 @@ describe('cohereAdapter.serializeRequest', () => {
     expect(autoOut.tool_choice).toBeUndefined();
   });
 
+  it('forces the only tool offered with REQUIRED, which is exact for one tool', () => {
+    const extract = { name: 'extract', parameters: { type: 'object', properties: { a: { type: 'string' } } } };
+    const ir: IRRequest = {
+      system: [],
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'x' }] }],
+      tools: [extract],
+      toolChoice: { type: 'tool', name: 'extract' },
+    };
+    const out = JSON.parse(cohereAdapter.serializeRequest(ctx(), ir)) as { tool_choice?: string };
+    expect(out.tool_choice).toBe('REQUIRED');
+  });
+
+  it('still refuses a named tool among several, or one that is not offered', () => {
+    const tool = (name: string) => ({ name, parameters: { type: 'object', properties: {} } });
+    const base: IRRequest = { system: [], messages: [{ role: 'user', content: [{ type: 'text', text: 'x' }] }] };
+    expect(() =>
+      cohereAdapter.serializeRequest(ctx(), { ...base, tools: [tool('a'), tool('b')], toolChoice: { type: 'tool', name: 'a' } }),
+    ).toThrow(/forcing a specific tool/);
+    expect(() =>
+      cohereAdapter.serializeRequest(ctx(), { ...base, tools: [tool('b')], toolChoice: { type: 'tool', name: 'a' } }),
+    ).toThrow(/forcing a specific tool/);
+    expect(() => cohereAdapter.serializeRequest(ctx(), { ...base, toolChoice: { type: 'tool', name: 'a' } })).toThrow(
+      /forcing a specific tool/,
+    );
+  });
+
   it('serializes tool_use.input as a JSON string in tool_calls.function.arguments', () => {
     const ir: IRRequest = {
       system: [],

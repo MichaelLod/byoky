@@ -1090,3 +1090,35 @@ describe('cross-family dispatch — empty turns never reach Claude', () => {
     expect(out.messages[2]).toEqual({ role: 'user', content: [{ type: 'tool_result', tool_use_id: 'call_1', content: '' }] });
   });
 });
+
+describe('cross-family dispatch — a forced single tool reaches Cohere as REQUIRED', () => {
+  it('openai → cohere: an instructor-style extraction call', () => {
+    const out = JSON.parse(
+      translateRequest(
+        ctx('openai', 'cohere'),
+        JSON.stringify({
+          model: 'gpt-5.5',
+          messages: [{ role: 'user', content: 'Jane is 31.' }],
+          tools: [{ type: 'function', function: { name: 'Person', parameters: { type: 'object', properties: { name: { type: 'string' }, age: { type: 'integer' } } } } }],
+          tool_choice: { type: 'function', function: { name: 'Person' } },
+        }),
+      ),
+    );
+    expect(out.tool_choice).toBe('REQUIRED');
+    expect(out.tools).toHaveLength(1);
+  });
+
+  it('gemini → cohere: mode ANY with the one declared function', () => {
+    const out = JSON.parse(
+      translateRequest(
+        ctx('gemini', 'cohere'),
+        JSON.stringify({
+          contents: [{ role: 'user', parts: [{ text: 'x' }] }],
+          tools: [{ functionDeclarations: [{ name: 'f', parameters: { type: 'OBJECT', properties: { a: { type: 'STRING' } } } }] }],
+          toolConfig: { functionCallingConfig: { mode: 'ANY', allowedFunctionNames: ['f'] } },
+        }),
+      ),
+    );
+    expect(out.tool_choice).toBe('REQUIRED');
+  });
+});

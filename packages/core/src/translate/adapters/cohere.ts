@@ -436,10 +436,15 @@ function serializeRequest(ctx: TranslationContext, ir: IRRequest): string {
         out.tool_choice = 'REQUIRED';
         break;
       case 'tool':
-        // Cohere has no named forced tool. Silently downgrading "force tool
-        // X" to REQUIRED (any tool) lets the destination model invoke the
-        // wrong tool, which breaks app logic with no signal to the caller.
-        // Fail loud so the caller knows their constraint can't be honored.
+        // Cohere has no named forced tool. When the named tool is the only
+        // one offered (the usual structured-extraction call), REQUIRED means
+        // exactly the same. With more tools, downgrading "force tool X" to
+        // REQUIRED (any tool) lets the model invoke the wrong tool, which
+        // breaks app logic with no signal to the caller: fail loud instead.
+        if (ir.tools?.length === 1 && ir.tools[0].name === ir.toolChoice.name) {
+          out.tool_choice = 'REQUIRED';
+          break;
+        }
         throw new TranslationError(
           'UNSUPPORTED_FEATURE',
           'Cohere does not support forcing a specific tool by name.',
