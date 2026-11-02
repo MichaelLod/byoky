@@ -77,7 +77,7 @@ Everything stays on your machine: the proxy only listens on `127.0.0.1` and talk
 
 ## Usage from the browser
 
-The bridge is also started by pages that use the Byoky SDK (OpenClaw plugin, etc.) — no CLI action needed in that flow. See `@byoky/sdk`.
+`byoky-bridge connect` and the OpenClaw plugin's login start the proxy from their own page on `127.0.0.1`: the page connects to the wallet with the Byoky SDK, then asks the extension to open the proxy. Only pages on `localhost`, `127.0.0.1` or `[::1]` can make that request, and only for a session they own; the SDK has no public API for it. Web apps on any other origin can't start the bridge and don't need it: they call the extension directly through `@byoky/sdk`.
 
 Once running, the HTTP surface is:
 
