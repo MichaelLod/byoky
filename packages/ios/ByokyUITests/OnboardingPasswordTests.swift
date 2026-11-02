@@ -18,11 +18,14 @@ final class OnboardingPasswordTests: XCTestCase {
         getStarted.tap()
     }
 
-    private func type(_ text: String, into identifier: String) {
-        let field = app.secureTextFields[identifier]
+    /// Both fields the way they're typed on a smaller phone, where the
+    /// keyboard covers Confirm: Return in the first field moves on to it.
+    private func typePasswords(_ password: String, confirm: String) {
+        let field = app.secureTextFields["onboarding.password"]
         XCTAssertTrue(field.waitForExistence(timeout: 5))
         field.tap()
-        field.typeText(text)
+        field.typeText(password + "\n")
+        app.secureTextFields["onboarding.confirmPassword"].typeText(confirm)
     }
 
     private var mismatch: XCUIElement {
@@ -31,8 +34,7 @@ final class OnboardingPasswordTests: XCTestCase {
 
     func testPasswordCoreCallsTooWeakCannotCreateAWallet() {
         // Passed the old onboarding rule (12+ characters, two classes).
-        type("password1234", into: "onboarding.password")
-        type("password1234", into: "onboarding.confirmPassword")
+        typePasswords("password1234", confirm: "password1234")
 
         let strength = app.descendants(matching: .any)["onboarding.passwordStrength"]
         XCTAssertTrue(strength.waitForExistence(timeout: 2))
@@ -42,9 +44,8 @@ final class OnboardingPasswordTests: XCTestCase {
     }
 
     func testMismatchIsShownUntilThePasswordsMatch() {
-        type("Correct-Horse-42x", into: "onboarding.password")
         // One character short; the field keeps focus for the last one.
-        type("Correct-Horse-42", into: "onboarding.confirmPassword")
+        typePasswords("Correct-Horse-42x", confirm: "Correct-Horse-42")
 
         XCTAssertTrue(mismatch.waitForExistence(timeout: 2))
         XCTAssertFalse(app.buttons["onboarding.createWallet"].isEnabled)
@@ -53,5 +54,12 @@ final class OnboardingPasswordTests: XCTestCase {
 
         XCTAssertFalse(mismatch.waitForExistence(timeout: 1))
         XCTAssertTrue(app.buttons["onboarding.createWallet"].isEnabled)
+    }
+
+    /// Return in Confirm creates the wallet once the passwords are valid,
+    /// so the keyboard covering Create Wallet blocks nothing.
+    func testReturnCreatesTheWalletOnceThePasswordsMatch() {
+        typePasswords("Correct-Horse-42x", confirm: "Correct-Horse-42x\n")
+        XCTAssertTrue(app.buttons["wallet.settings"].waitForExistence(timeout: 30))
     }
 }

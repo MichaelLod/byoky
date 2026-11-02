@@ -20,7 +20,7 @@ function run(env = {}) {
     writeFileSync(join(bin, 'xcrun'), `#!/bin/sh
 echo "xcrun $*" >> "$CALLS"
 case "$*" in
-  "simctl list runtimes -j") echo '{"runtimes":[{"identifier":"rt.iOS-26-0","platform":"iOS","isAvailable":true,"version":"26.0","supportedDeviceTypes":[{"identifier":"dt.iPhone","productFamily":"iPhone"}]},{"identifier":"rt.iOS-27-0","platform":"iOS","isAvailable":true,"version":"27.0","supportedDeviceTypes":[{"identifier":"dt.iPad","productFamily":"iPad"},{"identifier":"dt.iPhone-17","productFamily":"iPhone"}]}]}' ;;
+  "simctl list runtimes -j") echo '{"runtimes":[{"identifier":"rt.iOS-26-0","platform":"iOS","isAvailable":true,"version":"26.0","supportedDeviceTypes":[{"identifier":"dt.iPhone","productFamily":"iPhone"}]},{"identifier":"rt.iOS-27-0","platform":"iOS","isAvailable":true,"version":"27.0","supportedDeviceTypes":[{"identifier":"dt.iPad","productFamily":"iPad"},{"identifier":"dt.iPhone-18-Pro","productFamily":"iPhone"},{"identifier":"dt.iPhone-17","productFamily":"iPhone"},{"identifier":"dt.iPhone-11","productFamily":"iPhone"}]}]}' ;;
   "simctl create"*) echo UDID-1 ;;
 esac
 `, { mode: 0o755 })
@@ -44,7 +44,7 @@ esac
 
 const LAUNCH_FAILURE = 'IDELaunchReport: Launching ByokyTests Finished with error: Simulator device failed to launch com.byoky.app.'
 
-test('boots its own simulator (newest runtime, an iPhone) and waits for it before the tests, then deletes it', () => {
+test('boots its own simulator (newest runtime, an iPhone 17) and waits for it before the tests, then deletes it', () => {
   const r = run({ SIM_NAME: 'byoky-test-sim' })
   assert.equal(r.code, 0, r.out)
   const lines = r.calls.trim().split('\n')
@@ -75,4 +75,33 @@ test('any other failure fails without a second run', () => {
   assert.equal(r.code, 1, r.out)
   assert.doesNotMatch(r.calls, /test-without-building/)
   assert.match(r.calls, /xcrun simctl delete UDID-1\n$/)
+})
+
+// The runtime lists its iPhones newest first; the last one (iPhone 11 here)
+// is the oldest, which the script used to take.
+test('SIM_DEVICE_TYPE picks the iPhone; one the runtime lacks falls back to its newest', () => {
+  const small = run({ SIM_NAME: 'sim', SIM_DEVICE_TYPE: 'iPhone-11' })
+  assert.equal(small.code, 0, small.out)
+  assert.match(small.calls, /^xcrun simctl create sim dt\.iPhone-11 rt\.iOS-27-0$/m)
+
+  const missing = run({ SIM_NAME: 'sim', SIM_DEVICE_TYPE: 'iPhone-SE-3rd-generation' })
+  assert.equal(missing.code, 0, missing.out)
+  assert.match(missing.calls, /^xcrun simctl create sim dt\.iPhone-18-Pro rt\.iOS-27-0$/m)
+})
+
+test('--ui runs the UI tests without the marketing walk; RESULT_BUNDLE keeps the result', () => {
+  const r = run({ ARGS: ['--ui', '--quiet'], RESULT_BUNDLE: '/nonexistent/ui.xcresult' })
+  assert.equal(r.code, 0, r.out)
+  const test = r.calls.split('\n').find((l) => l.startsWith('xcodebuild test '))
+  assert.match(test, / -only-testing:ByokyUITests -skip-testing:ByokyUITests\/ByokyMarketingTests /)
+  assert.doesNotMatch(test, /ByokyTests /)
+  assert.match(test, / -resultBundlePath \/nonexistent\/ui\.xcresult( |$)/)
+  assert.match(test, / -quiet$/)
+})
+
+test('an unknown option stops before a simulator is made', () => {
+  const r = run({ ARGS: ['--uitests'] })
+  assert.equal(r.code, 2, r.out)
+  assert.match(r.out, /Unknown option: --uitests/)
+  assert.doesNotMatch(r.calls, /simctl create/)
 })

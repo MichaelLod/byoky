@@ -1,0 +1,71 @@
+name: iOS UI tests
+
+# ByokyUITests (VoiceOver labels, tap targets, confirmations, onboarding) on
+# a simulator. The macOS runner is slow and costly: nightly, on demand, and
+# on pushes and PRs that change the app. CI's ios-unit job runs ByokyTests.
+on:
+  push:
+    branches: [main, 'release/**']
+    paths:
+      - 'packages/ios/**'
+      - 'scripts/ios-unit-tests.sh'
+      - '.github/workflows/ios-ui.yml'
+  pull_request:
+    branches: [main, 'release/**']
+    paths:
+      - 'packages/ios/**'
+      - 'scripts/ios-unit-tests.sh'
+      - '.github/workflows/ios-ui.yml'
+  schedule:
+    - cron: '53 3 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  ui-tests:
+    name: ByokyUITests
+    # The project uses an Icon Composer app icon and the iOS 26 SDK.
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: pnpm/action-setup@02f6c237bd2518259fed6c71566509edfb3f2b74 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build core and the Safari extension the app embeds
+        run: |
+          pnpm --filter @byoky/core build
+          pnpm --filter @byoky/sdk build
+          pnpm --filter @byoky/extension build:safari
+          packages/ios/Scripts/copy-wxt-output.sh
+
+      - name: Generate the Xcode project
+        working-directory: packages/ios
+        run: |
+          brew install xcodegen
+          xcodegen generate
+
+      # The smallest current iPhone: the keyboard covers the most there.
+      - name: ByokyUITests
+        env:
+          SIM_DEVICE_TYPE: iPhone-SE-3rd-generation
+          RESULT_BUNDLE: ${{ runner.temp }}/ByokyUITests.xcresult
+        run: bash scripts/ios-unit-tests.sh "$RUNNER_TEMP/DerivedData" --ui
+
+      - name: Upload the result bundle
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ios-ui-test-results
+          path: ${{ runner.temp }}/ByokyUITests.xcresult
+          retention-days: 7

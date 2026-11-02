@@ -119,6 +119,10 @@ struct OnboardingView: View {
                     .textContentType(.newPassword)
                     .focused($focusedField, equals: .password)
                     .retroField(focused: focusedField == .password)
+                    // Return moves on to Confirm, which the keyboard covers
+                    // on smaller phones.
+                    .submitLabel(.next)
+                    .onSubmit { focusedField = .confirm }
                     .accessibilityIdentifier("onboarding.password")
 
                 // The strength line rates the password above it; the confirm
@@ -136,6 +140,9 @@ struct OnboardingView: View {
                     .textContentType(.newPassword)
                     .focused($focusedField, equals: .confirm)
                     .retroField(focused: focusedField == .confirm)
+                    // Return creates the wallet, as Go does on Android.
+                    .submitLabel(.go)
+                    .onSubmit { if isValid { createWallet() } }
                     .accessibilityIdentifier("onboarding.confirmPassword")
 
                 if passwordsDiffer {
