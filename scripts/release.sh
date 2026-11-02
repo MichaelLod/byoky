@@ -99,6 +99,18 @@ status_field() {
   ' "$STATUS_JSON" "$1" "$2"
 }
 
+# Whether GitHub Actions passed on commit $1 (scripts/ci-status.mjs): sets
+# CI_PROBLEMS to what didn't, one line each, indented for the report.
+ci_green() {
+  local out
+  if out=$(node scripts/ci-status.mjs "$1" 2>&1); then
+    CI_PROBLEMS=""
+    return 0
+  fi
+  CI_PROBLEMS=$(printf '%s\n' "$out" | sed 's/^/           /')
+  return 1
+}
+
 # How AMO's reviewers rebuild the add-on; BUILD-FIREFOX.md in the source zip.
 # The Node.js it asks for is package.json's engines.node.
 amo_build_note() {
@@ -246,15 +258,37 @@ fi
 if [ "${1:-}" = "retry" ]; then
   ALLOW_PENDING=false
   HOLD_MACOS=false
+  ALLOW_RED_CI=false
   for arg in "${@:2}"; do
     case "$arg" in
       --allow-pending) ALLOW_PENDING=true ;;
       --hold-macos) HOLD_MACOS=true ;;
-      *) echo "Usage: ./scripts/release.sh retry [--allow-pending] [--hold-macos]"; exit 1 ;;
+      --allow-red-ci) ALLOW_RED_CI=true ;;
+      *) echo "Usage: ./scripts/release.sh retry [--allow-pending] [--hold-macos] [--allow-red-ci]"; exit 1 ;;
     esac
   done
 
   CURRENT=$(node -p "require('./package.json').version")
+
+  # What retry publishes is the tagged commit, which has to have passed
+  # GitHub Actions like the commit the release started from. CI on it starts
+  # with the release's push to main and takes up to 40 minutes.
+  TAG_SHA=$(git rev-parse -q --verify "refs/tags/v${CURRENT}^{commit}" || true)
+  if [ -z "$TAG_SHA" ]; then
+    echo "Error: there's no tag v${CURRENT} here; fetch the tags (git fetch origin --tags) and run retry again"
+    exit 1
+  fi
+  if ! ci_green "$TAG_SHA"; then
+    if [ "$ALLOW_RED_CI" = true ]; then
+      echo "WARN: GitHub Actions hasn't passed on v${CURRENT} (${TAG_SHA:0:8}); --allow-red-ci retries anyway:"
+      echo "$CI_PROBLEMS"
+      echo ""
+    else
+      echo "Error: GitHub Actions hasn't passed on v${CURRENT} (${TAG_SHA:0:8}). Wait for it or fix it, or pass --allow-red-ci:"
+      echo "$CI_PROBLEMS"
+      exit 1
+    fi
+  fi
 
   # Derive native version from Android gradle
   ANDROID_GRADLE="$ROOT/packages/android/app/build.gradle.kts"
@@ -487,6 +521,7 @@ HOLD_MACOS=false
 ALLOW_BRANCH=false
 ALLOW_DIRTY=false
 SKIP_NATIVE_TESTS=false
+ALLOW_RED_CI=false
 NEW_VERSION=""
 
 for arg in "$@"; do
@@ -500,6 +535,7 @@ for arg in "$@"; do
     --allow-branch) ALLOW_BRANCH=true ;;
     --allow-dirty) ALLOW_DIRTY=true ;;
     --skip-native-tests) SKIP_NATIVE_TESTS=true ;;
+    --allow-red-ci) ALLOW_RED_CI=true ;;
     *)         NEW_VERSION="$arg" ;;
   esac
 done
@@ -508,9 +544,9 @@ if [ -z "$NEW_VERSION" ]; then
   CURRENT=$(node -p "require('./package.json').version")
   echo "Usage: ./scripts/release.sh <new-version> [--dry] [--skip-mobile] [--skip-store-uploads] [--yes]"
   echo "                                           [--allow-pending] [--hold-macos] [--allow-branch]"
-  echo "                                           [--allow-dirty] [--skip-native-tests]"
+  echo "                                           [--allow-dirty] [--skip-native-tests] [--allow-red-ci]"
   echo "       ./scripts/release.sh status"
-  echo "       ./scripts/release.sh retry [--allow-pending] [--hold-macos]"
+  echo "       ./scripts/release.sh retry [--allow-pending] [--hold-macos] [--allow-red-ci]"
   echo ""
   echo "  --dry                  Run the checks and the tests and print the plan; nothing"
   echo "                         is bumped or published, and signing is only checked"
@@ -534,9 +570,14 @@ if [ -z "$NEW_VERSION" ]; then
   echo "                         built and shipped but NOT committed or tagged"
   echo "  --skip-native-tests    Skip the Android and iOS unit tests (the JS build,"
   echo "                         typecheck and tests always run)"
+  echo "  --allow-red-ci         Release although GitHub Actions hasn't passed on HEAD"
+  echo "                         (failed, still running, or never ran because HEAD isn't"
+  echo "                         pushed). With retry: on the tagged commit"
   echo ""
   echo "Releases go out from main: fast-forward main to the work, release from the main"
   echo "checkout. The release commit and tag v<version> are pushed to origin main."
+  echo "HEAD has to be pushed and green in GitHub Actions (CI, Security, and Android"
+  echo "emulator when it ran) first; retry asks the same of the tagged commit."
   echo "retry finishes a release that stopped after the push: it publishes the npm"
   echo "packages and the GitHub release that are missing and uploads to the stores that"
   echo "are behind. A run that stopped earlier says how to undo its version bump."
@@ -637,6 +678,19 @@ LATEST_TAG=$(git tag --list 'v[0-9]*' --sort=-version:refname | head -1)
 if [ -n "$LATEST_TAG" ] && [ "${LATEST_TAG#v}" != "$OLD_VERSION" ] && \
    [ "$(printf '%s\n%s\n' "${LATEST_TAG#v}" "$OLD_VERSION" | sort -V | tail -1)" = "${LATEST_TAG#v}" ]; then
   ERRORS+=("${LATEST_TAG} is newer than this tree's ${OLD_VERSION}: HEAD is missing that release's version bump")
+fi
+
+# GitHub Actions has to have passed on what's released: the checks below
+# don't build the create-byoky-app templates or run the e2e and emulator
+# suites, and main has no required checks. A HEAD that was never pushed has
+# no runs.
+HEAD_SHA=$(git rev-parse HEAD)
+if ci_green "$HEAD_SHA"; then
+  :
+elif [ "$ALLOW_RED_CI" = true ]; then
+  WARNINGS+=("GitHub Actions hasn't passed on ${HEAD_SHA:0:8} (--allow-red-ci):"$'\n'"$CI_PROBLEMS")
+else
+  ERRORS+=("GitHub Actions hasn't passed on ${HEAD_SHA:0:8}. Push it and wait for CI, or fix what failed, or pass --allow-red-ci:"$'\n'"$CI_PROBLEMS")
 fi
 
 # Without the upload keystore gradle builds an unsigned AAB, which Google Play
@@ -774,9 +828,10 @@ elif [ "$STATUS_CODE" -ne 0 ]; then
 fi
 
 # --- Verify ---
-# What ships has to build and pass its tests: the JS packages always, the
-# Android and iOS unit tests unless --skip-native-tests.
-echo "==> Verifying (install, build, typecheck, tests)..."
+# What ships has to build and pass its tests: the JS packages and the
+# create-byoky-app templates always, the Android and iOS unit tests unless
+# --skip-native-tests.
+echo "==> Verifying (install, build, typecheck, tests, templates)..."
 verify() {
   echo "  \$ $*"
   if ! "$@"; then
@@ -792,6 +847,7 @@ verify pnpm --filter @byoky/extension exec wxt prepare
 verify pnpm typecheck
 verify pnpm test
 verify node --test scripts/tests/*.test.mjs
+verify bash scripts/template-smoke.sh chat multi-provider backend-relay
 if [ "$SKIP_NATIVE_TESTS" = true ]; then
   echo "  WARN: --skip-native-tests: the Android and iOS unit tests didn't run"
 else

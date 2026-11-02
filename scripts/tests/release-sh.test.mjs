@@ -16,6 +16,10 @@ import { SCRIPTS, FAKE_ASC_ENV, writePlayServiceAccount, playRoutes, onTrack, PL
 const MAC_ONLY = { skip: process.platform !== 'darwin' && 'release.sh past the bump needs macOS (BSD sed, PlistBuddy)' }
 
 const NOT_PENDING = { localVersion: '1.1.1', results: [{ id: 'chrome', version: '1.1.1', pending: false }] }
+// GitHub Actions on the commit, as `gh run list --json` lists it.
+const ghRun = (workflowName, conclusion, status = 'completed') =>
+  ({ databaseId: workflowName.length, workflowName, status, conclusion, createdAt: '2026-11-02T12:00:00Z', url: `https://github.test/runs/${workflowName.length}` })
+const CI_GREEN = [ghRun('CI', 'success'), ghRun('Security', 'success'), ghRun('Android emulator', 'success')]
 const CWS_CLI = join(SCRIPTS, '..', 'node_modules', 'chrome-webstore-upload-cli', 'source', 'cli.js')
 const CHROME_UPLOAD = /^npx chrome-webstore-upload --source dist\/byoky-chrome-v1\.1\.2-store\.zip --extension-id extid$/m
 
@@ -39,7 +43,8 @@ const plist = (version, build) => `<?xml version="1.0" encoding="UTF-8"?>
 // (STUB_NPX_EXIT; for chrome-webstore-upload also the OAuth environment it
 // got, and STUB_NPX_REAL=1 runs the workspace's real CLI with fetch stubbed),
 // npm (`npm view` answers for STUB_NPM_PUBLISHED: "all" or
-// package names), gh (STUB_GH_RELEASE_MISSING=1: no release yet), xcrun,
+// package names), gh (STUB_GH_RELEASE_MISSING=1: no release yet; `gh run list`
+// answers STUB_GH_RUNS, green by default, and `gh run view` STUB_GH_JOBS), xcrun,
 // xcodebuild (an export leaves an .ipa, or a .pkg for the macOS archive).
 // The submit-appstore.mjs stub exits STUB_ASC_<IOS|MAC_OS>_QUICK for retry's
 // first look (ASC_BUILD_WAIT_MIN=0) and STUB_ASC_<platform>_WAIT otherwise.
@@ -91,9 +96,10 @@ const wait = process.env.ASC_BUILD_WAIT_MIN
 appendFileSync(process.env.CALLS, \`submit-appstore.mjs \${version} \${platform} wait=\${wait}\\n\`)
 process.exitCode = Number(process.env[\`STUB_ASC_\${platform}_\${wait === '0' ? 'QUICK' : 'WAIT'}\`] ?? 0)
 `)
-  for (const name of ['ios-unit-tests.sh', ...real]) copyFileSync(join(SCRIPTS, name), join(work, 'scripts', name))
+  for (const name of ['ios-unit-tests.sh', 'ci-status.mjs', ...real]) copyFileSync(join(SCRIPTS, name), join(work, 'scripts', name))
   write(join(work, 'scripts/ios-signing.sh'), logArgs('ios-signing.sh') + 'exit "${STUB_SIGNING_EXIT:-0}"\n')
   write(join(work, 'scripts/sync-mobile-bundle.sh'), logArgs('sync-mobile-bundle.sh'))
+  write(join(work, 'scripts/template-smoke.sh'), logArgs('template-smoke.sh'))
   write(join(work, 'scripts/scan-openclaw-plugin.mjs'), '')
   write(join(work, 'scripts/release-notes.mjs'), "console.log('notes')\n")
   write(join(work, 'scripts/generate-versions.mjs'), '')
@@ -134,7 +140,13 @@ if [ "$1" = view ]; then
 fi
 echo "npm $*" >> "$CALLS"
 `, 0o755)
-  write(join(bin, 'gh'), logArgs('gh') + '[ "$1 $2" = "release view" ] && [ -n "${STUB_GH_RELEASE_MISSING:-}" ] && exit 1\nexit 0\n', 0o755)
+  write(join(bin, 'gh'), logArgs('gh') + `case "$1 $2" in
+  "release view") [ -n "\${STUB_GH_RELEASE_MISSING:-}" ] && exit 1 ;;
+  "run list") printf '%s\\n' "$STUB_GH_RUNS" ;;
+  "run view") printf '%s\\n' "$STUB_GH_JOBS" ;;
+esac
+exit 0
+`, 0o755)
 
   const fetchLog = join(base, 'fetch.log')
   const run = (args, env = {}, routes) => {
@@ -156,6 +168,8 @@ echo "npm $*" >> "$CALLS"
         HOME: base,
         CALLS: calls,
         STUB_STATUS_JSON: JSON.stringify(NOT_PENDING),
+        STUB_GH_RUNS: JSON.stringify(CI_GREEN),
+        STUB_GH_JOBS: '{"jobs":[]}',
         CHROME_EXTENSION_ID: 'extid',
         CHROME_CLIENT_ID: 'client',
         CHROME_CLIENT_SECRET: 'secret',
@@ -402,6 +416,7 @@ test('the tests run before anything is bumped, the native ones included', (t) =>
   // The typecheck needs the bridge's dist (the OpenClaw plugin imports its types).
   const order = ['pnpm install --frozen-lockfile', 'pnpm build:core', 'pnpm build:sdk', 'pnpm --filter @byoky/bridge build',
     'pnpm --filter @byoky/extension exec wxt prepare', 'pnpm typecheck', 'pnpm test',
+    'template-smoke.sh chat multi-provider backend-relay',
     'gradlew :app:testDebugUnitTest', 'xcrun simctl create byoky-release-tests-']
   let at = -1
   for (const step of order) {
@@ -426,6 +441,84 @@ test('a failing test stops the release before the bump', (t) => {
   assert.equal(r.code, 1, r.out)
   assert.match(r.out, /Error: 'pnpm test' failed\. Nothing was bumped or published\./)
   assert.match(readFileSync(join(s.work, 'package.json'), 'utf8'), /"version": "1\.1\.1"/)
+})
+
+// --- GitHub Actions ---
+
+test('a release needs GitHub Actions green on HEAD: failed, running or missing runs stop it before the bump', (t) => {
+  const s = sandbox()
+  t.after(s.cleanup)
+  const head = s.git('rev-parse', 'HEAD').trim()
+  const jobs = JSON.stringify({ jobs: [
+    { name: 'build (24)', status: 'completed', conclusion: 'success' },
+    { name: 'templates (chat)', status: 'completed', conclusion: 'failure' },
+    { name: 'e2e', status: 'completed', conclusion: 'failure' },
+  ] })
+  const red = s.run(['1.1.2', '--yes'], {
+    STUB_GH_RUNS: JSON.stringify([ghRun('CI', 'failure'), ghRun('Security', 'success')]),
+    STUB_GH_JOBS: jobs,
+  })
+  assert.equal(red.code, 1, red.out)
+  assert.match(red.calls, new RegExp(`^gh run list --commit ${head} `, 'm'))
+  assert.match(red.out, new RegExp(`ERROR: GitHub Actions hasn't passed on ${head.slice(0, 8)}\\. .*--allow-red-ci:\\n +CI: failure in templates \\(chat\\), e2e \\(https://github\\.test/runs/2\\)`))
+  assert.doesNotMatch(red.calls, /pnpm install|ios-signing/)
+  assert.match(readFileSync(join(s.work, 'package.json'), 'utf8'), /"version": "1\.1\.1"/)
+
+  // HEAD never pushed: no runs.
+  const none = s.run(['1.1.2', '--dry'], { STUB_GH_RUNS: '[]' })
+  assert.equal(none.code, 1, none.out)
+  assert.match(none.out, /no GitHub Actions runs for [0-9a-f]{8}: push it to main or a release\/\*\* branch and wait for CI/)
+
+  const running = s.run(['1.1.2', '--dry'], {
+    STUB_GH_RUNS: JSON.stringify([ghRun('CI', null, 'in_progress'), ghRun('Security', 'success')]),
+  })
+  assert.equal(running.code, 1, running.out)
+  assert.match(running.out, /CI is still in progress/)
+
+  const noSecurity = s.run(['1.1.2', '--dry'], { STUB_GH_RUNS: JSON.stringify([ghRun('CI', 'success')]) })
+  assert.equal(noSecurity.code, 1, noSecurity.out)
+  assert.match(noSecurity.out, /Security didn't run on/)
+
+  // An Android emulator run that failed counts as well.
+  const emulator = s.run(['1.1.2', '--dry'], { STUB_GH_RUNS: JSON.stringify([...CI_GREEN.slice(0, 2), ghRun('Android emulator', 'failure')]) })
+  assert.equal(emulator.code, 1, emulator.out)
+  assert.match(emulator.out, /Android emulator: failure/)
+
+  // A rerun that passed replaces the failed run before it.
+  const rerun = s.run(['1.1.2', '--dry'], { STUB_GH_RUNS: JSON.stringify([
+    { ...ghRun('CI', 'failure'), createdAt: '2026-11-02T11:00:00Z' }, ...CI_GREEN] ) })
+  assert.equal(rerun.code, 0, rerun.out)
+})
+
+test('--allow-red-ci releases although GitHub Actions is red, and says what failed', MAC_ONLY, (t) => {
+  const s = sandbox()
+  t.after(s.cleanup)
+  const r = s.run(['1.1.2', '--yes', '--skip-mobile', '--allow-red-ci'], {
+    STUB_GH_RUNS: JSON.stringify([ghRun('CI', 'failure'), ghRun('Security', 'success')]),
+    STUB_GH_JOBS: JSON.stringify({ jobs: [{ name: 'e2e', status: 'completed', conclusion: 'failure' }] }),
+  })
+  assert.equal(r.code, 0, r.out)
+  assert.match(r.out, /WARN: GitHub Actions hasn't passed on [0-9a-f]{8} \(--allow-red-ci\):\n +CI: failure in e2e/)
+  assert.equal(s.origin('log', '-1', '--format=%s', 'main').trim(), 'Bump to v1.1.2 (native 1.1.2/31)')
+})
+
+test('retry needs GitHub Actions green on the tagged commit, unless --allow-red-ci', (t) => {
+  const s = released(t)
+  // A commit after the tag: retry asks about the tag's.
+  s.git('commit', '-q', '--allow-empty', '-m', 'after the release')
+  const tagged = s.git('rev-parse', 'v1.1.2^{commit}').trim()
+  const env = { STUB_GH_RUNS: JSON.stringify([ghRun('CI', null, 'in_progress'), ghRun('Security', 'success')]) }
+  const r = s.run(['retry'], env)
+  assert.equal(r.code, 1, r.out)
+  assert.match(r.calls, new RegExp(`^gh run list --commit ${tagged} `, 'm'))
+  assert.match(r.out, new RegExp(`Error: GitHub Actions hasn't passed on v1\\.1\\.2 \\(${tagged.slice(0, 8)}\\)`))
+  assert.match(r.out, /CI is still in progress/)
+  assert.doesNotMatch(r.calls, /chrome-webstore-upload|gh release create|pnpm publish/)
+
+  const forced = s.run(['retry', '--allow-red-ci'], env)
+  assert.equal(forced.code, 0, forced.out)
+  assert.match(forced.out, /WARN: GitHub Actions hasn't passed on v1\.1\.2 .*--allow-red-ci retries anyway/)
+  assert.match(forced.calls, CHROME_UPLOAD)
 })
 
 // --- a whole run, and picking up after a failure ---
