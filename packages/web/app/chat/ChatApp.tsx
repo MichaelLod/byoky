@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, Fragment } from 'react';
+import { useState, useEffect, useMemo, useRef, Fragment } from 'react';
 import { Byoky, ByokyErrorCode, type ByokySession } from '@byoky/sdk';
 import { cohereErrorMessage, cohereStreamText, offeredModelPicks, openAICompatErrorMessage, outputCapField, pickModel } from '../components/chat-providers';
 
@@ -213,11 +213,18 @@ function ChatView({ session, onDisconnect }: { session: ByokySession; onDisconne
     try { localStorage.setItem('byoky-chat-models', JSON.stringify(selectedModels)); } catch {}
   }, [selectedModels]);
 
+  const availableProviderIds = useMemo(
+    () => providerIds.filter(id => session.providers[id]?.available === true),
+    [session.providers],
+  );
+  const noKeys = availableProviderIds.length === 0;
+
+  // Keep the selection on a provider the wallet has a key for, including
+  // when a key is added or removed mid-session; none while there is none.
   useEffect(() => {
-    if (selectedProvider) return;
-    const first = providerIds.find(id => session.providers[id]?.available === true);
-    setSelectedProvider(first ?? providerIds[0]);
-  }, [session.providers, selectedProvider]);
+    if (selectedProvider && availableProviderIds.includes(selectedProvider)) return;
+    setSelectedProvider(availableProviderIds[0] ?? '');
+  }, [availableProviderIds, selectedProvider]);
 
   function removeAttachment() { if (attachedImage) { URL.revokeObjectURL(attachedImage.preview); setAttachedImage(null); } }
 
@@ -307,14 +314,18 @@ function ChatView({ session, onDisconnect }: { session: ByokySession; onDisconne
     <>
       <div className="header">
         <div className="provider-select">
-          <label>Provider:</label>
-          <select value={selectedProvider} onChange={e => setSelectedProvider(e.target.value)}>
-            {providerIds.filter(id => session.providers[id]?.available).map(id => <option key={id} value={id}>{providers[id].name}</option>)}
-          </select>
-          {selectedProvider && (
-            <select value={currentModel} onChange={e => setSelectedModels(prev => ({ ...prev, [selectedProvider]: e.target.value }))}>
-              {providers[selectedProvider].models.map(m => <option key={m} value={m}>{m}</option>)}
-            </select>
+          {!noKeys && (
+            <>
+              <label>Provider:</label>
+              <select value={selectedProvider} onChange={e => setSelectedProvider(e.target.value)}>
+                {availableProviderIds.map(id => <option key={id} value={id}>{providers[id].name}</option>)}
+              </select>
+              {selectedProvider && (
+                <select value={currentModel} onChange={e => setSelectedModels(prev => ({ ...prev, [selectedProvider]: e.target.value }))}>
+                  {providers[selectedProvider].models.map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
+              )}
+            </>
           )}
         </div>
         <div className="header-actions">
@@ -324,7 +335,13 @@ function ChatView({ session, onDisconnect }: { session: ByokySession; onDisconne
       </div>
 
       <div className="messages" ref={messagesRef}>
-        {messages.length === 0 && (
+        {noKeys && (
+          <div className="empty-wallet-banner" role="status">
+            <strong>Your wallet has no API keys yet.</strong>
+            <span>Add one in the Byoky extension or mobile app to start chatting.</span>
+          </div>
+        )}
+        {messages.length === 0 && !noKeys && (
           <div className="empty">
             <div className="empty-icon">
               <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
@@ -364,8 +381,8 @@ function ChatView({ session, onDisconnect }: { session: ByokySession; onDisconne
             </button>
           </>
         )}
-        <input type="text" value={input} onChange={e => setInput(e.target.value)} placeholder={attachedImage ? 'Ask about this image...' : 'Type a message...'} disabled={loading} autoFocus />
-        <button type="submit" className="btn-send" disabled={loading || (!input.trim() && !attachedImage)}>Send</button>
+        <input type="text" value={input} onChange={e => setInput(e.target.value)} placeholder={noKeys ? 'No keys in your wallet yet' : attachedImage ? 'Ask about this image...' : 'Type a message...'} disabled={loading || noKeys} autoFocus />
+        <button type="submit" className="btn-send" disabled={loading || !selectedProvider || (!input.trim() && !attachedImage)}>Send</button>
       </form>
     </>
   );
