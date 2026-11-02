@@ -6,7 +6,8 @@ import {
   MIN_PASSWORD_LENGTH,
 } from '@byoky/core';
 import { PasswordMeter } from '../components/PasswordMeter';
-import { lockedUntilFrom, lockoutMessage, useLockoutCountdown } from '../hooks/useLockoutCountdown';
+import { lockedUntilFrom, useLockoutCountdown } from '../hooks/useLockoutCountdown';
+import { FormError, LockoutEndedStatus, LockoutError } from '../components/FormError';
 
 async function sendInternal(action: string, payload?: unknown): Promise<Record<string, unknown>> {
   return browser.runtime.sendMessage({
@@ -155,37 +156,55 @@ function ExportModal({ onClose }: { onClose: () => void }) {
   const [currentPassword, setCurrentPassword] = useState('');
   const [exportPassword, setExportPassword] = useState('');
   const [confirm, setConfirm] = useState('');
-  const [error, setError] = useState('');
+  const [error, setErrorText] = useState('');
+  // The field the error is about: the wallet password (also when the
+  // background refuses it), the new export password, or its confirmation.
+  const [errorField, setErrorField] = useState<'current' | 'export' | 'confirm'>('current');
   const [exporting, setExporting] = useState(false);
+  // Set when a lockout ran out, for screen readers, until the next try.
+  const [lockoutEnded, setLockoutEnded] = useState(false);
   // Export re-authentication shares the unlock lockout.
   const { lockedUntil, setLockedUntil } = useWalletStore();
   const lockoutSeconds = useLockoutCountdown(lockedUntil, () => {
     setLockedUntil(null);
     setError('');
+    setLockoutEnded(true);
   });
   const lockedOut = lockoutSeconds > 0;
-  const shownError = lockedOut ? lockoutMessage(lockoutSeconds) : error;
+  const hasError = lockedOut || !!error;
+
+  function setError(text: string, field: 'current' | 'export' | 'confirm' = 'current') {
+    setErrorText(text);
+    setErrorField(field);
+  }
+
+  /** Marks the field the error is about, and points it at the error. */
+  function fieldError(field: 'current' | 'export' | 'confirm') {
+    const invalid = hasError && (lockedOut ? field === 'current' : errorField === field);
+    return { 'aria-invalid': invalid, 'aria-describedby': invalid ? 'export-error' : undefined };
+  }
 
   const strength = checkPasswordStrength(exportPassword);
 
   async function handleExport(e: FormEvent) {
     e.preventDefault();
     setError('');
+    setLockoutEnded(false);
 
     if (!currentPassword) {
       setError('Enter your wallet password');
       return;
     }
     if (exportPassword.length < MIN_PASSWORD_LENGTH) {
-      setError(`Password must be at least ${MIN_PASSWORD_LENGTH} characters`);
+      setError(`Password must be at least ${MIN_PASSWORD_LENGTH} characters`, 'export');
       return;
     }
     if (strength.score < 2) {
-      setError('Password is too weak');
+      setError('Password is too weak', 'export');
       return;
     }
     if (exportPassword !== confirm) {
-      setError('Passwords do not match');
+      setError('Passwords do not match', 'confirm');
       return;
     }
 
@@ -225,7 +244,10 @@ function ExportModal({ onClose }: { onClose: () => void }) {
         on this device or another one.
       </p>
 
-      {shownError && <div className="error">{shownError}</div>}
+      {lockedOut
+        ? <LockoutError key={lockedUntil} id="export-error" seconds={lockoutSeconds} />
+        : error && <FormError id="export-error">{error}</FormError>}
+      <LockoutEndedStatus ended={lockoutEnded} />
 
       <form onSubmit={handleExport}>
         <div className="form-group">
@@ -237,6 +259,7 @@ function ExportModal({ onClose }: { onClose: () => void }) {
             onChange={(e) => setCurrentPassword(e.target.value)}
             placeholder="The password you unlock Byoky with"
             autoComplete="current-password"
+            {...fieldError('current')}
             autoFocus
           />
         </div>
@@ -250,6 +273,7 @@ function ExportModal({ onClose }: { onClose: () => void }) {
             onChange={(e) => setExportPassword(e.target.value)}
             placeholder="At least 12 characters"
             autoComplete="new-password"
+            {...fieldError('export')}
           />
           {exportPassword.length > 0 && <PasswordMeter strength={strength} />}
         </div>
@@ -262,6 +286,7 @@ function ExportModal({ onClose }: { onClose: () => void }) {
             value={confirm}
             onChange={(e) => setConfirm(e.target.value)}
             placeholder="Repeat password"
+            {...fieldError('confirm')}
           />
         </div>
 
@@ -288,12 +313,29 @@ function ImportModal({ onClose }: { onClose: () => void }) {
   const [importPassword, setImportPassword] = useState('');
   const [fileData, setFileData] = useState<string | null>(null);
   const [fileName, setFileName] = useState('');
-  const [error, setError] = useState('');
+  const [error, setErrorText] = useState('');
+  // The file pick or the password: what the error is about.
+  const [errorField, setErrorField] = useState<'file' | 'password'>('password');
   const [importing, setImporting] = useState(false);
   const [summary, setSummary] = useState<{ added: number; duplicates: number; rejected: number } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   // Only the latest pick may fill in fileData; an earlier, slower read may not.
   const readId = useRef(0);
+
+  function setError(text: string, field: 'file' | 'password' = 'password') {
+    setErrorText(text);
+    setErrorField(field);
+  }
+
+  /** Points the control the error is about at it (and marks the password field). */
+  function fieldError(field: 'file' | 'password') {
+    const about = !!error && errorField === field;
+    return {
+      // A button can't be aria-invalid.
+      ...(field === 'password' ? { 'aria-invalid': about } : {}),
+      'aria-describedby': about ? 'import-error' : undefined,
+    };
+  }
 
   // A new pick replaces the old one, also when it is rejected: Import must
   // never send an earlier file under an error about this one.
@@ -306,7 +348,7 @@ function ImportModal({ onClose }: { onClose: () => void }) {
     setFileData(null);
     const MAX_IMPORT_SIZE = 10 * 1024 * 1024; // 10MB
     if (file.size > MAX_IMPORT_SIZE) {
-      setError('File too large (max 10MB)');
+      setError('File too large (max 10MB)', 'file');
       setFileName('');
       input.value = '';
       return;
@@ -319,7 +361,7 @@ function ImportModal({ onClose }: { onClose: () => void }) {
     };
     reader.onerror = () => {
       if (id !== readId.current) return;
-      setError('Could not read the file');
+      setError('Could not read the file', 'file');
       setFileName('');
       input.value = '';
     };
@@ -331,7 +373,7 @@ function ImportModal({ onClose }: { onClose: () => void }) {
     setError('');
 
     if (!fileData) {
-      setError('Please select a .byoky file');
+      setError('Please select a .byoky file', 'file');
       return;
     }
     if (!importPassword) {
@@ -391,7 +433,7 @@ function ImportModal({ onClose }: { onClose: () => void }) {
         keys you already have stay as they are, and duplicates are skipped.
       </p>
 
-      {error && <div className="error">{error}</div>}
+      {error && <FormError id="import-error">{error}</FormError>}
 
       <form onSubmit={handleImport}>
         <div className="form-group">
@@ -407,6 +449,7 @@ function ImportModal({ onClose }: { onClose: () => void }) {
             type="button"
             className="btn btn-secondary btn-file"
             onClick={() => fileRef.current?.click()}
+            {...fieldError('file')}
           >
             {fileName || 'Choose .byoky file'}
           </button>
@@ -420,6 +463,7 @@ function ImportModal({ onClose }: { onClose: () => void }) {
             value={importPassword}
             onChange={(e) => setImportPassword(e.target.value)}
             placeholder="Password used during export"
+            {...fieldError('password')}
           />
         </div>
 

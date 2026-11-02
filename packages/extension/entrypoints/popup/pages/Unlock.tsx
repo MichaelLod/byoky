@@ -1,7 +1,8 @@
 import { useState, type FormEvent } from 'react';
 import { useWalletStore } from '../store';
 import { Raven } from '../components/Raven';
-import { lockoutMessage, useLockoutCountdown } from '../hooks/useLockoutCountdown';
+import { useLockoutCountdown } from '../hooks/useLockoutCountdown';
+import { FormError, LockoutEndedStatus, LockoutError } from '../components/FormError';
 import { describeOrigin } from '../utils/origin';
 
 export function Unlock() {
@@ -10,23 +11,28 @@ export function Unlock() {
   } = useWalletStore();
   const [password, setPassword] = useState('');
   const [showReset, setShowReset] = useState(false);
+  // Set when a lockout ran out, for screen readers, until the next try.
+  const [lockoutEnded, setLockoutEnded] = useState(false);
   // The background refuses every password until the lockout ends, so count
   // it down and offer the button again only then.
   const lockoutSeconds = useLockoutCountdown(lockedUntil, () => {
     setLockedUntil(null);
     clearError();
+    setLockoutEnded(true);
   });
   const lockedOut = lockoutSeconds > 0;
-  const shownError = lockedOut ? lockoutMessage(lockoutSeconds) : error;
+  const hasError = lockedOut || !!error;
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (!password || submitting || lockedOut) return;
+    setLockoutEnded(false);
     unlock(password);
   }
 
   function handlePasswordChange(value: string) {
     setPassword(value);
+    setLockoutEnded(false);
     // "Incorrect password" is about the last try, not what is being typed.
     if (error && !lockedOut) clearError();
   }
@@ -51,7 +57,10 @@ export function Unlock() {
       {!showReset ? (
         <>
           <form onSubmit={handleSubmit}>
-            {shownError && <div className="error">{shownError}</div>}
+            {lockedOut
+              ? <LockoutError key={lockedUntil} id="unlock-error" seconds={lockoutSeconds} />
+              : error && <FormError id="unlock-error">{error}</FormError>}
+            <LockoutEndedStatus ended={lockoutEnded} />
 
             <div className="form-group">
               <label htmlFor="password">Master password</label>
@@ -61,6 +70,8 @@ export function Unlock() {
                 value={password}
                 onChange={(e) => handlePasswordChange(e.target.value)}
                 placeholder="Enter your password"
+                aria-invalid={hasError}
+                aria-describedby={hasError ? 'unlock-error' : undefined}
                 autoFocus
               />
             </div>

@@ -2,6 +2,7 @@ import { useState, useEffect, type FormEvent } from 'react';
 import { useWalletStore } from '../store';
 import { PROVIDERS } from '@byoky/core';
 import { ProviderIcon } from '../components/ProviderIcon';
+import { FormError } from '../components/FormError';
 
 const providerOptions = Object.values(PROVIDERS);
 
@@ -113,13 +114,21 @@ export function AddCredential() {
   };
   const apiKeyHint = apiKeyHints[providerId] ?? 'your provider console';
 
+  // The field the background's error is about (the endpoint, or the key), so
+  // it can be marked; "Wallet is locked" is about neither.
+  const errorField = !error ? null : /base url/i.test(error) ? 'baseUrl' : /key|token/i.test(error) ? 'apiKey' : null;
+  const fieldError = (field: 'baseUrl' | 'apiKey') => ({
+    'aria-invalid': errorField === field,
+    'aria-describedby': errorField === field ? 'add-credential-error' : undefined,
+  });
+
   return (
     <div>
       <p className="page-subtitle">
         Add a credential for {provider?.name ?? 'an LLM provider'}.
       </p>
 
-      {error && <div className="error">{error}</div>}
+      {error && <FormError id="add-credential-error">{error}</FormError>}
 
       <form onSubmit={handleSubmit}>
         <div className="form-group">
@@ -192,6 +201,7 @@ export function AddCredential() {
                 type="text"
                 value={baseUrl}
                 onChange={(e) => edited(setBaseUrl)(e.target.value)}
+                {...fieldError('baseUrl')}
                 required
                 placeholder={
                   LOCAL_PROVIDER_DEFAULT_BASE_URL[providerId] ??
@@ -237,6 +247,7 @@ export function AddCredential() {
               value={apiKey}
               onChange={(e) => edited(setApiKey)(e.target.value)}
               {...SECRET_INPUT_PROPS}
+              {...fieldError('apiKey')}
               required={keyRequired}
               placeholder={
                 providerId === 'anthropic' ? 'sk-ant-api03-...'
@@ -268,6 +279,7 @@ export function AddCredential() {
               value={apiKey}
               onChange={(e) => edited(setApiKey)(e.target.value)}
               {...SECRET_INPUT_PROPS}
+              {...fieldError('apiKey')}
               required
               placeholder="sk-ant-oat01-..."
               rows={3}

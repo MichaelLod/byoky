@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { useWalletStore } from '../store';
 import { TrustResetNotice } from '../components/TrustResetNotice';
 import { LimitsHoldNotice } from '../components/LimitsHoldNotice';
+import { FormError } from '../components/FormError';
 import {
   PROVIDERS,
   type TokenAllowance, type Group, type Session, type CredentialMeta,
@@ -210,7 +211,7 @@ export function ConnectedApps() {
     <div>
       <LimitsHoldNotice />
       <TrustResetNotice />
-      {error && !formOpen && <div className="error">{error}</div>}
+      {error && !formOpen && <FormError>{error}</FormError>}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
         <h2 className="page-title" style={{ marginBottom: 0 }}>Connected Apps</h2>
         {sessions.length > 1 && (
@@ -705,7 +706,7 @@ function GroupForm({
           {modelInfo ?? modelHint}
         </div>
       </div>
-      {error && <div className="error">{error}</div>}
+      {error && <FormError>{error}</FormError>}
       <div style={{ display: 'flex', gap: '8px' }}>
         <button className="btn btn-primary btn-sm" onClick={handleSave} disabled={!trimmedName}>Save</button>
         <button className="btn btn-secondary btn-sm" onClick={onCancel}>Cancel</button>
@@ -805,7 +806,7 @@ function AllowanceForm({
           ))}
         </div>
       )}
-      {error && <div className="error">{error}</div>}
+      {error && <FormError>{error}</FormError>}
       <div className="allowance-actions">
         <button className="btn btn-primary btn-sm" onClick={handleSave}>Save</button>
         {allowance && (

@@ -10,6 +10,7 @@ import {
   type PendingApproval,
 } from '@byoky/core';
 import { Raven } from '../components/Raven';
+import { FormError } from '../components/FormError';
 import { describeOrigin } from '../utils/origin';
 
 /**
@@ -76,7 +77,7 @@ export function ApprovalRequest() {
     return (
       <div>
         <h2 className="page-title">Connection Request</h2>
-        {error && <div className="error">{error}</div>}
+        {error && <FormError>{error}</FormError>}
         <div className="empty-state">
           <p>No pending requests.</p>
           <button className="btn btn-secondary" style={{ marginTop: '12px' }} onClick={() => navigate('dashboard')}>
@@ -126,7 +127,7 @@ function ApprovalCard({ approval, queued }: { approval: PendingApproval; queued:
         </div>
       </div>
 
-      {error && <div className="error">{error}</div>}
+      {error && <FormError>{error}</FormError>}
 
       <div className="approval-card">
         <div className="approval-origin">{origin.label}</div>
