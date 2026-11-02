@@ -141,4 +141,17 @@ describe('docs snippets', () => {
     expect(listeners).toBeGreaterThanOrEqual(4);
     expect(unguarded).toEqual([]);
   });
+
+  it('turn files into base64 without spreading the bytes into fromCharCode', () => {
+    // fromCharCode(...bytes) passes one argument per byte and overflows the
+    // stack from about 125 KB, so any real photo throws a RangeError.
+    const hits: string[] = [];
+    for (const file of [...SNIPPET_FILES, 'packages/web/app/page.tsx']) {
+      const text = read(file);
+      const re = /fromCharCode\(\s*\.\.\./g;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(text)) !== null) hits.push(`${file}:${text.slice(0, m.index).split('\n').length}`);
+    }
+    expect(hits).toEqual([]);
+  });
 });

@@ -174,9 +174,12 @@ const client = new Anthropic({
 
 // Read a file from an <input> or drag-and-drop
 const file: File = document.querySelector('input')!.files![0];
-const base64 = btoa(
-  String.fromCharCode(...new Uint8Array(await file.arrayBuffer())),
-);
+const bytes = new Uint8Array(await file.arrayBuffer());
+let binary = '';
+// One byte at a time: spreading a whole photo into fromCharCode
+// overflows the call stack.
+for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+const base64 = btoa(binary);
 
 const response = await client.messages.create({
   model: 'claude-sonnet-4-6',
