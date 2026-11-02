@@ -1,0 +1,36 @@
+{
+  "about": [
+    "Which upstream response headers an app never gets: the ones naming the account behind the key (OpenAI's",
+    "organization and project, Anthropic's organization id), which would let connected apps link one user across",
+    "sites, and server, tracing and cookie headers. Everything else reaches the app; SDKs read the request ids and",
+    "the retry and rate-limit headers. \"stripped\" is the whole deny-list, \"kept\" headers that must pass.",
+    "One list for all wallets: packages/core/tests/proxy-utils.test.ts (STRIPPED_RESPONSE_HEADERS, filterResponseHeaders),",
+    "packages/ios/ByokyTests/ProxyPolicyTests.swift (ProxyPolicy.strippedResponseHeaders) and",
+    "packages/android/.../proxy/HeaderPolicyTest.kt (HeaderPolicy.STRIPPED_RESPONSE_HEADERS)."
+  ],
+  "stripped": [
+    "openai-organization",
+    "openai-project",
+    "anthropic-organization-id",
+    "server",
+    "x-cloud-trace-context",
+    "set-cookie",
+    "set-cookie2",
+    "alt-svc",
+    "via"
+  ],
+  "kept": [
+    "content-type",
+    "request-id",
+    "x-request-id",
+    "retry-after",
+    "retry-after-ms",
+    "x-should-retry",
+    "x-ratelimit-limit-tokens",
+    "x-ratelimit-remaining-requests",
+    "anthropic-ratelimit-requests-remaining",
+    "anthropic-ratelimit-tokens-reset",
+    "openai-processing-ms",
+    "openai-version"
+  ]
+}

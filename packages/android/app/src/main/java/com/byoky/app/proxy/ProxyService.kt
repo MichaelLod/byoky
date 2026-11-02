@@ -666,7 +666,7 @@ class ProxyService(
         val out = mutableMapOf<String, String>()
         for ((name, values) in response.headers.toMultimap()) {
             val lower = name.lowercase()
-            if (lower in SENSITIVE_RESPONSE_HEADERS || lower in HOP_BY_HOP_RESPONSE_HEADERS) continue
+            if (lower in HeaderPolicy.STRIPPED_RESPONSE_HEADERS || lower in HOP_BY_HOP_RESPONSE_HEADERS) continue
             out[lower] = values.joinToString(", ")
         }
         return out
@@ -878,10 +878,6 @@ class ProxyService(
 
         fun endpointNotAllowed() = ProxyError(EndpointPolicy.ERROR_CODE, EndpointPolicy.ERROR_MESSAGE, EndpointPolicy.ERROR_STATUS)
 
-        val SENSITIVE_RESPONSE_HEADERS = setOf(
-            "server", "x-request-id", "x-cloud-trace-context",
-            "set-cookie", "set-cookie2", "alt-svc", "via",
-        )
         // The body is re-emitted as decoded text chunks, so framing and
         // encoding headers from upstream no longer describe it.
         private val HOP_BY_HOP_RESPONSE_HEADERS = setOf(

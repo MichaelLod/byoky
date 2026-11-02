@@ -49,6 +49,20 @@ object HeaderPolicy {
         return out
     }
 
+    /**
+     * Upstream response headers an app never gets. Some name the account
+     * behind the key (OpenAI's organization and project, Anthropic's
+     * organization id), which any connected app could read to link the same
+     * user across sites; the rest are server, tracing and cookie headers.
+     * SDKs read the request ids and the retry and rate-limit headers, which
+     * pass. Same set as core's `STRIPPED_RESPONSE_HEADERS`
+     * (tests/vectors/response-headers.json).
+     */
+    val STRIPPED_RESPONSE_HEADERS: Set<String> = setOf(
+        "openai-organization", "openai-project", "anthropic-organization-id",
+        "server", "x-cloud-trace-context", "set-cookie", "set-cookie2", "alt-svc", "via",
+    )
+
     /** Excluded from translated and swapped requests: the app's version names its own dialect. */
     val ROUTED_EXCLUDED: Set<String> = setOf("anthropic-version")
 }

@@ -13,9 +13,12 @@ import {
   resolveProviderBaseUrl,
   detectRequestCapabilities,
   rewriteToolNamesInJSONBody,
+  STRIPPED_RESPONSE_HEADERS,
+  filterResponseHeaders,
 } from '../src/proxy-utils.js';
 import endpointPolicyVectors from './vectors/endpoint-policy.json';
 import localServerUrlVectors from './vectors/local-server-urls.json';
+import responseHeaderVectors from './vectors/response-headers.json';
 
 // ── validateProxyUrl ────────────────────────────────────
 
@@ -205,6 +208,24 @@ describe('resolveProviderBaseUrl', () => {
     expect(resolveProviderBaseUrl('azure_openai', 'https://myres.openai.azure.com?x=1')).toBeNull();
     expect(resolveProviderBaseUrl('ollama', 'http://10.0.0.2:11434')).toBeNull();
     expect(resolveProviderBaseUrl('nonexistent', 'https://x.example')).toBeNull();
+  });
+});
+
+// ── filterResponseHeaders ──────────────────────────────
+
+// F040. The iOS and Android wallets run the same file against their copies.
+describe('filterResponseHeaders (shared vectors)', () => {
+  const { stripped, kept } = responseHeaderVectors as { stripped: string[]; kept: string[] };
+
+  it('strips exactly the shared deny-list', () => {
+    expect([...STRIPPED_RESPONSE_HEADERS].sort()).toEqual([...stripped].sort());
+  });
+
+  it('drops account identifiers in any case and keeps what SDKs read', () => {
+    const upstream: Record<string, string> = {};
+    for (const name of stripped) upstream[name.toUpperCase()] = 'x';
+    for (const name of kept) upstream[name] = `v-${name}`;
+    expect(filterResponseHeaders(upstream)).toEqual(Object.fromEntries(kept.map((name) => [name, `v-${name}`])));
   });
 });
 

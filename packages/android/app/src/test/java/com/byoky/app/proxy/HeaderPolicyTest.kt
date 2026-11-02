@@ -59,4 +59,14 @@ class HeaderPolicyTest {
             HeaderPolicy.FORWARDABLE,
         )
     }
+
+    /** F040. packages/core/tests/vectors/response-headers.json, shared with core and iOS. */
+    @Test
+    fun responseHeaderDenyListMatchesTheSharedVectors() {
+        val vectors = SharedVectors.load("response-headers.json")
+        val stripped = vectors.getJSONArray("stripped").let { a -> (0 until a.length()).map { a.getString(it) } }
+        val kept = vectors.getJSONArray("kept").let { a -> (0 until a.length()).map { a.getString(it) } }
+        assertEquals(stripped.toSet(), HeaderPolicy.STRIPPED_RESPONSE_HEADERS)
+        assertEquals(emptyList<String>(), kept.filter { it in HeaderPolicy.STRIPPED_RESPONSE_HEADERS })
+    }
 }

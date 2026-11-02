@@ -91,6 +91,16 @@ final class ProxyPolicyTests: XCTestCase {
 
     // MARK: - Headers
 
+    /// F040. packages/core/tests/vectors/response-headers.json, shared with
+    /// core's `STRIPPED_RESPONSE_HEADERS` and Android.
+    func testResponseHeaderDenyListMatchesTheSharedVectors() throws {
+        let vectors = try SharedVectors.load("response-headers")
+        let stripped = try XCTUnwrap(vectors["stripped"] as? [String])
+        let kept = try XCTUnwrap(vectors["kept"] as? [String])
+        XCTAssertEqual(ProxyPolicy.strippedResponseHeaders, Set(stripped))
+        XCTAssertTrue(ProxyPolicy.strippedResponseHeaders.isDisjoint(with: kept))
+    }
+
     func testOnlyAllowlistedHeadersAreForwarded() {
         let forwarded = ProxyPolicy.forwardedHeaders([
             "Content-Type": "application/json",

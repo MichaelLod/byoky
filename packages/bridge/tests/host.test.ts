@@ -167,6 +167,30 @@ describe('stripIncompatibleBetas', () => {
 });
 
 describe('page path (proxy)', () => {
+  // F040: the setup token's claude.ai organization never reaches the app.
+  it('passes on the upstream headers without the ones naming the account', async () => {
+    const fetchSpy = vi.fn(async () => new Response('{}', {
+      headers: {
+        'content-type': 'application/json',
+        'anthropic-organization-id': '11111111-2222-3333-4444-555555555555',
+        server: 'cloudflare',
+        'request-id': 'req_1',
+        'retry-after': '3',
+        'anthropic-ratelimit-requests-remaining': '9',
+      },
+    }));
+    const spied = createHost({ writeMessage: (m) => messages.push(m as Msg), loadToken: () => TOKEN, fetch: fetchSpy });
+    await spied.handleMessage({
+      type: 'proxy', requestId: 'h1', url: 'https://api.anthropic.com/v1/messages', method: 'POST', headers: {}, body: '{}',
+    });
+    expect(ofType('proxy_response_meta')[0].headers).toEqual({
+      'content-type': 'application/json',
+      'request-id': 'req_1',
+      'retry-after': '3',
+      'anthropic-ratelimit-requests-remaining': '9',
+    });
+  });
+
   it('rewrites tool names in a JSON reply', async () => {
     await host.handleMessage({
       type: 'proxy', requestId: 'r1', url: `${base}/json`, method: 'POST', headers: {}, body: '{}',

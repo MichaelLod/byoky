@@ -32,6 +32,28 @@ final class NativeBridgeE2ETests: XCTestCase {
         XCTAssertEqual(h.wallet.requestLogs.first?.statusCode, 200)
     }
 
+    /// Headers naming the account behind the key never reach the page (F040).
+    @MainActor
+    func testAccountHeadersAreStripped() async throws {
+        let h = try await BridgeHarness.make(self)
+        StubUpstream.script(.init(headers: [
+            "Content-Type": "application/json",
+            "openai-organization": "user-victim123",
+            "openai-project": "proj_abc",
+            "x-request-id": "req_2",
+            "x-ratelimit-limit-tokens": "30000000",
+        ], chunks: [Data("{}".utf8)]))
+
+        let replies = try await h.proxy(body: #"{"model":"gpt-5.5","messages":[]}"#)
+
+        let headers = try XCTUnwrap(replies.first?["headers"] as? [String: String])
+        XCTAssertNil(headers["openai-organization"])
+        XCTAssertNil(headers["openai-project"])
+        XCTAssertEqual(headers["x-request-id"], "req_2")
+        XCTAssertEqual(headers["x-ratelimit-limit-tokens"], "30000000")
+        XCTAssertEqual(headers["content-type"], "application/json")
+    }
+
     @MainActor
     func testEventStreamPassesThroughAndEndsWithDone() async throws {
         let h = try await BridgeHarness.make(self)

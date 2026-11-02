@@ -168,6 +168,18 @@ enum ProxyPolicy {
         "x-goog-api-client",
     ]
 
+    /// Upstream response headers a web app never gets. Some name the account
+    /// behind the key (OpenAI's organization and project, Anthropic's
+    /// organization id), which any connected app could read to link the
+    /// same user across sites; the rest are server, tracing and cookie
+    /// headers. SDKs read the request ids and the retry and rate-limit
+    /// headers, which pass. Same set as core's `STRIPPED_RESPONSE_HEADERS`
+    /// (tests/vectors/response-headers.json).
+    static let strippedResponseHeaders: Set<String> = [
+        "openai-organization", "openai-project", "anthropic-organization-id",
+        "server", "x-cloud-trace-context", "set-cookie", "set-cookie2", "alt-svc", "via",
+    ]
+
     /// The app's headers to forward, keyed by lowercase name. Values with CR,
     /// LF or NUL are dropped (header injection). `excluding` removes allowed
     /// names that don't apply to a rerouted request.

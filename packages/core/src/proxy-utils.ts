@@ -256,6 +256,40 @@ const FORWARDABLE_HEADERS = new Set([
 ]);
 
 /**
+ * Upstream response headers an app never gets. Some name the account behind
+ * the key (OpenAI's organization and project, Anthropic's organization id),
+ * which any connected app could read to link the same user across sites and
+ * sessions; the rest are server, tracing and cookie headers. Everything else
+ * is passed on: SDKs read the content type, the request ids and the retry
+ * and rate-limit headers. The iOS and Android wallets strip the same set
+ * (tests/vectors/response-headers.json).
+ */
+export const STRIPPED_RESPONSE_HEADERS: ReadonlySet<string> = new Set([
+  'openai-organization',
+  'openai-project',
+  'anthropic-organization-id',
+  'server',
+  'x-cloud-trace-context',
+  'set-cookie',
+  'set-cookie2',
+  'alt-svc',
+  'via',
+]);
+
+/**
+ * An upstream response's headers as an app may see them: names in lower
+ * case, without STRIPPED_RESPONSE_HEADERS.
+ */
+export function filterResponseHeaders(headers: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [name, value] of Object.entries(headers)) {
+    const lower = name.toLowerCase();
+    if (!STRIPPED_RESPONSE_HEADERS.has(lower)) out[lower] = value;
+  }
+  return out;
+}
+
+/**
  * Reject header values containing CR/LF/NUL — defense against header injection
  * smuggled through arbitrary string values. undici already rejects these,
  * but explicit + early is cheaper than discovering it inside fetch().

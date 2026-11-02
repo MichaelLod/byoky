@@ -30,6 +30,7 @@ import {
   computeAllowanceCheck,
   shouldEstimateUsage,
   isModelPinnableRequest,
+  filterResponseHeaders,
   validateProxyUrl,
   isAllowedProxyRequest,
   resolveProviderBaseUrl,
@@ -1045,10 +1046,12 @@ export default defineBackground(() => {
           signal: upstreamAbort.signal,
         });
 
-        const respHeaders: Record<string, string> = {};
+        const upstreamHeaders: Record<string, string> = {};
         response.headers.forEach((v, k) => {
-          respHeaders[k] = v;
+          upstreamHeaders[k] = v;
         });
+        // Without the ones naming the account behind the key (F040).
+        const respHeaders = filterResponseHeaders(upstreamHeaders);
 
         send({
           type: 'BYOKY_PROXY_RESPONSE_META',
@@ -2168,7 +2171,8 @@ export default defineBackground(() => {
         if (response.type === 'proxy_response_meta') {
           bridgeResponded = true;
           status = response.status ?? 0;
-          const respHeaders = response.headers ?? {};
+          // The bridge strips the account headers too; an older one doesn't.
+          const respHeaders = filterResponseHeaders(response.headers ?? {});
           contentType = respHeaders['content-type'] ?? '';
           // Only a success streams; an error is translated whole at the end.
           isStreamingResponse = status >= 200 && status < 300 && (respHeaders['content-type'] ?? '').includes('text/event-stream');
@@ -2835,10 +2839,12 @@ export default defineBackground(() => {
         });
         responseStatus = response.status;
 
-        const responseHeaders: Record<string, string> = {};
+        const upstreamHeaders: Record<string, string> = {};
         response.headers.forEach((value, key) => {
-          responseHeaders[key] = value;
+          upstreamHeaders[key] = value;
         });
+        // Without the ones naming the account behind the key, as for apps.
+        const responseHeaders = filterResponseHeaders(upstreamHeaders);
         responseContentType = responseHeaders['content-type'] ?? '';
 
         bridgeProxyPort?.postMessage({

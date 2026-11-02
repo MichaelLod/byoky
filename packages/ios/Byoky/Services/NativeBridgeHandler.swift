@@ -980,7 +980,7 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
         var responseHeaders: [String: String] = [:]
         for (key, value) in httpResponse.allHeaderFields {
             let lower = String(describing: key).lowercased()
-            if sensitiveResponseHeaders.contains(lower) { continue }
+            if ProxyPolicy.strippedResponseHeaders.contains(lower) { continue }
             responseHeaders[lower] = String(describing: value)
         }
         deliver(requestId: requestId, message: [
@@ -1143,12 +1143,6 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
 }
 
 // MARK: - Proxy helpers
-
-/// Upstream response headers that are never forwarded to the web app.
-private let sensitiveResponseHeaders: Set<String> = [
-    "server", "x-request-id", "x-cloud-trace-context",
-    "set-cookie", "set-cookie2", "alt-svc", "via",
-]
 
 /// Providers that need `stream_options.include_usage` injected for streaming.
 private let streamUsageProviders: Set<String> = [
