@@ -30,7 +30,7 @@ permissions:
 jobs:
   emulator:
     name: Instrumented tests and Maestro flows
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 60
     env:
       # The version the flows are run with locally; the zip is checked

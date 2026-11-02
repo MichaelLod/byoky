@@ -22,7 +22,7 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     strategy:
       fail-fast: false
@@ -83,7 +83,7 @@ jobs:
   # plugin (which inlines the bridge's dist) and the scaffolder; and the
   # typecheck of every package, which needs all of those builds.
   packages:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -128,7 +128,7 @@ jobs:
   # commit's SDK, must install, build and typecheck. Needs the scaffolder's
   # --template flag (non-interactive).
   templates:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     strategy:
       fail-fast: false
@@ -185,7 +185,9 @@ jobs:
 
   # Fake-provider Playwright run: the real extension, headless, no keys.
   e2e:
-    runs-on: ubuntu-latest
+    # Playwright 1.58 has no Chromium build for ubuntu-26.04 (ubuntu-latest
+    # since October 2026); move up after bumping @playwright/test.
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -208,7 +210,7 @@ jobs:
           retention-days: 7
 
   android-unit:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     defaults:
       run:
@@ -233,7 +235,7 @@ jobs:
   # Which changes the iOS suite has to see; the macOS runner is slow and
   # costly, so pushes and PRs that touch none of these skip it.
   ios-changes:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     outputs:
       run: ${{ steps.decide.outputs.run }}
