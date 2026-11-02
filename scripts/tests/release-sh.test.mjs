@@ -16,6 +16,8 @@ import { SCRIPTS, FAKE_ASC_ENV } from './helpers.mjs'
 const MAC_ONLY = { skip: process.platform !== 'darwin' && 'release.sh past the bump needs macOS (BSD sed, PlistBuddy)' }
 
 const NOT_PENDING = { localVersion: '1.1.1', results: [{ id: 'chrome', version: '1.1.1', pending: false }] }
+const CWS_CLI = join(SCRIPTS, '..', 'node_modules', 'chrome-webstore-upload-cli', 'source', 'cli.js')
+const CHROME_UPLOAD = /^npx chrome-webstore-upload --source dist\/byoky-chrome-v1\.1\.2-store\.zip --extension-id extid$/m
 
 function write(path, text, mode) {
   mkdirSync(join(path, '..'), { recursive: true })
@@ -34,7 +36,9 @@ const plist = (version, build) => `<?xml version="1.0" encoding="UTF-8"?>
 // A repo at `version` laid out like byoky (the files release.sh bumps,
 // stub scripts), pushed to its origin and tagged. Tools are shims that log
 // to CALLS: pnpm (STUB_PNPM_FAIL="<args>" fails that call), npx
-// (STUB_NPX_EXIT), npm (`npm view` answers for STUB_NPM_PUBLISHED: "all" or
+// (STUB_NPX_EXIT; for chrome-webstore-upload also the OAuth environment it
+// got, and STUB_NPX_REAL=1 runs the workspace's real CLI with fetch stubbed),
+// npm (`npm view` answers for STUB_NPM_PUBLISHED: "all" or
 // package names), gh (STUB_GH_RELEASE_MISSING=1: no release yet), xcrun,
 // xcodebuild (an export leaves an .ipa, or a .pkg for the macOS archive).
 // The submit-appstore.mjs stub exits STUB_ASC_<IOS|MAC_OS>_QUICK for retry's
@@ -116,7 +120,12 @@ esac
   "simctl create"*) echo UDID-1 ;;
 esac
 `, 0o755)
-  write(join(bin, 'npx'), logArgs('npx') + 'exit "${STUB_NPX_EXIT:-0}"\n', 0o755)
+  write(join(bin, 'npx'), logArgs('npx') + `if [ "$1" = chrome-webstore-upload ]; then
+  echo "npx-env PUBLISHER_ID=\${PUBLISHER_ID:-} CLIENT_ID=\${CLIENT_ID:-} CLIENT_SECRET=\${CLIENT_SECRET:+set} REFRESH_TOKEN=\${REFRESH_TOKEN:+set}" >> "$CALLS"
+  [ -n "\${STUB_NPX_REAL:-}" ] && shift && exec node "${CWS_CLI}" "$@"
+fi
+exit "\${STUB_NPX_EXIT:-0}"
+`, 0o755)
   write(join(bin, 'npm'), `#!/bin/sh
 if [ "$1" = view ]; then
   name="\${2%@*}"; ver="\${2##*@}"
@@ -175,7 +184,7 @@ function released(t) {
   write(join(s.work, 'dist/byoky-chrome-v1.1.2.zip'), 'keyed')
   write(join(s.work, 'dist/byoky-chrome-v1.1.2-store.zip'), 'store')
   const run = s.run
-  s.run = (args, env = {}) => run(args, { STUB_NPM_PUBLISHED: 'all', ...env })
+  s.run = (args, env = {}, routes) => run(args, { STUB_NPM_PUBLISHED: 'all', ...env }, routes)
   return s
 }
 
@@ -183,9 +192,41 @@ test('retry uploads the Chrome store zip, not the keyed sideload zip', (t) => {
   const s = released(t)
   const r = s.run(['retry'])
   assert.equal(r.code, 0, r.out)
-  assert.match(r.calls, /npx chrome-webstore-upload upload --source dist\/byoky-chrome-v1\.1\.2-store\.zip /)
+  assert.match(r.calls, CHROME_UPLOAD)
   assert.doesNotMatch(r.calls, /byoky-chrome-v1\.1\.2\.zip/)
   assert.match(r.out, /Retried 1 store/)
+})
+
+// Google supported Web Store API v1.1 until 15 Oct 2026.
+const CWS_V2 = 'https://chromewebstore.googleapis.com/upload/v2/publishers/29fa2c41-d315-4dfb-a14c-8919348cb737/items/extid'
+const cwsRoutes = (upload) => [
+  { method: 'POST', url: '^https://www\\.googleapis\\.com/oauth2/v4/token$', body: { access_token: 'token' } },
+  { method: 'POST', url: ':upload$', ...upload },
+  { method: 'POST', url: ':publish$', body: { state: 'PENDING_REVIEW' } },
+]
+
+test('the Chrome upload goes through Web Store API v2 under the publisher, with the OAuth values off the command line', (t) => {
+  const s = released(t)
+  const r = s.run(['retry'], { STUB_NPX_REAL: '1' }, cwsRoutes({ body: { uploadState: 'SUCCEEDED', crxVersion: '1.1.2' } }))
+  assert.equal(r.code, 0, r.out)
+  assert.deepEqual(r.fetches.map((c) => `${c.method} ${c.url}`), [
+    'POST https://www.googleapis.com/oauth2/v4/token',
+    `POST ${CWS_V2}:upload`,
+    `POST ${CWS_V2.replace('/upload/v2/', '/v2/')}:publish`,
+  ])
+  assert.match(r.fetches[0].body, /"client_id":"client".*"refresh_token":"refresh".*"client_secret":"secret"/)
+  // Upload, then submit for review and publish once approved (no command).
+  assert.match(r.calls, CHROME_UPLOAD)
+  assert.match(r.calls, /^npx-env PUBLISHER_ID=29fa2c41-d315-4dfb-a14c-8919348cb737 CLIENT_ID=client CLIENT_SECRET=set REFRESH_TOKEN=set$/m)
+  assert.doesNotMatch(r.calls, /--client|--refresh|--auto-publish| secret\b| refresh\b/)
+  assert.match(r.out, /Chrome Web Store: uploaded, publishes after review/)
+
+  const refused = s.run(['retry'], { STUB_NPX_REAL: '1' },
+    cwsRoutes({ status: 400, body: { error: { code: 400, message: 'The version of the uploaded package is not larger than the published one.' } } }))
+  assert.equal(refused.code, 1, refused.out)
+  assert.match(refused.out, /not larger than the published one/)
+  assert.match(refused.out, /Chrome Web Store: FAILED/)
+  assert.ok(!refused.fetches.some((c) => c.url.endsWith(':publish')))
 })
 
 test('retry leaves a Chrome submission in review alone', (t) => {
@@ -197,7 +238,7 @@ test('retry leaves a Chrome submission in review alone', (t) => {
   assert.match(r.out, /v1\.1\.2 is PENDING_REVIEW; skipped/)
 
   const forced = s.run(['retry', '--allow-pending'], { STUB_STATUS_JSON: JSON.stringify(status), STUB_STATUS_CODE: '3' })
-  assert.match(forced.calls, /chrome-webstore-upload upload --source dist\/byoky-chrome-v1\.1\.2-store\.zip/)
+  assert.match(forced.calls, CHROME_UPLOAD)
 })
 
 test('retry leaves a store whose review state is unknown alone, and fails the run', (t) => {
@@ -210,7 +251,7 @@ test('retry leaves a store whose review state is unknown alone, and fails the ru
 
   const forced = s.run(['retry', '--allow-pending'], { STUB_STATUS_JSON: JSON.stringify(status), STUB_STATUS_CODE: '3' })
   assert.equal(forced.code, 0, forced.out)
-  assert.match(forced.calls, /chrome-webstore-upload upload --source dist\/byoky-chrome-v1\.1\.2-store\.zip/)
+  assert.match(forced.calls, CHROME_UPLOAD)
 })
 
 test('a failed retry upload is not counted and fails the run', (t) => {

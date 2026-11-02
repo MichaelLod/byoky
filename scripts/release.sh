@@ -73,6 +73,22 @@ write_store_notes() {
   fi
 }
 
+# The Chrome Web Store publisher: the first UUID in the developer dashboard's
+# URL. store-status.mjs has the same default.
+CHROME_PUBLISHER_ID="${CHROME_PUBLISHER_ID:-29fa2c41-d315-4dfb-a14c-8919348cb737}"
+
+# Uploads a Chrome store zip through the Chrome Web Store API v2
+# (chrome-webstore-upload-cli 4; Google supported v1.1 until 15 Oct 2026).
+# Without a command it uploads, then submits for review and publishes once
+# approved. CLI 4 takes the OAuth values from the environment only; they are
+# set for this one command, so they reach neither the process list nor, as
+# exports would, xcodebuild and Gradle.
+chrome_upload() {
+  CLIENT_ID="$CHROME_CLIENT_ID" CLIENT_SECRET="${CHROME_CLIENT_SECRET:-}" \
+    REFRESH_TOKEN="${CHROME_REFRESH_TOKEN:-}" PUBLISHER_ID="$CHROME_PUBLISHER_ID" \
+    npx chrome-webstore-upload --source "$1" --extension-id "$CHROME_EXTENSION_ID"
+}
+
 # The stores' state as store-status.mjs --json reports it (set STATUS_JSON
 # first): status_field <store id> <field>, e.g. status_field chrome pending.
 status_field() {
@@ -321,13 +337,7 @@ if [ "${1:-}" = "retry" ]; then
       store_result "Chrome Web Store" "FAILED: ${CHROME_STORE_ZIP} is missing"
     else
       echo "Chrome: v${CHROME_LIVE} → v${CURRENT}"
-      if npx chrome-webstore-upload upload \
-        --source "$CHROME_STORE_ZIP" \
-        --extension-id "$CHROME_EXTENSION_ID" \
-        --client-id "$CHROME_CLIENT_ID" \
-        --client-secret "$CHROME_CLIENT_SECRET" \
-        --refresh-token "$CHROME_REFRESH_TOKEN" \
-        --auto-publish 2>&1; then
+      if chrome_upload "$CHROME_STORE_ZIP" 2>&1; then
         RETRIED=$((RETRIED + 1))
         store_result "Chrome Web Store" "uploaded, publishes after review"
       else
@@ -1125,13 +1135,7 @@ if [ "$SKIP_STORE_UPLOADS" = true ]; then
   store_result "Chrome Web Store" "skipped (--skip-store-uploads)"
 elif [ -n "${CHROME_EXTENSION_ID:-}" ] && [ -n "${CHROME_CLIENT_ID:-}" ]; then
   echo "  Uploading to Chrome Web Store..."
-  if npx chrome-webstore-upload upload \
-    --source "$CHROME_STORE_ZIP" \
-    --extension-id "$CHROME_EXTENSION_ID" \
-    --client-id "$CHROME_CLIENT_ID" \
-    --client-secret "$CHROME_CLIENT_SECRET" \
-    --refresh-token "$CHROME_REFRESH_TOKEN" \
-    --auto-publish; then
+  if chrome_upload "$CHROME_STORE_ZIP"; then
     store_result "Chrome Web Store" "uploaded, publishes after review"
   else
     echo "  WARN: Chrome upload failed; the other stores still go out (retry with ./scripts/release.sh retry)"
