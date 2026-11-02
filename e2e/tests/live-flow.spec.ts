@@ -363,7 +363,7 @@ test.describe('Byoky end-to-end flow', () => {
     await expect(walletA.popup.locator('.connected-app-card')).toBeVisible({ timeout: 5_000 });
     await walletA.popup.click('.allowance-edit-btn');
     const form = walletA.popup.locator('.allowance-form');
-    await form.locator('input[type="number"]').first().fill('1');
+    await form.getByLabel('Total token limit').fill('1');
     await form.locator('button:has-text("Save")').click();
     await expect(walletA.popup.locator('.allowance-limit')).toBeVisible({ timeout: 5_000 });
 
