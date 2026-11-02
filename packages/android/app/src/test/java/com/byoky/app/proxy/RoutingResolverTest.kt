@@ -161,6 +161,55 @@ class RoutingResolverTest {
         assertEquals("gpt-5.5", auto.translation?.dstModel)
     }
 
+    // ── Phones that can't route (no JavaScriptSandbox) (F047) ────────────
+
+    /** What TranslationEngine answers on a phone without JavaScriptSandbox: every call fails. */
+    private val noSandbox = object : RoutingResolver.Families {
+        override fun shouldTranslate(srcProviderId: String, dstProviderId: String) = false
+        override fun sameFamily(srcProviderId: String, dstProviderId: String) = false
+        override fun autoRouteModel(providerId: String): String? = null
+    }
+
+    @Test
+    fun withoutTheSandboxAGroupBoundElsewhereServesNothing() {
+        val ollama = Credential(id = "l1", providerId = "ollama", label = "local", createdAt = 1, baseUrl = "http://localhost:11434")
+        val local = Group(id = "g", name = "Local", providerId = "ollama", model = "llama3.2")
+        assertNull(RoutingResolver.resolve("anthropic", "claude-sonnet-4-6", local, listOf(key1, ollama), noSandbox))
+        assertNull(RoutingResolver.resolve("openai", "gpt-5.5", local, listOf(openai, ollama), noSandbox))
+        assertNull(RoutingResolver.canServe("anthropic", local, listOf(key1, ollama), noSandbox))
+        // A group on the app's own provider still works.
+        val own = Group(id = "g", name = "Claude", providerId = "anthropic")
+        assertEquals("k1", RoutingResolver.resolve("anthropic", "m", own, listOf(key1), noSandbox)?.credential?.id)
+    }
+
+    @Test
+    fun withoutTheSandboxTheMessageSaysRoutingIsUnavailableNotThatAKeyIsMissing() {
+        val ollama = Credential(id = "l1", providerId = "ollama", label = "local", createdAt = 1, baseUrl = "http://localhost:11434")
+        val local = Group(id = "g", name = "Local", providerId = "ollama", model = "llama3.2")
+        val message = RoutingResolver.noCredentialMessage("anthropic", listOf(ollama), local, noSandbox, routingSupported = false)
+        assertEquals(
+            "This phone can't route requests to another provider: that needs Android System WebView 110 or newer. " +
+                "Update Android System WebView from the Play Store, or move this app out of the group \"Local\", " +
+                "which routes it to Ollama (local).",
+            message,
+        )
+        // No group, keys only for other providers: only this provider's key helps.
+        val noGroup = RoutingResolver.noCredentialMessage("anthropic", listOf(openai), null, noSandbox, routingSupported = false)
+        assertTrue(noGroup, noGroup.startsWith("No API key for Anthropic found. This phone can't route"))
+        // Where the phone can route, the group's missing key or model is named as before.
+        assertTrue(RoutingResolver.noCredentialMessage("anthropic", listOf(key1), local, families, routingSupported = true)
+            .startsWith("No ollama API key found."))
+        val deepseek = Credential(id = "d1", providerId = "deepseek", label = "ds", createdAt = 1)
+        assertEquals(
+            "This app's group routes it to deepseek, which needs a model to translate anthropic requests. Set a model on the group.",
+            RoutingResolver.noCredentialMessage("anthropic", listOf(deepseek), Group(id = "g", name = "DS", providerId = "deepseek"), families, routingSupported = true),
+        )
+        // A pin to a key that's gone is named first.
+        val stale = Group(id = "g", name = "Work", providerId = "anthropic", credentialId = "gone")
+        assertTrue(RoutingResolver.noCredentialMessage("anthropic", listOf(key1), stale, families, routingSupported = true)
+            .startsWith("The key this app's group \"Work\" is pinned to"))
+    }
+
     // ── Model-less cross-family groups (F099) ────────────────────────────
 
     @Test

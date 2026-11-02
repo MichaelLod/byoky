@@ -2,6 +2,7 @@ package com.byoky.app.proxy
 
 import com.byoky.app.data.Credential
 import com.byoky.app.data.Group
+import com.byoky.app.data.Provider
 import com.byoky.app.data.RoutingDecision
 import com.byoky.app.data.RoutingTranslation
 import okhttp3.HttpUrl
@@ -300,6 +301,59 @@ object RoutingResolver {
             swapToProviderId = group.providerId,
             swapDstModel = group.model?.takeIf { it.isNotEmpty() },
         )
+    }
+
+    /**
+     * Actionable message for the PROVIDER_UNAVAILABLE error when [resolve]
+     * gives null (core `buildNoCredentialMessage`, plus two cases of its own):
+     *   1. The group's pinned key is gone (or isn't one of its provider's).
+     *   2. The group binds another provider and this phone can't route
+     *      ([routingSupported] false: no JavaScriptSandbox, which needs
+     *      Android System WebView 110 or newer). The group's key may well be
+     *      in the wallet, so naming a missing key would mislead.
+     *   3. The app's group routes to a provider with no key → name it; with
+     *      a key but no model to translate with → ask for a model.
+     *   4. The wallet has keys, just not for this provider → list them;
+     *      where the phone can't route, only this provider's key helps.
+     *   5. The wallet is empty → ask for any key.
+     */
+    fun noCredentialMessage(
+        providerId: String,
+        credentials: List<Credential>,
+        group: Group?,
+        engine: Families?,
+        routingSupported: Boolean,
+    ): String {
+        val pin = group?.credentialId
+        if (group != null && pin != null && credentials.none { it.id == pin && it.providerId == group.providerId }) {
+            return "The key this app's group \"${group.name}\" is pinned to is no longer in your wallet. Edit the group and pick another key."
+        }
+        // An empty providerId is the default sentinel group: no routing.
+        val groupBinding = group?.providerId?.takeIf { it.isNotEmpty() }
+        if (group != null && groupBinding != null && groupBinding != providerId) {
+            if (!routingSupported) {
+                return "This phone can't route requests to another provider: that needs Android System WebView 110 or newer. " +
+                    "Update Android System WebView from the Play Store, or move this app out of the group \"${group.name}\", " +
+                    "which routes it to ${Provider.find(groupBinding)?.name ?: groupBinding}."
+            }
+            val modelMissing = group.model.isNullOrEmpty() && engine?.autoRouteModel(groupBinding) == null
+            if (modelMissing && engine != null && credentials.any { it.providerId == groupBinding } &&
+                engine.shouldTranslate(providerId, groupBinding)
+            ) {
+                return "This app's group routes it to $groupBinding, which needs a model to translate $providerId requests. Set a model on the group."
+            }
+            return "No $groupBinding API key found. Add a $groupBinding key to your wallet, or assign this app to a provider you already have a key for."
+        }
+        val held = credentials.map { it.providerId }.distinct().sorted()
+        if (held.isNotEmpty() && !routingSupported) {
+            val name = Provider.find(providerId)?.name ?: providerId
+            return "No API key for $name found. This phone can't route requests to another provider's key: that needs " +
+                "Android System WebView 110 or newer. Add a key for $name, or update Android System WebView from the Play Store."
+        }
+        if (held.isNotEmpty()) {
+            return "No $providerId API key found. Keys: ${held.joinToString(", ")}. Add a $providerId key, or assign this app to one of those providers."
+        }
+        return "No API keys in your wallet. Add a key for any provider to get started."
     }
 
     /**

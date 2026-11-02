@@ -209,6 +209,7 @@ fun AppsScreen(wallet: WalletStore) {
             session = session,
             groups = orderedGroups,
             currentGroupId = appGroups[session.appOrigin] ?: DEFAULT_GROUP_ID,
+            routingSupported = engine.isSupported,
             onSelect = { groupId ->
                 val targetGroup = orderedGroups.firstOrNull { it.id == groupId }
                 val logs = requestLogs
@@ -666,6 +667,7 @@ private fun MoveToGroupSheet(
     session: Session,
     groups: List<Group>,
     currentGroupId: String,
+    routingSupported: Boolean,
     onSelect: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -746,12 +748,48 @@ private fun MoveToGroupSheet(
                 }
             }
             Spacer(Modifier.height(12.dp))
-            Text(
-                "The next request from this app will use the group's credential. Cross-family requests are translated on the fly.",
-                color = Dim,
-                fontSize = 12.sp,
-            )
+            if (routingSupported) {
+                Text(
+                    "The next request from this app will use the group's credential. Cross-family requests are translated on the fly.",
+                    color = Dim,
+                    fontSize = 12.sp,
+                )
+            } else {
+                RoutingUnsupportedNotice()
+            }
             Spacer(Modifier.height(16.dp))
+        }
+    }
+}
+
+/**
+ * Shown instead of the routing hints on a phone without JavaScriptSandbox
+ * (Android System WebView older than 110): a group can only serve apps that
+ * call its own provider there, since translation and swaps run in it.
+ */
+@Composable
+private fun RoutingUnsupportedNotice() {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .panel(background = Void, border = Amber.copy(alpha = 0.5f))
+            .padding(10.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Icon(Icons.Default.Warning, null, tint = Amber, modifier = Modifier.size(16.dp))
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                "Routing needs a newer Android System WebView",
+                color = Amber,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+            )
+            Text(
+                "This phone can't send an app's requests to another provider. Apps in a group only work when they call the group's own provider. Update Android System WebView from the Play Store to route them.",
+                color = Fog,
+                fontSize = 11.sp,
+            )
         }
     }
 }
@@ -969,7 +1007,9 @@ private fun GroupEditorDialog(
                 )
 
                 val info = modelInfo
-                if (info != null) {
+                if (!engine.isSupported) {
+                    RoutingUnsupportedNotice()
+                } else if (info != null) {
                     Text(info, color = Dim, style = MonoStyle.copy(fontSize = 11.sp))
                 } else {
                     Text(
