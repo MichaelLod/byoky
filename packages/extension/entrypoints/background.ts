@@ -812,13 +812,16 @@ export default defineBackground(() => {
       // page could keep the wallet from locking with junk requests.
       resetIdleTimer();
 
+      // From here on the request is the approved app's: a refusal also goes
+      // in the request log, so History shows why it got nothing (F065). It
+      // is logged first, so the entry is there when the app hears of it.
+      const refuse = async (status: number, code: string, message: string) => {
+        await logRefusal(session, msg, status, code, message).catch(() => {});
+        send({ type: 'BYOKY_PROXY_RESPONSE_ERROR', requestId: msg.requestId, status, error: { code, message } });
+      };
+
       if (!masterPassword) {
-        send({
-          type: 'BYOKY_PROXY_RESPONSE_ERROR',
-          requestId: msg.requestId,
-          status: 423,
-          error: { code: 'WALLET_LOCKED', message: 'Wallet is locked' },
-        });
+        await refuse(423, 'WALLET_LOCKED', 'Wallet is locked');
         return;
       }
 
@@ -846,23 +849,13 @@ export default defineBackground(() => {
           Array.from(new Set(allCreds.map((c) => c.providerId))).sort(),
           group,
         );
-        send({
-          type: 'BYOKY_PROXY_RESPONSE_ERROR',
-          requestId: msg.requestId,
-          status: 403,
-          error: { code: 'PROVIDER_UNAVAILABLE', message },
-        });
+        await refuse(403, 'PROVIDER_UNAVAILABLE', message);
         return;
       }
       // The key goes out with the headers of effectiveProviderId, so it has
       // to be that provider's (see resolveSessionProviders).
       if (credential.providerId !== effectiveProviderId) {
-        send({
-          type: 'BYOKY_PROXY_RESPONSE_ERROR',
-          requestId: msg.requestId,
-          status: 403,
-          error: { code: 'PROVIDER_UNAVAILABLE', message: `The key this app is routed to is not a ${effectiveProviderId} key` },
-        });
+        await refuse(403, 'PROVIDER_UNAVAILABLE', `The key this app is routed to is not a ${effectiveProviderId} key`);
         return;
       }
 
@@ -881,12 +874,7 @@ export default defineBackground(() => {
       // step, so a burst of parallel requests can't all pass the check.
       const reservation = await checkAndReserveAllowance(session.appOrigin, msg.providerId, msg);
       if (!reservation.allowed) {
-        send({
-          type: 'BYOKY_PROXY_RESPONSE_ERROR',
-          requestId: msg.requestId,
-          status: 429,
-          error: { code: 'QUOTA_EXCEEDED', message: reservation.reason },
-        });
+        await refuse(429, 'QUOTA_EXCEEDED', reservation.reason);
         return;
       }
       let logEntryId: string | undefined;
@@ -2516,7 +2504,14 @@ export default defineBackground(() => {
       });
       return;
     }
+    // A refusal of this session's request also goes in the request log, as
+    // on the page path (F065), before the tool hears of it.
+    const logRefused = (status: number, code: string, message: string) =>
+      logRefusal(session, { providerId, url, method, body, bodyEncoding } as ProxyRequest, status, code, message)
+        .catch(() => {});
+
     if (!masterPassword) {
+      await logRefused(423, 'WALLET_LOCKED', 'Wallet is locked');
       bridgeProxyPort?.postMessage({
         type: 'proxy_http_error',
         requestId,
@@ -2529,6 +2524,7 @@ export default defineBackground(() => {
 
     // Validate providerId is one the session actually granted access to
     if (!session.providers.some((p) => p.providerId === providerId && p.available)) {
+      await logRefused(403, 'PROVIDER_UNAVAILABLE', 'Provider not available in this session');
       bridgeProxyPort?.postMessage({
         type: 'proxy_http_error',
         requestId,
@@ -2565,6 +2561,7 @@ export default defineBackground(() => {
         Array.from(new Set(allCreds.map((c) => c.providerId))).sort(),
         group,
       );
+      await logRefused(403, 'PROVIDER_UNAVAILABLE', message);
       bridgeProxyPort?.postMessage({
         type: 'proxy_http_error',
         requestId,
@@ -2580,6 +2577,7 @@ export default defineBackground(() => {
     const effectiveProviderId = translation?.dstProviderId ?? swap?.dstProviderId ?? providerId;
     // The key goes out with effectiveProviderId's headers (as on the page path).
     if (credential.providerId !== effectiveProviderId) {
+      await logRefused(403, 'PROVIDER_UNAVAILABLE', `The key this app is routed to is not a ${effectiveProviderId} key`);
       bridgeProxyPort?.postMessage({
         type: 'proxy_http_error',
         requestId,
@@ -2753,6 +2751,7 @@ export default defineBackground(() => {
         const nativePort = bridgeProxyPort;
         const reservation = await checkAndReserveAllowance(session.appOrigin, providerId, appRequest);
         if (!reservation.allowed) {
+          await logRefused(429, 'QUOTA_EXCEEDED', reservation.reason);
           nativePort.postMessage({ type: 'proxy_http_error', requestId, error: reservation.reason });
           return;
         }
@@ -2793,7 +2792,7 @@ export default defineBackground(() => {
               if (!outputTokens) outputTokens = Math.ceil(responseChars / 4);
             }
             const logId = await logRequest(session, appRequest, status);
-            await updateLogEntry(logId, { inputTokens, outputTokens, model: parseModel(body) });
+            await updateLogEntry(logId, { inputTokens, outputTokens, model: loggedModel(appRequest) });
             browser.runtime.sendMessage({ type: 'BYOKY_INTERNAL', action: 'usageUpdated' }).catch(() => {});
             await addUsage(session.appOrigin, providerId, (inputTokens ?? 0) + (outputTokens ?? 0));
           };
@@ -2809,7 +2808,7 @@ export default defineBackground(() => {
         } else {
           // Older bridges don't report back; log what is known now.
           reservation.release();
-          const model = parseModel(body);
+          const model = loggedModel(appRequest);
           logRequest(session, appRequest, 200).then((logId) => {
             if (model) updateLogEntry(logId, { model });
           });
@@ -2835,6 +2834,7 @@ export default defineBackground(() => {
       // as on the page path.
       const reservation = await checkAndReserveAllowance(session.appOrigin, providerId, appRequest);
       if (!reservation.allowed) {
+        await logRefused(429, 'QUOTA_EXCEEDED', reservation.reason);
         bridgeProxyPort?.postMessage({ type: 'proxy_http_error', requestId, error: reservation.reason });
         return;
       }
@@ -3087,6 +3087,14 @@ export default defineBackground(() => {
     return ctx;
   }
 
+  /**
+   * The model a request names, for the log: its body's, or for Gemini, which
+   * names it in the path, its URL's (F066). An encoded (binary) body has none.
+   */
+  function loggedModel(req: Pick<ProxyRequest, 'url' | 'body' | 'bodyEncoding'>): string | undefined {
+    return (req.bodyEncoding ? undefined : parseModel(req.body)) ?? modelFromUrl(req.url);
+  }
+
   /** Gemini puts the model in the path: /v1beta/models/{model}:generateContent. */
   function modelFromUrl(url: string | undefined): string | undefined {
     if (!url) return undefined;
@@ -3266,6 +3274,7 @@ export default defineBackground(() => {
     session: Session,
     req: ProxyRequest,
     status: number,
+    error?: string,
   ): Promise<string> {
     const id = crypto.randomUUID();
     // Strip query params from URL to avoid logging secrets (e.g. API keys in query strings)
@@ -3293,6 +3302,7 @@ export default defineBackground(() => {
       status,
       timestamp: Date.now(),
     };
+    if (error) entry.error = error;
 
     if (sp) entry.credentialId = sp.credentialId;
     if (translation) {
@@ -3333,6 +3343,31 @@ export default defineBackground(() => {
     });
 
     return id;
+  }
+
+  // When each kind of refusal was last logged, by app, provider and code.
+  const loggedRefusals = new Map<string, number>();
+  const REFUSAL_REPEAT_MS = 5_000;
+
+  /**
+   * Log a request of an approved app (or bridge session) that the wallet
+   * refused before calling upstream: over its limit, apps paused, no key
+   * for it, wallet locked. Not refusals any page can cause (another
+   * origin, a blocked endpoint), which could flood the log. The same
+   * refusal again within a few seconds isn't logged again, so an app
+   * retrying can't push real entries out of the log. Usage skips it
+   * (status 400 and up).
+   */
+  async function logRefusal(session: Session, req: ProxyRequest, status: number, code: string, message: string): Promise<void> {
+    const now = Date.now();
+    for (const [k, at] of loggedRefusals) if (now - at >= REFUSAL_REPEAT_MS) loggedRefusals.delete(k);
+    const key = JSON.stringify([session.appOrigin, req.providerId, code]);
+    if (loggedRefusals.has(key)) return;
+    loggedRefusals.set(key, now);
+    const entryId = await logRequest(session, req, status, message);
+    const model = loggedModel(req);
+    if (model) await updateLogEntry(entryId, { model });
+    browser.runtime.sendMessage({ type: 'BYOKY_INTERNAL', action: 'usageUpdated' }).catch(() => {});
   }
 
   async function updateLogEntry(
@@ -3461,7 +3496,7 @@ export default defineBackground(() => {
     const inputTokens = req.body && !req.bodyEncoding ? Math.ceil(req.body.length / 4) : 0;
     const outputTokens = Math.max(0, estimateRequestTokens(req) - inputTokens);
     const logEntryId = await logRequest(session, req, 499);
-    await updateLogEntry(logEntryId, { inputTokens, outputTokens, model: req.bodyEncoding ? undefined : parseModel(req.body) });
+    await updateLogEntry(logEntryId, { inputTokens, outputTokens, model: loggedModel(req) });
     await addUsage(session.appOrigin, req.providerId, inputTokens + outputTokens);
   }
 
@@ -3501,7 +3536,7 @@ export default defineBackground(() => {
     responseText: string,
     complete: boolean,
   ) {
-    const model = req.bodyEncoding ? undefined : parseModel(req.body);
+    const model = loggedModel(req);
     const ok = status >= 200 && status < 300;
     const parsed = ok ? parseUsage(upstreamProviderId, responseText) : undefined;
     let inputTokens = parsed?.inputTokens;

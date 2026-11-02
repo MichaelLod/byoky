@@ -23,6 +23,16 @@ final class UsageMeteringTests: XCTestCase {
 
     // MARK: - Parsing
 
+    /// The log names a Gemini request's model, which is in its URL (F066).
+    func testLoggedModelComesFromTheBodyOrAGeminiURL() {
+        let gemini = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+        XCTAssertEqual(UsageParser.loggedModel(providerId: "gemini", url: gemini, body: Data(#"{"contents":[]}"#.utf8)), "gemini-2.5-flash")
+        XCTAssertEqual(UsageParser.loggedModel(providerId: "gemini", url: gemini, body: Data(#"{"model":"x"}"#.utf8)), "x")
+        XCTAssertEqual(UsageParser.loggedModel(providerId: "openai", url: "https://api.openai.com/v1/chat/completions",
+                                               body: Data(#"{"model":"gpt-5.5"}"#.utf8)), "gpt-5.5")
+        XCTAssertNil(UsageParser.loggedModel(providerId: "openai", url: "https://api.openai.com/v1/chat/completions", body: nil))
+    }
+
     func testPlainJsonUsage() {
         XCTAssertEqual(
             UsageParser.parseUsage(providerId: "anthropic", body: #"{"usage":{"input_tokens":12,"output_tokens":34}}"#),

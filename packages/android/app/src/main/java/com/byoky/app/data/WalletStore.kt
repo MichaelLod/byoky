@@ -728,7 +728,7 @@ class WalletStore(context: Context) {
         val queryIndex = url.indexOf('?')
         if (queryIndex >= 0) sanitizedUrl = url.substring(0, queryIndex)
 
-        val model = UsageParser.parseModel(requestBody)
+        val model = UsageParser.loggedModel(providerId, url, requestBody)
         val inputTokens = usage?.inputTokens?.coerceAtMost(Int.MAX_VALUE.toLong())?.toInt()
         val outputTokens = usage?.outputTokens?.coerceAtMost(Int.MAX_VALUE.toLong())?.toInt()
 

@@ -328,3 +328,32 @@ describe('background: the bridge fits a local tool\'s request to the model it na
     expect(upstream(h).body).toBe(body);
   });
 });
+
+// F066: the log took the model from the body only, so every direct Gemini
+// request (model in the URL) was logged without one.
+describe('background: the log names a Gemini request\'s model', () => {
+  const body = '{"contents":[{"role":"user","parts":[{"text":"hi"}]}]}';
+  const geminiUsage = () => jsonResponse({ usageMetadata: { promptTokenCount: 2, candidatesTokenCount: 3 } });
+
+  it('takes it from the URL, where Gemini names it', async () => {
+    const h = await startBackground({ local: await walletStorage(KEYS) });
+    await h.unlock();
+    const reply = await connectApproved(h, APP, { providers: [{ id: 'gemini', required: true }] });
+    h.fetch.mockImplementation(async () => geminiUsage());
+    const r = await h.proxy(APP, {
+      sessionKey: reply.payload.sessionKey, providerId: 'gemini', url: `${GEMINI}/gemini-2.5-flash:generateContent`, body,
+    }).result;
+    expect(r.done).toBe(true);
+    await h.until(() => requestLog(h)[0]?.model != null, 5_000, 'the model on the log entry');
+    expect(requestLog(h)[0]).toMatchObject({ model: 'gemini-2.5-flash', inputTokens: 2, outputTokens: 3 });
+  });
+
+  it('names the app\'s model, and the pinned one as served', async () => {
+    const { h, sessionKey } = await appInGroup('gemini', 'gemini-3.8-flash');
+    h.fetch.mockImplementation(async () => geminiUsage());
+    const r = await h.proxy(APP, { sessionKey, providerId: 'gemini', url: `${GEMINI}/gemini-2.5-flash:generateContent`, body }).result;
+    expect(r.done).toBe(true);
+    await h.until(() => requestLog(h)[0]?.model != null, 5_000, 'the model on the log entry');
+    expect(requestLog(h)[0]).toMatchObject({ model: 'gemini-2.5-flash', actualModel: 'gemini-3.8-flash' });
+  });
+});

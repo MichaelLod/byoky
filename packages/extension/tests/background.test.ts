@@ -165,6 +165,37 @@ describe('background: proxy boundary', () => {
     expect(h.fetch).not.toHaveBeenCalled();
   });
 
+  // F065: a request the wallet refused left no trace in History.
+  it('logs a refused request once, with its reason, and counts nothing', async () => {
+    const h = await unlockedWallet({
+      tokenAllowances: [{ origin: APP, totalLimit: 50 }],
+      usageTotals: { [APP]: { anthropic: 100 } },
+    });
+    const { payload } = await connectApproved(h, APP, { providers: [{ id: 'anthropic', required: true }] });
+    for (let i = 0; i < 3; i++) {
+      expect((await h.proxy(APP, chat(payload.sessionKey)).result).error).toMatchObject({ status: 429, error: { code: 'QUOTA_EXCEEDED' } });
+    }
+    await h.until(() => requestLog(h)[0]?.model != null, 5_000, 'the refusal logged');
+    await h.settle();
+    // An app retrying against its limit adds one entry, not one per try.
+    expect(requestLog(h)).toHaveLength(1);
+    expect(requestLog(h)[0]).toMatchObject({
+      status: 429, providerId: 'anthropic', model: 'claude-x', error: `Token allowance exceeded for ${APP}`,
+    });
+    expect(h.fetch).not.toHaveBeenCalled();
+    expect((h.local.data.usageTotals as any)[APP].anthropic).toBe(100);
+  });
+
+  it('does not log a refusal any page could cause', async () => {
+    const h = await unlockedWallet();
+    const { payload } = await connectApproved(h, APP, { providers: [{ id: 'anthropic', required: true }] });
+    expect((await h.proxy(OTHER, chat(payload.sessionKey)).result).error.error.code).toBe('ORIGIN_MISMATCH');
+    const endpoint = chat(payload.sessionKey, { url: 'https://api.anthropic.com/v1/files', method: 'GET' });
+    expect((await h.proxy(APP, endpoint).result).error.error.code).toBe('ENDPOINT_NOT_ALLOWED');
+    await h.settle();
+    expect(requestLog(h)).toHaveLength(0);
+  });
+
   it('holds the allowance of in-flight requests, and releases it when they end', async () => {
     // Each request may use about 20 (prompt) + 50 (max_tokens) tokens. A
     // request is let through while the app's usage plus holds is under its

@@ -22,6 +22,14 @@ enum UsageParser {
         return model
     }
 
+    /// The model a logged request names: its body's, or for Gemini, which
+    /// names it in the path (`…/models/{model}:generateContent`), its URL's,
+    /// as the extension logs it (F066).
+    static func loggedModel(providerId: String, url: String, body: Data?) -> String? {
+        if let model = parseModel(from: body) { return model }
+        return providerId == "gemini" ? RoutingResolver.geminiModel(fromURL: url) : nil
+    }
+
     /// Usage from a complete response body, streamed (SSE) or plain JSON.
     static func parseUsage(providerId: String, body: String) -> TokenUsage? {
         var meter = UsageMeter(providerId: providerId)
