@@ -259,6 +259,13 @@ function CredentialCard({ cred, usage, shared, onOpenStats, onRemove }: Credenti
           Added {new Date(cred.createdAt).toLocaleDateString()}
         </span>
       </div>
+      {/* Safari can't add one, but a backup from Chrome or Firefox can bring one in. */}
+      {import.meta.env.SAFARI && cred.authMethod === 'oauth' && (
+        <div className="warning-note" style={{ marginTop: '8px' }}>
+          Setup tokens need the Byoky Bridge, which works with Chrome and Firefox on a computer.
+          Requests with this one fail in Safari; use an Anthropic API key here.
+        </div>
+      )}
 
       <button
         type="button"

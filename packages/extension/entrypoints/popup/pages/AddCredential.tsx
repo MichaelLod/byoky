@@ -41,7 +41,10 @@ export function AddCredential() {
   const [bridgeOnline, setBridgeOnline] = useState<boolean | null>(null);
 
   const provider = PROVIDERS[providerId];
-  const supportsOAuth = provider?.authMethods.includes('oauth');
+  // Setup tokens go through the Byoky Bridge, which Safari can't reach (an
+  // iPhone or iPad has none, and on a Mac Safari's native messaging goes to
+  // the Byoky app), so the background refuses them there: no toggle.
+  const supportsOAuth = !import.meta.env.SAFARI && provider?.authMethods.includes('oauth');
   const isLocalProvider = providerId === 'ollama' || providerId === 'lm_studio';
   const requiresBaseUrl = provider?.requiresCustomBaseUrl === true;
 
@@ -286,8 +289,8 @@ export function AddCredential() {
             </div>
             <div className="warning-note" style={{ marginTop: '10px' }}>
               <strong>Online only.</strong> Setup tokens proxy through this
-              extension and the local Byoky Bridge. If the browser or bridge
-              isn't running, apps using this credential will get 401.
+              extension and the local Byoky Bridge. While the browser or the
+              bridge isn't running, apps' requests with this credential fail.
             </div>
             {bridgeOnline === false && (
               <div className="warning-note" style={{ marginTop: '10px' }}>
