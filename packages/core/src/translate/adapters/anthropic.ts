@@ -948,25 +948,29 @@ function serializeMessagesToAnthropic(messages: IRMessage[]): AnthropicMessage[]
 }
 
 /**
- * Returns null when every block of a non-empty message was dropped (e.g. an
- * assistant turn holding only another family's unsigned reasoning): sending
- * it with empty content would be rejected. Anthropic merges the neighbouring
+ * Anthropic refuses an empty text block and an empty user message (live
+ * 2026-11-02: "text content blocks must be non-empty", "user messages must
+ * have non-empty content"), which the other families take: a Gemini
+ * {text:''} part beside a thought signature, an OpenAI user turn with
+ * content '', an assistant turn with content null (what an app gets back for
+ * a thinking-only Claude reply). So empty or whitespace-only text blocks are
+ * left out (text inside a tool_result stays as it is), and a message with
+ * nothing left, such as an assistant turn holding only another family's
+ * unsigned reasoning, is dropped (null). Anthropic merges the neighbouring
  * same-role turns that this can leave behind.
  */
 function serializeMessageToAnthropic(msg: IRMessage): AnthropicMessage | null {
   const blocks: AnthropicContentBlock[] = [];
   for (const b of msg.content) {
+    if (b.type === 'text' && b.text.trim().length === 0) continue;
     const wire = serializeContentBlockToAnthropic(b);
     if (wire) blocks.push(wire);
   }
-  if (blocks.length === 0 && msg.content.length > 0) return null;
+  if (blocks.length === 0) return null;
 
   // Collapse single text block to plain string for compactness.
   if (blocks.length === 1 && blocks[0].type === 'text') {
     return { role: msg.role, content: (blocks[0] as { text: string }).text };
-  }
-  if (blocks.length === 0) {
-    return { role: msg.role, content: '' };
   }
   return { role: msg.role, content: blocks };
 }

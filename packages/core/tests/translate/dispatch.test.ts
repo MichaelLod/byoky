@@ -998,3 +998,95 @@ describe('cross-family dispatch — an output limit above the destination model\
     expect(out.max_tokens).toBe(500_000);
   });
 });
+
+describe('cross-family dispatch — empty turns never reach Claude', () => {
+  const toClaude = (src: ModelFamily, body: unknown) =>
+    JSON.parse(translateRequest(ctx(src, 'anthropic'), JSON.stringify(body))) as { messages: Array<{ role: string; content: unknown }> };
+  const noEmpty = (messages: Array<{ content: unknown }>) => {
+    for (const m of messages) {
+      expect(m.content).not.toBe('');
+      if (Array.isArray(m.content)) {
+        for (const b of m.content as Array<{ type: string; text?: string }>) {
+          if (b.type === 'text') expect(b.text?.trim()).not.toBe('');
+        }
+      }
+    }
+  };
+
+  it('openai: an assistant turn with content null between user turns is dropped', () => {
+    const out = toClaude('openai', {
+      model: 'gpt-5.5',
+      messages: [{ role: 'user', content: 'hi' }, { role: 'assistant', content: null }, { role: 'user', content: 'continue' }],
+    });
+    expect(out.messages).toEqual([{ role: 'user', content: 'hi' }, { role: 'user', content: 'continue' }]);
+  });
+
+  it('openai: a user turn with content \'\' is dropped, and an empty text part is left out', () => {
+    const out = toClaude('openai', {
+      model: 'gpt-5.5',
+      messages: [
+        { role: 'user', content: '' },
+        { role: 'assistant', content: 'ok' },
+        { role: 'user', content: [{ type: 'text', text: '' }, { type: 'text', text: 'hello' }] },
+      ],
+    });
+    expect(out.messages).toEqual([{ role: 'assistant', content: 'ok' }, { role: 'user', content: 'hello' }]);
+  });
+
+  it('gemini: a model turn with an empty text part is dropped; one beside a thought signature is left out', () => {
+    const out = toClaude('gemini', {
+      contents: [
+        { role: 'user', parts: [{ text: 'hi' }] },
+        { role: 'model', parts: [{ text: '' }] },
+        { role: 'user', parts: [{ text: 'again' }] },
+        { role: 'model', parts: [{ text: 'a' }, { text: '', thoughtSignature: 'x' }] },
+        { role: 'user', parts: [{ text: 'more' }] },
+      ],
+    });
+    expect(out.messages).toEqual([
+      { role: 'user', content: 'hi' },
+      { role: 'user', content: 'again' },
+      { role: 'assistant', content: 'a' },
+      { role: 'user', content: 'more' },
+    ]);
+  });
+
+  it('a thinking-only Claude reply, replayed by an OpenAI or a Gemini app, leaves no empty turn', () => {
+    const reply = JSON.stringify({
+      id: 'msg_1',
+      type: 'message',
+      role: 'assistant',
+      model: 'claude-opus-5-5',
+      content: [{ type: 'thinking', thinking: '', signature: 'sig' }],
+      stop_reason: 'max_tokens',
+      usage: { input_tokens: 5, output_tokens: 64 },
+    });
+    const openaiMsg = JSON.parse(translateResponse(ctx('openai', 'anthropic'), reply)).choices[0].message;
+    const openaiNext = toClaude('openai', {
+      model: 'gpt-5.5',
+      messages: [{ role: 'user', content: 'hi' }, openaiMsg, { role: 'user', content: 'continue' }],
+    });
+    noEmpty(openaiNext.messages);
+    expect(openaiNext.messages.map((m) => m.role)).toEqual(['user', 'user']);
+
+    const geminiContent = JSON.parse(translateResponse(ctx('gemini', 'anthropic'), reply)).candidates[0].content;
+    const geminiNext = toClaude('gemini', {
+      contents: [{ role: 'user', parts: [{ text: 'hi' }] }, geminiContent, { role: 'user', parts: [{ text: 'continue' }] }],
+    });
+    noEmpty(geminiNext.messages);
+    expect(geminiNext.messages.map((m) => m.role)).toEqual(['user', 'user']);
+  });
+
+  it('text inside a tool result is kept as it is, even empty', () => {
+    const out = toClaude('openai', {
+      model: 'gpt-5.5',
+      messages: [
+        { role: 'user', content: 'run it' },
+        { role: 'assistant', content: null, tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'run', arguments: '{}' } }] },
+        { role: 'tool', tool_call_id: 'call_1', content: '' },
+      ],
+    });
+    expect(out.messages[1]).toEqual({ role: 'assistant', content: [{ type: 'tool_use', id: 'call_1', name: 'run', input: {} }] });
+    expect(out.messages[2]).toEqual({ role: 'user', content: [{ type: 'tool_result', tool_use_id: 'call_1', content: '' }] });
+  });
+});
