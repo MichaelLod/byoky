@@ -77,8 +77,27 @@ describe('Content-Security-Policy', () => {
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data: blob: https://avatars.githubusercontent.com https://unpkg.com https://api.producthunt.com",
       "connect-src 'self' https://api.github.com",
+      "base-uri 'none'",
+      "form-action 'self'",
+      "object-src 'none'",
       "frame-ancestors 'none';",
     ]);
+  });
+
+  // A nonce trusts a <script> tag, not its URL: an injected <base href> would
+  // load Next's nonced /_next/ scripts from another host. base-uri and
+  // form-action don't fall back to default-src, so they must be set.
+  it('pins base-uri and form-action, which a nonce does not cover', () => {
+    const directives = new Map(
+      csp().replace(/;$/, '').split('; ').map((d) => {
+        const [name, ...sources] = d.split(' ');
+        return [name, sources.join(' ')] as const;
+      }),
+    );
+    expect(directives.get('script-src')).toMatch(/'nonce-/);
+    expect(["'none'", "'self'"]).toContain(directives.get('base-uri'));
+    expect(["'none'", "'self'"]).toContain(directives.get('form-action'));
+    expect(directives.get('object-src')).toBe("'none'");
   });
 
   it('never allows inline or eval script', () => {
