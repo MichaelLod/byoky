@@ -216,7 +216,7 @@ function bridgeBin(): string {
  * native hosts with a minimal PATH, which is why we need the wrapper to set
  * PATH and call node with an absolute path).
  */
-function installBridgeManifest(userDataDir: string, extensionId: string): void {
+function installBridgeManifest(userDataDir: string, extensionId: string, bridgeEnv: Record<string, string> = {}): void {
   const bin = bridgeBin();
   const nodeBin = process.execPath;
   const nodeDir = path.dirname(nodeBin);
@@ -228,6 +228,7 @@ function installBridgeManifest(userDataDir: string, extensionId: string): void {
   const wrapper = [
     '#!/bin/bash',
     `export PATH='${nodeDir}:/usr/local/bin:/usr/bin:/bin'`,
+    ...Object.entries(bridgeEnv).map(([name, value]) => `export ${name}='${value.replace(/'/g, `'\\''`)}'`),
     `exec '${nodeBin}' '${bin}' host "$@"`,
     '',
   ].join('\n');
@@ -254,12 +255,20 @@ function installBridgeManifest(userDataDir: string, extensionId: string): void {
 // the first-run launch below would surface a mismatch.
 const EXPECTED_EXTENSION_ID = 'ahhecmfcclkjdgjnmackoacldnmgmipl';
 
-async function launchWallet(label: string, port: number): Promise<Wallet> {
+export interface LaunchOptions {
+  /**
+   * Environment for the bridge host the browser starts, e.g. a HOME of its
+   * own (so its ~/.byoky-bridge/token is not the user's).
+   */
+  bridgeEnv?: Record<string, string>;
+}
+
+async function launchWallet(label: string, port: number, opts: LaunchOptions = {}): Promise<Wallet> {
   // Create a named user-data-dir so we can drop a NativeMessagingHosts
   // manifest into it BEFORE launch — Chromium doesn't re-scan after start,
   // but it does read the manifest fresh on each connectNative() call.
   const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), `byoky-e2e-${label}-`));
-  installBridgeManifest(userDataDir, EXPECTED_EXTENSION_ID);
+  installBridgeManifest(userDataDir, EXPECTED_EXTENSION_ID, opts.bridgeEnv);
 
   // Headless uses Chromium's new headless mode (channel 'chromium'), which
   // still loads extensions and needs no display. The config's `headless`
@@ -294,7 +303,7 @@ async function launchWallet(label: string, port: number): Promise<Wallet> {
   if (extensionId !== EXPECTED_EXTENSION_ID) {
     // Rewrite the manifest with the real id — still works because Chromium
     // reads it lazily on connectNative().
-    installBridgeManifest(userDataDir, extensionId);
+    installBridgeManifest(userDataDir, extensionId, opts.bridgeEnv);
   }
   // eslint-disable-next-line no-console
   console.log(`[${label}] extension id: ${extensionId}`);

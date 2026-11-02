@@ -118,6 +118,11 @@ jobs:
       - name: Plugin dist checks
         run: npx vitest run packages/openclaw-plugin/tests
 
+      # The built bridge host, started as the browser starts it, answers a
+      # framed ping. (The e2e job drives it end to end.)
+      - name: Bridge host smoke test
+        run: npx vitest run packages/bridge/tests/host-smoke.test.ts
+
       # release.sh, the store scripts and ios-signing against throwaway repos
       # and a stubbed fetch (node:test, not vitest). The cases that run
       # release.sh past the version bump skip off macOS.
