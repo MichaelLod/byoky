@@ -1108,6 +1108,8 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
             deliverProxyError(requestId: requestId, code: code, message: message, status: 400)
             return nil
         case nil:
+            // Embeddings, audio and the like keep the app's model, as in core.
+            if !ProxyPolicy.isModelPinnableRequest(url: url) { return text }
             // A Gemini URL that names the model gets the pin instead (a body
             // `model` would be ignored); Gemini's OpenAI-compatible endpoint
             // takes it from the body like everyone else.

@@ -29,6 +29,7 @@ import {
   injectStreamUsageOptions,
   computeAllowanceCheck,
   shouldEstimateUsage,
+  isModelPinnableRequest,
   validateProxyUrl,
   isAllowedProxyRequest,
   resolveProviderBaseUrl,
@@ -3262,7 +3263,8 @@ export default defineBackground(() => {
     } else if (swap) {
       entry.actualProviderId = swap.dstProviderId;
       if (swap.dstModel) entry.actualModel = swap.dstModel;
-    } else if (sp?.modelOverride) {
+    } else if (sp?.modelOverride && isModelPinnableRequest(req.url)) {
+      // Embeddings, audio and the like keep the app's model (rewriteRequestModel).
       entry.actualModel = sp.modelOverride;
     }
 

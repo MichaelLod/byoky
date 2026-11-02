@@ -128,6 +128,31 @@ const GENERATION_PATH_SUFFIXES = [
   'chat/completions', 'completions', 'responses', 'messages', 'chat', 'complete', 'generate',
 ].map((s) => s.split('/'));
 
+const TOKEN_COUNT_PATH_SUFFIXES = ['messages/count_tokens', 'responses/input_tokens'].map((s) => s.split('/'));
+
+/**
+ * Whether a group's pinned model applies to a request to `url` (the URL the
+ * app called): text generation and token counting, the endpoints that take
+ * the chat models a group pins. Embeddings, moderation, audio, images,
+ * rerank, Mistral's fill-in-the-middle and Gemini's embedContent take
+ * models of their own kind, which a pinned chat model would only get
+ * refused, so they keep the app's model. The iOS and Android wallets apply
+ * the same rule where the bundled core can't.
+ */
+export function isModelPinnableRequest(url: string): boolean {
+  let path: string;
+  try {
+    path = new URL(url).pathname;
+  } catch {
+    return false;
+  }
+  const last = path.slice(path.lastIndexOf('/') + 1);
+  if (/:(?:stream)?[Gg]enerateContent$|:countTokens$/.test(last)) return true;
+  const segments = path.toLowerCase().split('/').filter((s) => s.length > 0);
+  if (endsWithSegments(segments, ['fim', 'completions'])) return false;
+  return [...GENERATION_PATH_SUFFIXES, ...TOKEN_COUNT_PATH_SUFFIXES].some((suffix) => endsWithSegments(segments, suffix));
+}
+
 /** Gemini's `models/{model}:{action}` inference actions. */
 const GEMINI_POST_ACTIONS = new Set([
   'generateContent', 'streamGenerateContent', 'countTokens', 'embedContent', 'batchEmbedContents',

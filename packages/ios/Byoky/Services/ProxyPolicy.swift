@@ -115,6 +115,29 @@ enum ProxyPolicy {
         return generationPathSuffixes.contains { endsWith(segments, $0) }
     }
 
+    // MARK: - Pinned models
+
+    /// Trailing path segments of the token-count endpoints.
+    static let tokenCountPathSuffixes: [[String]] = [
+        "messages/count_tokens", "responses/input_tokens",
+    ].map { $0.split(separator: "/").map(String.init) }
+
+    /// Whether a group's pinned model applies to a request to `url` (the URL
+    /// the app called): text generation and token counting. Embeddings,
+    /// moderation, audio, images, rerank, fill-in-the-middle and Gemini's
+    /// embedContent take models of their own kind, which a pinned chat model
+    /// would only get refused, so they keep the app's model. Mirrors
+    /// `isModelPinnableRequest` in core's proxy-utils.ts, which the bundled
+    /// engine applies itself; this copy is for when it can't.
+    static func isModelPinnableRequest(url: String) -> Bool {
+        guard let path = URLComponents(string: url)?.percentEncodedPath else { return false }
+        let last = path.split(separator: "/", omittingEmptySubsequences: false).last.map(String.init) ?? ""
+        if last.range(of: #":(stream)?[Gg]enerateContent$|:countTokens$"#, options: .regularExpression) != nil { return true }
+        let segments = path.lowercased().split(separator: "/").map(String.init)
+        if endsWith(segments, ["fim", "completions"]) { return false }
+        return (generationPathSuffixes + tokenCountPathSuffixes).contains { endsWith(segments, $0) }
+    }
+
     private static func endsWith(_ segments: [String], _ suffix: [String]) -> Bool {
         guard suffix.count <= segments.count else { return false }
         return Array(segments.suffix(suffix.count)) == suffix

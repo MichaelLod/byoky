@@ -286,6 +286,20 @@ final class NativeBridgeE2ETests: XCTestCase {
         XCTAssertNil(sent["temperature"])
     }
 
+    /// An embeddings call keeps the app's model under a pinned chat model,
+    /// which OpenAI would refuse there (F003).
+    @MainActor
+    func testPinnedModelLeavesEmbeddingsAlone() async throws {
+        let h = try await BridgeHarness.make(self, pinnedModel: "gpt-5.5-mini")
+        StubUpstream.script(.init(chunks: [Data(#"{"data":[],"usage":{"prompt_tokens":1,"total_tokens":1}}"#.utf8)]))
+        let body = #"{"model":"text-embedding-3-small","input":"hello"}"#
+
+        let replies = try await h.proxy(url: "https://api.openai.com/v1/embeddings", body: body)
+
+        XCTAssertEqual(replies.last?.type, "BYOKY_PROXY_RESPONSE_DONE")
+        XCTAssertEqual(StubUpstream.bodies.first.map { String(decoding: $0, as: UTF8.self) }, body)
+    }
+
     /// A request the pinned model can't serve gets a clear error and goes nowhere.
     @MainActor
     func testPinnedModelRefusesWhatItCantServe() async throws {

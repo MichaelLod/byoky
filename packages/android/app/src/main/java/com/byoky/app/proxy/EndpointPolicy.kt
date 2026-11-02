@@ -51,7 +51,12 @@ object EndpointPolicy {
         "chat/completions", "completions", "responses", "messages", "chat", "complete", "generate",
     ).map { it.split('/') }
 
+    /** Token-count endpoints, which a group's pinned model applies to as well. */
+    private val TOKEN_COUNT_SUFFIXES = listOf("messages/count_tokens", "responses/input_tokens").map { it.split('/') }
+
     private val GENERATE_CONTENT = Regex(":(stream)?[Gg]enerateContent$")
+
+    private val PINNABLE_GEMINI_ACTION = Regex(":(stream)?[Gg]enerateContent$|:countTokens$")
 
     /** Local servers bill nothing. */
     private val LOCAL_PROVIDERS = setOf("ollama", "lm_studio")
@@ -107,6 +112,25 @@ object EndpointPolicy {
         val segments = path.lowercase().split('/').filter { it.isNotEmpty() }
         return GENERATION_SUFFIXES.any { endsWith(segments, it) }
     }
+
+    /**
+     * Whether a group's pinned model applies to a request to [appUrl] (the
+     * URL the app called): text generation and token counting. Embeddings,
+     * moderation, audio, images, rerank, fill-in-the-middle and Gemini's
+     * embedContent take models of their own kind, which a pinned chat model
+     * would only get refused, so they keep the app's model. Mirrors
+     * `isModelPinnableRequest` in core's proxy-utils.ts, which the bundled
+     * engine applies itself; this copy is for when it can't.
+     */
+    fun isModelPinnable(appUrl: HttpUrl): Boolean {
+        val path = appUrl.encodedPath
+        if (PINNABLE_GEMINI_ACTION.containsMatchIn(path.substringAfterLast('/'))) return true
+        val segments = path.lowercase().split('/').filter { it.isNotEmpty() }
+        if (endsWith(segments, listOf("fim", "completions"))) return false
+        return (GENERATION_SUFFIXES + TOKEN_COUNT_SUFFIXES).any { endsWith(segments, it) }
+    }
+
+    fun isModelPinnable(appUrl: String): Boolean = appUrl.toHttpUrlOrNull()?.let { isModelPinnable(it) } ?: false
 
     /** Non-empty path segments, percent-decoded as strict UTF-8; null if one doesn't decode. */
     private fun decodedSegments(url: HttpUrl): List<String>? =

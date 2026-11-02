@@ -4,6 +4,7 @@ import {
   walletStorage,
   jsonResponse,
   connectApproved,
+  requestLog,
   senderFor,
   type CredentialSpec,
   type FakeNativeConnection,
@@ -141,6 +142,30 @@ describe('background: a group\'s pinned model gets that model\'s request rules',
     expect(JSON.parse(upstream(h).body)).toEqual({ model: 'gemini-3.8-flash', messages: [{ role: 'user', content: 'hi' }] });
   });
 
+  // F003: embeddings, speech and image calls take models of their own kind;
+  // a pinned chat model only gets them refused upstream.
+  it('leaves the model of an embeddings or speech request as the app sent it', async () => {
+    const { h, sessionKey } = await appInGroup('openai', 'gpt-5.5-mini');
+    const calls = [
+      ['https://api.openai.com/v1/embeddings', '{"model":"text-embedding-3-small","input":"hello"}'],
+      ['https://api.openai.com/v1/audio/speech', '{"model":"gpt-4o-mini-tts","input":"hello","voice":"alloy"}'],
+    ];
+    for (const [url, body] of calls) {
+      expect((await h.proxy(APP, { sessionKey, providerId: 'openai', url, body }).result).done, url).toBe(true);
+    }
+    expect(calls.map((_, i) => upstream(h, i))).toEqual(calls.map(([url, body]) => ({ url, body })));
+    await h.until(() => requestLog(h).length === 2 && requestLog(h).every((e) => e.model), 5_000, 'both log entries');
+    for (const entry of requestLog(h)) expect(entry).not.toHaveProperty('actualModel');
+  });
+
+  it('logs the pinned model for a request it was applied to', async () => {
+    const { h, sessionKey } = await appInGroup('openai', 'gpt-5.5');
+    const body = JSON.stringify({ model: 'gpt-4.1', messages: [] });
+    expect((await h.proxy(APP, { sessionKey, providerId: 'openai', url: OPENAI_URL, body }).result).done).toBe(true);
+    await h.until(() => requestLog(h)[0]?.model != null, 5_000, 'the log entry');
+    expect(requestLog(h)[0]).toMatchObject({ model: 'gpt-4.1', actualModel: 'gpt-5.5' });
+  });
+
   it('answers a request the pinned model can\'t serve with a clear error, sending nothing', async () => {
     const { h, sessionKey } = await appInGroup('openai', 'gpt-6-astra');
     const r = await h.proxy(APP, {
@@ -220,6 +245,20 @@ describe('background: the bridge path fits a pinned model\'s requests too', () =
     expect(replies.at(-1).type).toBe('proxy_http_response_done');
     expect(upstream(h).url).toBe(GEMINI_OPENAI);
     expect(JSON.parse(upstream(h).body)).toEqual({ model: 'gemini-3.8-flash', stream: true, messages: [{ role: 'user', content: 'hi' }] });
+  });
+
+  it('leaves the model of an embeddings or speech request as the tool sent it (F003)', async () => {
+    const { h, sessionKey } = await appInGroup('openai', 'gpt-5.5-mini');
+    const bridge = await startBridge(h, sessionKey);
+    const calls = [
+      ['https://api.openai.com/v1/embeddings', '{"model":"text-embedding-3-small","input":"hello"}'],
+      ['https://api.openai.com/v1/audio/speech', '{"model":"gpt-4o-mini-tts","input":"hello","voice":"alloy"}'],
+    ];
+    for (const [url, body] of calls) {
+      const replies = await bridgeExchange(h, bridge, { sessionKey, providerId: 'openai', url, body });
+      expect(replies.at(-1).type, url).toBe('proxy_http_response_done');
+    }
+    expect(calls.map((_, i) => upstream(h, i))).toEqual(calls.map(([url, body]) => ({ url, body })));
   });
 
   it('answers a request the pinned model can\'t serve with a clear error', async () => {

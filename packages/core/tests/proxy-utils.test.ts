@@ -9,6 +9,7 @@ import {
   validateProxyUrl,
   isAllowedProxyRequest,
   shouldEstimateUsage,
+  isModelPinnableRequest,
   resolveProviderBaseUrl,
   detectRequestCapabilities,
   rewriteToolNamesInJSONBody,
@@ -118,6 +119,48 @@ describe('shouldEstimateUsage', () => {
   ];
   it.each(cases)('%s %s (%s) → %s', (provider, url, type, expected) => {
     expect(shouldEstimateUsage(provider, url, type)).toBe(expected);
+  });
+});
+
+// ── isModelPinnableRequest ──────────────────────────────
+
+// F003. The iOS (ProxyPolicyTests) and Android (EndpointPolicyTest) copies
+// of this rule run the same cases.
+describe('isModelPinnableRequest', () => {
+  const GEMINI = 'https://generativelanguage.googleapis.com/v1beta/models';
+  const cases: [string, boolean][] = [
+    ['https://api.openai.com/v1/chat/completions', true],
+    ['https://api.openai.com/v1/completions', true],
+    ['https://api.openai.com/v1/responses', true],
+    ['https://api.openai.com/v1/responses/input_tokens', true],
+    ['https://api.anthropic.com/v1/messages?beta=true', true],
+    ['https://api.anthropic.com/v1/messages/count_tokens', true],
+    ['https://api.cohere.com/v2/chat', true],
+    ['http://localhost:11434/api/generate', true],
+    ['http://localhost:11434/api/chat', true],
+    ['https://api.groq.com/openai/v1/chat/completions', true],
+    [`${GEMINI}/gemini-2.5-flash:generateContent`, true],
+    [`${GEMINI}/gemini-2.5-flash:streamGenerateContent?alt=sse`, true],
+    [`${GEMINI}/gemini-2.5-flash:countTokens`, true],
+    ['https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', true],
+    ['https://api.openai.com/v1/embeddings', false],
+    ['https://api.openai.com/v1/moderations', false],
+    ['https://api.openai.com/v1/audio/speech', false],
+    ['https://api.openai.com/v1/audio/transcriptions', false],
+    ['https://api.openai.com/v1/images/generations', false],
+    ['https://api.openai.com/v1/images/edits', false],
+    ['https://api.cohere.com/v2/embed', false],
+    ['https://api.cohere.com/v2/rerank', false],
+    ['https://api.mistral.ai/v1/fim/completions', false],
+    ['http://localhost:11434/api/embed', false],
+    ['http://localhost:11434/api/show', false],
+    [`${GEMINI}/text-embedding-004:embedContent`, false],
+    [`${GEMINI}/text-embedding-004:batchEmbedContents`, false],
+    ['https://api.openai.com/v1/models', false],
+    ['not a url', false],
+  ];
+  it.each(cases)('%s → %s', (url, expected) => {
+    expect(isModelPinnableRequest(url)).toBe(expected);
   });
 });
 

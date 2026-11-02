@@ -239,7 +239,9 @@ class ProxyService(
                 requestBody = if (binaryBody) null else body,
                 usage = counted,
                 actualProviderId = routing?.translation?.dstProviderId ?: routing?.swapToProviderId,
-                actualModel = routing?.translation?.dstModel ?: routing?.swapDstModel ?: routing?.modelOverride,
+                // A pin isn't applied to embeddings, audio and the like.
+                actualModel = routing?.translation?.dstModel ?: routing?.swapDstModel
+                    ?: routing?.modelOverride?.takeIf { EndpointPolicy.isModelPinnable(appUrl) },
                 groupId = group?.id,
             )
         } catch (_: Exception) {
@@ -733,10 +735,15 @@ class ProxyService(
             // A body core left as it was (not JSON, already the model) keeps its bytes.
             is ModelRewrite.Body -> if (rewrite.body == text) body else rewrite.body.toByteArray(Charsets.UTF_8)
             is ModelRewrite.Refused -> throw ProxyError(rewrite.code, rewrite.message, 400)
+            // Embeddings, audio and the like keep the app's model, as in core.
             // A Gemini URL that names the model gets the pin instead (a body
             // `model` would be ignored); Gemini's OpenAI-compatible endpoint
             // takes it from the body like everyone else.
-            null -> if (providerId == "gemini" && RoutingResolver.geminiUrl(url, model) != null) body else rewriteModel(body, model)
+            null -> when {
+                !EndpointPolicy.isModelPinnable(url) -> body
+                providerId == "gemini" && RoutingResolver.geminiUrl(url, model) != null -> body
+                else -> rewriteModel(body, model)
+            }
         }
     }
 
