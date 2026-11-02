@@ -28,7 +28,7 @@ GROUPS AND CROSS-PROVIDER ROUTING
 Put apps in groups ("Work", "Personal") and pin each group to a key. Drag an app from a Claude group to a GPT group and Byoky translates requests and streaming responses on the fly. The app doesn't change a line.
 
 WORKS WITH YOUR TOOLS
-The open-source Byoky bridge lets Claude Code, OpenClaw and other CLI tools use your wallet through a localhost proxy. Your keys stay in the extension.
+The open-source Byoky bridge lets Claude Code, OpenClaw and other CLI tools use your wallet through a localhost proxy. API keys stay in the extension. A Claude setup token is handed to the local bridge for each request, and the bridge makes that call to Anthropic from your computer.
 
 NO SERVERS
 No account. No cloud. No telemetry. Keys are encrypted on your device with AES-256-GCM, using a key derived from your password. Requests go straight from your wallet to the provider. To move keys to another device, export a password-protected .byoky file.
@@ -70,7 +70,7 @@ GROUPS AND CROSS-PROVIDER ROUTING
 Put apps in groups ("Work", "Personal") and pin each group to a key. Move an app to a group that uses another provider, and Byoky translates its requests and streaming responses on the fly. The app doesn't change a line.
 
 WORKS WITH YOUR TOOLS
-The open-source Byoky bridge lets command-line coding tools use your wallet through a localhost proxy. Your keys stay in the extension.
+The open-source Byoky bridge lets command-line coding tools use your wallet through a localhost proxy. API keys stay in the extension. A setup token is handed to the local bridge for each request, and the bridge makes that call from your computer.
 
 NO SERVERS
 No account. No cloud. No telemetry. Keys are encrypted on your device with AES-256-GCM, using a key derived from your password. Requests go straight from your wallet to the provider. To move keys to another device, export a password-protected .byoky file.
@@ -107,7 +107,7 @@ All sites: websites built with the Byoky SDK talk to the wallet through window m
 **Summary** (≤250 chars):
 
 ```
-Keep every AI API key in one encrypted wallet in your browser. Apps connect to it, you approve, and Byoky makes the calls. Your keys never leave the extension. No account, no cloud, open source.
+Keep every AI API key in one encrypted wallet in your browser. Apps connect to it, you approve, and Byoky makes the calls. Your keys never leave your device. No account, no cloud, open source.
 ```
 
 **Description:** the shared long description above.
