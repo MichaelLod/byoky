@@ -76,3 +76,25 @@ describe('wide side panel keeps one centered column (F126)', () => {
     expect(rule(css, '.fab-root')).toMatch(/right: max\(20px, calc\(\(100vw - var\(--column-max\)\) \/ 2 \+ 20px\)\);/);
   });
 });
+
+// F022: Firefox's sidebar opens 216px wide; body's min-width of 320px cut
+// off the nav, Lock, Remove and most of Approve. e2e/tests/narrow-sidebar
+// checks the layout in a browser; this keeps its CSS from slipping back.
+describe('narrow sidebar (F022)', () => {
+  const css = read('App.css');
+
+  it('lets the side panel be narrower than 320px', () => {
+    expect(rule(css, 'body')).toMatch(/min-width: 0;/);
+    // The toolbar popup keeps its fixed width.
+    expect(rule(css, 'html.popup body')).toMatch(/min-width: 360px/);
+  });
+
+  it('tightens the layout below 300px, after the rules it overrides', () => {
+    const at = css.indexOf('@media (max-width: 299px)');
+    expect(at).toBeGreaterThan(css.lastIndexOf('\n.approval-actions {'));
+    expect(at).toBeGreaterThan(css.lastIndexOf('\n.header {'));
+    const block = css.slice(at);
+    expect(block).toMatch(/\.approval-actions \{\s*grid-template-columns: minmax\(0, 1fr\);/);
+    expect(block).toMatch(/\.header \{\s*flex-wrap: wrap;/);
+  });
+});

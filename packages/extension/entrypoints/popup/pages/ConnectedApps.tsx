@@ -223,7 +223,7 @@ export function ConnectedApps() {
       <LimitsHoldNotice />
       <TrustResetNotice />
       {error && !formOpen && <FormError>{error}</FormError>}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+      <div className="page-title-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
         <h2 className="page-title" style={{ marginBottom: 0 }}>Connected Apps</h2>
         {sessions.length > 1 && (
           <button

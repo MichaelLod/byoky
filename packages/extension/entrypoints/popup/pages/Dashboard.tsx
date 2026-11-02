@@ -81,7 +81,7 @@ export function Dashboard() {
       <LimitsHoldNotice />
       <TrustResetNotice />
       <RetiredFeaturesNotice />
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+      <div className="page-title-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
         <h2 className="page-title" style={{ marginBottom: 0 }}>Credentials</h2>
         <button className="text-link bracket-link" onClick={() => lock()}>
           Lock

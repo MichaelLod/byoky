@@ -71,7 +71,8 @@ html {
 
 body {
   width: 100%;
-  min-width: 320px;
+  /* Firefox opens its sidebar 216px wide; see the narrow layout below. */
+  min-width: 0;
   max-width: var(--column-max);
   margin: 0 auto;
   min-height: 100vh;
@@ -747,6 +748,14 @@ html.popup .app {
 }
 
 /* ── Page titles ── */
+
+/* A page title with a link beside it ([ Lock ], [ Disconnect all ]): the
+   link drops below the title where both don't fit (a narrow sidebar). */
+.page-title-row {
+  flex-wrap: wrap;
+  column-gap: 12px;
+  row-gap: 4px;
+}
 
 .page-title {
   text-wrap: balance;
@@ -2316,5 +2325,96 @@ html.popup .app {
 
   .status-line::after {
     animation: none;
+  }
+}
+
+/* ── Narrow sidebar ──
+   Firefox's sidebar (sidepanel.html) opens 216px wide, the legacy sidebar's
+   18em, and the user may drag it narrower than 300px later. The column
+   tightens so every control stays on screen. Last in the file, so it
+   overrides the rules above. The toolbar popup keeps its 360px
+   (html.popup body) and the iPhone sheet its 320px. */
+@media (max-width: 299px) {
+  .header {
+    flex-wrap: wrap;
+    gap: 4px;
+    min-height: 0;
+    padding: 10px 8px 8px 12px;
+  }
+
+  .logo {
+    gap: 6px;
+    font-size: 14px;
+  }
+
+  .nav {
+    gap: 0;
+  }
+
+  .nav button {
+    width: 32px;
+    height: 32px;
+  }
+
+  .status-strip {
+    gap: 8px;
+    padding: 6px 8px 6px 12px;
+    font-size: 10px;
+    letter-spacing: 0.04em;
+  }
+
+  .status-strip-state {
+    min-width: 0;
+  }
+
+  .content {
+    padding: 12px 12px 16px;
+  }
+
+  .brand-mark svg {
+    max-width: 100%;
+    height: auto;
+  }
+
+  .lock-title {
+    font-size: 22px;
+  }
+
+  .approval-hero {
+    flex-wrap: wrap;
+  }
+
+  .approval-hero .page-title {
+    font-size: 19px;
+  }
+
+  .approval-actions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .card-header,
+  .card-actions,
+  .dialog-actions {
+    flex-wrap: wrap;
+  }
+
+  /* A key's name keeps a readable width; Rename and Remove go below it. */
+  .credential-card-heading {
+    flex-basis: 120px;
+  }
+
+  .connected-providers .badge {
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  /* A provider's limit goes below its name when both don't fit. */
+  .allowance-field-inline {
+    flex-wrap: wrap;
+  }
+
+  .allowance-field-inline input {
+    flex-basis: 100px;
   }
 }
