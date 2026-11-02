@@ -208,7 +208,8 @@ class WalletStore(context: Context) {
     suspend fun unlock(password: String): UnlockResult = withContext(Dispatchers.Default) { unlockBlocking(password) }
 
     /**
-     * Re-check the master password right before a sensitive action (export).
+     * Re-check the master password right before a sensitive action (export;
+     * a key's endpoint checks it itself, see [updateCredentialEndpoint]).
      * Shares the unlock brute-force counter and lockout, so an unlocked phone
      * can't be used to guess the password. PBKDF2 runs on Dispatchers.Default.
      */
@@ -393,14 +394,24 @@ class WalletStore(context: Context) {
 
     /**
      * Point a credential of a provider without a fixed host (Azure OpenAI,
-     * Ollama, LM Studio) at another server. The URL passes the same check as
-     * when the key was added, and the id stays, so group pins survive.
-     * Throws IllegalArgumentException for an unknown id or an unusable URL.
+     * Ollama, LM Studio) at another server. That decides where the key is
+     * sent, so it takes the master password again, like export: an unlocked
+     * phone alone must not be enough to send a key somewhere else. Wrong
+     * attempts count toward the unlock lockout. The URL passes the same check
+     * as when the key was added, and the id stays, so group pins survive.
+     * Throws IllegalArgumentException for an unknown id or an unusable URL,
+     * before the password is checked. PBKDF2 runs on Dispatchers.Default.
      */
-    fun updateCredentialEndpoint(credentialId: String, newBaseUrl: String) {
-        _credentials.update { withCredentialEndpoint(it, credentialId, newBaseUrl) }
-        saveCredentials()
-    }
+    suspend fun updateCredentialEndpoint(credentialId: String, newBaseUrl: String, password: String): UnlockResult =
+        withContext(Dispatchers.Default) {
+            withCredentialEndpoint(_credentials.value, credentialId, newBaseUrl)
+            val result = checkPassword(password)
+            if (result == UnlockResult.Success) {
+                _credentials.update { withCredentialEndpoint(it, credentialId, newBaseUrl) }
+                saveCredentials()
+            }
+            result
+        }
 
     fun decryptKey(credential: Credential): String {
         val password = masterPassword ?: throw IllegalStateException("Wallet locked")

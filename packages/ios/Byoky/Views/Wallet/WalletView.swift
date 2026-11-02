@@ -280,12 +280,16 @@ private extension View {
 
 /// Set the endpoint (Azure) or server URL (Ollama, LM Studio) of an existing
 /// credential. Validated with the same rules as import and Add Credential.
+/// It decides where the key is sent, so it takes the wallet password again,
+/// as export does.
 struct EndpointEditorView: View {
     @EnvironmentObject var wallet: WalletStore
     @Environment(\.dismiss) private var dismiss
     let credential: Credential
 
     @State private var endpoint = ""
+    @State private var masterPassword = ""
+    @State private var saving = false
     @State private var error: String?
 
     private var isAzure: Bool { credential.providerId == "azure_openai" }
@@ -318,6 +322,20 @@ struct EndpointEditorView: View {
                 }
                 .retroRow()
 
+                Section {
+                    SecureField("Wallet password", text: $masterPassword)
+                        .font(.mono(15))
+                        .textContentType(.password)
+                        .accessibilityIdentifier("endpointEditor.masterPassword")
+                } header: {
+                    ListHeader("Confirm it's you")
+                } footer: {
+                    ListFooter(isAzure
+                         ? "Changing the endpoint changes where this key is sent, so it takes the password you use to unlock Byoky."
+                         : "Changing the server URL changes where this key is sent, so it takes the password you use to unlock Byoky.")
+                }
+                .retroRow()
+
                 if let error {
                     Section {
                         Text(error).foregroundStyle(Theme.alarm)
@@ -330,21 +348,32 @@ struct EndpointEditorView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
+                        .disabled(saving)
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
-                        do {
-                            try wallet.updateCredentialEndpoint(id: credential.id, endpoint: endpoint)
-                            dismiss()
-                        } catch {
-                            self.error = error.localizedDescription
-                        }
-                    }
-                    .disabled(!isValid)
-                    .accessibilityIdentifier("endpointEditor.save")
+                    Button("Save") { save() }
+                        .disabled(!isValid || masterPassword.isEmpty || saving)
+                        .accessibilityIdentifier("endpointEditor.save")
                 }
             }
             .onAppear { endpoint = credential.baseUrl ?? "" }
+        }
+    }
+
+    private func save() {
+        saving = true
+        error = nil
+        Task {
+            defer { saving = false }
+            do {
+                try await wallet.updateCredentialEndpoint(id: credential.id, endpoint: endpoint, masterPassword: masterPassword)
+                dismiss()
+            } catch WalletError.wrongPassword {
+                masterPassword = ""
+                error = "Wrong wallet password"
+            } catch {
+                self.error = error.localizedDescription
+            }
         }
     }
 }

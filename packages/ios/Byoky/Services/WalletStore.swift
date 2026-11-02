@@ -335,19 +335,7 @@ final class WalletStore: ObservableObject {
         progress: @escaping @Sendable (Double) -> Void = { _ in }
     ) async throws -> String {
         guard masterKey != nil else { throw WalletError.locked }
-        if let endTime = currentLockout().lockedUntil, Date() < endTime {
-            lockoutEndTime = endTime
-            throw WalletError.lockedOut(max(1, Int(endTime.timeIntervalSinceNow)))
-        }
-        let storedHash = try keychain.loadString(key: passwordHashKey)
-        let verified = await Task.detached(priority: .userInitiated) {
-            CryptoService.shared.verifyPassword(masterPassword, hash: storedHash)
-        }.value
-        guard verified else {
-            handleFailedAttempt()
-            throw WalletError.wrongPassword
-        }
-        resetFailedAttempts()
+        try await confirmMasterPassword(masterPassword)
         guard masterKey != nil else { throw WalletError.locked }
 
         let entries = try credentials.map { credential in
@@ -500,6 +488,25 @@ final class WalletStore: ObservableObject {
     }
 
     // MARK: - Brute-Force Protection
+
+    /// Re-checks the master password right before a sensitive action (export,
+    /// changing where a key is sent). Wrong attempts count toward the same
+    /// lockout as unlocking; the PBKDF2 check runs off the main actor.
+    private func confirmMasterPassword(_ password: String) async throws {
+        if let endTime = currentLockout().lockedUntil, Date() < endTime {
+            lockoutEndTime = endTime
+            throw WalletError.lockedOut(max(1, Int(endTime.timeIntervalSinceNow)))
+        }
+        let storedHash = try keychain.loadString(key: passwordHashKey)
+        let verified = await Task.detached(priority: .userInitiated) {
+            CryptoService.shared.verifyPassword(password, hash: storedHash)
+        }.value
+        guard verified else {
+            handleFailedAttempt()
+            throw WalletError.wrongPassword
+        }
+        resetFailedAttempts()
+    }
 
     /// The stored lockout state, merged with the in-memory copy (whichever
     /// counts more wins, so neither a failed read nor a stale copy can lower
@@ -662,12 +669,19 @@ final class WalletStore: ObservableObject {
 
     /// Set the endpoint / server URL of an Azure, Ollama or LM Studio
     /// credential (e.g. an Azure key added before endpoints were required).
-    func updateCredentialEndpoint(id: String, endpoint: String) throws {
+    /// That decides where the key is sent, so it takes the master password
+    /// again, like export: an unlocked phone alone must not be enough to send
+    /// a key somewhere else. The endpoint is checked before the password, so
+    /// a typo costs no attempt.
+    func updateCredentialEndpoint(id: String, endpoint: String, masterPassword: String) async throws {
         guard let idx = credentials.firstIndex(where: { $0.id == id }) else { throw WalletError.credentialNotFound }
         guard let normalized = Provider.normalizedEndpoint(endpoint, for: credentials[idx].providerId) else {
             throw WalletError.invalidEndpoint
         }
-        credentials[idx].baseUrl = normalized
+        try await confirmMasterPassword(masterPassword)
+        // The wallet may have locked (or the key gone) during the check.
+        guard let current = credentials.firstIndex(where: { $0.id == id }) else { throw WalletError.credentialNotFound }
+        credentials[current].baseUrl = normalized
         try saveCredentials()
     }
 

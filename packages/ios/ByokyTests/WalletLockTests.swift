@@ -131,6 +131,74 @@ final class WalletLockTests: XCTestCase {
         XCTAssertTrue(wallet.credentials.isEmpty)
     }
 
+    // MARK: - Where a key is sent
+
+    /// An unlocked phone alone can't repoint an Azure key at another host:
+    /// changing the endpoint takes the wallet password.
+    @MainActor
+    func testChangingAnEndpointTakesTheWalletPassword() async throws {
+        let wallet = try freshWallet()
+        try wallet.addCredential(providerId: "azure_openai", label: "Azure", apiKey: "azure-endpoint-test",
+                                 baseUrl: "https://contoso.openai.azure.com")
+        let id = try XCTUnwrap(wallet.credentials.first?.id)
+
+        do {
+            try await wallet.updateCredentialEndpoint(id: id, endpoint: "https://attacker.example", masterPassword: "not the password")
+            XCTFail("a wrong password changed where the key is sent")
+        } catch WalletError.wrongPassword {}
+        XCTAssertEqual(wallet.credentials.first?.baseUrl, "https://contoso.openai.azure.com")
+
+        try await wallet.updateCredentialEndpoint(id: id, endpoint: "https://fabrikam.openai.azure.com/", masterPassword: password)
+        XCTAssertEqual(wallet.credentials.first?.baseUrl, "https://fabrikam.openai.azure.com")
+    }
+
+    /// Giving a key without an endpoint its first one sends it there just as
+    /// much as changing one, so it takes the password too.
+    @MainActor
+    func testAddingAMissingEndpointTakesTheWalletPassword() async throws {
+        let wallet = try freshWallet()
+        try wallet.addCredential(providerId: "azure_openai", label: "Azure", apiKey: "azure-endpoint-test")
+        let id = try XCTUnwrap(wallet.credentials.first?.id)
+        XCTAssertNil(wallet.credentials.first?.baseUrl)
+
+        do {
+            try await wallet.updateCredentialEndpoint(id: id, endpoint: "https://attacker.example", masterPassword: "")
+            XCTFail("no password set an endpoint")
+        } catch WalletError.wrongPassword {}
+        XCTAssertNil(wallet.credentials.first?.baseUrl)
+
+        try await wallet.updateCredentialEndpoint(id: id, endpoint: "contoso.openai.azure.com", masterPassword: password)
+        XCTAssertEqual(wallet.credentials.first?.baseUrl, "https://contoso.openai.azure.com")
+    }
+
+    /// Guesses there count toward the unlock lockout; an unusable address is
+    /// refused before the password is tried and costs no attempt.
+    @MainActor
+    func testEndpointPasswordGuessesCountTowardTheLockout() async throws {
+        let wallet = try freshWallet()
+        try wallet.addCredential(providerId: "azure_openai", label: "Azure", apiKey: "azure-endpoint-test",
+                                 baseUrl: "https://contoso.openai.azure.com")
+        let id = try XCTUnwrap(wallet.credentials.first?.id)
+
+        do {
+            try await wallet.updateCredentialEndpoint(id: id, endpoint: "http://attacker.example", masterPassword: "guess")
+            XCTFail("an http endpoint was accepted")
+        } catch WalletError.invalidEndpoint {}
+
+        for attempt in 1...5 {
+            do {
+                try await wallet.updateCredentialEndpoint(id: id, endpoint: "https://attacker.example", masterPassword: "guess \(attempt)")
+                XCTFail("guess \(attempt) was accepted")
+            } catch WalletError.wrongPassword {}
+        }
+        XCTAssertNotNil(wallet.lockoutEndTime, "five guesses lock out, the first one didn't count")
+        do {
+            try await wallet.updateCredentialEndpoint(id: id, endpoint: "https://fabrikam.openai.azure.com", masterPassword: password)
+            XCTFail("the lockout let the right password through")
+        } catch WalletError.lockedOut {}
+        XCTAssertEqual(wallet.credentials.first?.baseUrl, "https://contoso.openai.azure.com")
+    }
+
     // MARK: - Auto-lock
 
     /// Left alone in the foreground, the wallet locks when the timeout runs out.

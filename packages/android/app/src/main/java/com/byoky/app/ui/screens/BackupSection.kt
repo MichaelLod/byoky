@@ -222,8 +222,9 @@ private fun importSummaryText(summary: WalletBackup.ImportSummary): String {
     return lines.joinToString("\n")
 }
 
+/** A password field with a show/hide toggle, for the wallet's re-auth dialogs. */
 @Composable
-private fun PasswordField(
+internal fun PasswordField(
     value: String,
     onValueChange: (String) -> Unit,
     label: String,
