@@ -273,8 +273,6 @@ export const MODELS: ModelEntry[] = [
       ...FRONTIER,
       // Command A does not accept image inputs at the chat API surface.
       vision: false,
-      // No structured output constraint equivalent to OpenAI json_schema.
-      structuredOutput: false,
     },
   },
 ];

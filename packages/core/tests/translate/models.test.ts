@@ -199,6 +199,13 @@ describe('capabilityGaps', () => {
     expect(capabilityGaps(used, getModel('command-a-03-2025')!)).toEqual(['vision']);
   });
 
+  it('does not flag structured outputs for any registry model: every family takes a JSON schema', () => {
+    // Claude output_config.format, Gemini responseJsonSchema, OpenAI json_schema,
+    // Cohere json_object + json_schema (command-a-03-2025 live 2026-11-02: 200).
+    const used: CapabilitySet = { tools: false, vision: false, structuredOutput: true, reasoning: false };
+    for (const model of MODELS) expect(capabilityGaps(used, model), model.id).toEqual([]);
+  });
+
   it('does not flag capabilities the app never used', () => {
     expect(capabilityGaps(EMPTY_CAPABILITY_SET, textOnly)).toEqual([]);
   });
