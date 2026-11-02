@@ -55,17 +55,15 @@ export function VersionStatus() {
                 </span>
               )}
             </span>
-            {p.platform === 'Chrome' && (
+            {p.platform === 'Chrome' && p.pending && (
               <a
                 href="https://github.com/MichaelLod/byoky/blob/main/INSTALL.md#chrome-install-from-source"
                 className="version-status-source"
                 target="_blank"
                 rel="noopener noreferrer"
-                title="Chrome Web Store reviews often lag behind the current release — building from source keeps you on the latest code."
+                title="A source install is a separate wallet without auto-updates. Read the notes before you switch."
               >
-                {p.pending
-                  ? `v${p.pending} pending review — install from source for the latest`
-                  : 'Chrome review can lag — install from source for the latest'}
+                {`v${p.pending} pending review — install from source for the latest`}
               </a>
             )}
             {p.platform === 'iOS' && p.pending && (
