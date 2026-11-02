@@ -10,7 +10,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, copyFileSync, chmo
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { SCRIPTS, FAKE_ASC_ENV } from './helpers.mjs'
+import { SCRIPTS, FAKE_ASC_ENV, writePlayServiceAccount, playRoutes, onTrack, PLAY_VERSION_CODE_USED, editDeleted } from './helpers.mjs'
 
 // A whole run bumps with BSD sed and PlistBuddy, like release.sh on a Mac.
 const MAC_ONLY = { skip: process.platform !== 'darwin' && 'release.sh past the bump needs macOS (BSD sed, PlistBuddy)' }
@@ -178,8 +178,8 @@ echo "npm $*" >> "$CALLS"
 
 // --- retry ---
 
-function released(t) {
-  const s = sandbox({ version: '1.1.2', versionCode: 31 })
+function released(t, opts = {}) {
+  const s = sandbox({ version: '1.1.2', versionCode: 31, ...opts })
   t.after(s.cleanup)
   write(join(s.work, 'dist/byoky-chrome-v1.1.2.zip'), 'keyed')
   write(join(s.work, 'dist/byoky-chrome-v1.1.2-store.zip'), 'store')
@@ -686,4 +686,58 @@ test('retry: a macOS version in review blocks the Mac upload, and --hold-macos l
   assert.doesNotMatch(held.calls, /MAC_OS|byoky-macos/)
   assert.match(held.out, /App Store \(macOS\): held \(--hold-macos\)/)
   assert.match(held.calls, /submit-appstore\.mjs 1\.1\.2 IOS wait=0\n/)
+})
+
+// --- retry and Google Play ---
+
+// v1.1.2 (versionCode 31) released; Chrome has it, Google Play's store page
+// still shows 1.1.1. play(args, { track, bundles }) runs retry with the real
+// upload-google-play.mjs against the Android Publisher API (playRoutes).
+function playReleased(t) {
+  const s = released(t, { real: ['upload-google-play.mjs'] })
+  write(join(s.work, 'dist/byoky-android-v1.1.2.aab'), 'aab')
+  const env = {
+    GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: writePlayServiceAccount(join(s.base, 'play.json')),
+    STUB_STATUS_JSON: JSON.stringify({ results: [{ id: 'chrome', version: '1.1.2', pending: false }] }),
+  }
+  const page = { url: 'play\\.google\\.com/store/apps', body: '<html>[[["1.1.1"]]</html>' }
+  s.play = (args, opts) => s.run(args, env, [page, ...playRoutes(opts)])
+  return s
+}
+const bundleUploads = (r) => r.fetches.filter((c) => c.url.includes('/bundles'))
+
+test('retry leaves a Play update on the production track alone while Google reviews it', (t) => {
+  const s = playReleased(t)
+  // The release uploaded versionCode 31; Play would refuse it again.
+  const r = s.play(['retry'], { track: onTrack('31'), bundles: PLAY_VERSION_CODE_USED })
+  assert.equal(r.code, 0, r.out)
+  assert.deepEqual(bundleUploads(r), [])
+  assert.ok(editDeleted(r.fetches))
+  assert.match(r.out, /Google Play: v1\.1\.2 \(versionCode 31\) is on the production track already, in review or live; nothing to upload/)
+  assert.match(r.out, /Nothing retried/)
+})
+
+test('retry uploads to Google Play when the production track lacks the version code', (t) => {
+  const s = playReleased(t)
+  const r = s.play(['retry'], { track: onTrack('30') })
+  assert.equal(r.code, 0, r.out)
+  assert.equal(bundleUploads(r).length, 1)
+  assert.match(r.out, /Google Play: uploaded to the production track/)
+  assert.match(r.out, /Retried 1 store/)
+})
+
+test("retry leaves Google Play alone when the production track can't be read, unless --allow-pending", (t) => {
+  const s = playReleased(t)
+  const unreadable = { track: { status: 500, body: { error: { message: 'backend error' } } }, bundles: PLAY_VERSION_CODE_USED }
+  const r = s.play(['retry'], unreadable)
+  assert.equal(r.code, 1, r.out)
+  assert.deepEqual(bundleUploads(r), [])
+  assert.match(r.out, /Google Play: NOT UPLOADED: its review state is unknown \(the production track couldn't be read\)/)
+
+  // Forced, the upload finds the version code taken: it went up before.
+  const forced = s.play(['retry', '--allow-pending'], unreadable)
+  assert.equal(forced.code, 0, forced.out)
+  assert.equal(bundleUploads(forced).length, 1)
+  assert.match(forced.out, /Google Play: versionCode 31 went up before \(Google Play refuses it again\); nothing uploaded/)
+  assert.doesNotMatch(forced.out, /FAILED/)
 })

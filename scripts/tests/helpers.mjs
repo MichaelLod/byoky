@@ -56,3 +56,39 @@ export function runWithFetchStub(script, args, { routes, env = {}, setup, inspec
 }
 
 export const writes = (calls) => calls.filter((c) => c.method !== 'GET')
+
+// A throwaway Google Play service account for upload-google-play.mjs, which
+// signs its JWT with the key and asks token_uri for a token.
+let playKey
+export function writePlayServiceAccount(path) {
+  playKey ??= generateKeyPairSync('rsa', { modulusLength: 2048 }).privateKey.export({ type: 'pkcs8', format: 'pem' })
+  writeFileSync(path, JSON.stringify({
+    client_email: 'release@example.iam.gserviceaccount.com',
+    private_key: playKey,
+    token_uri: 'https://oauth2.googleapis.com/token',
+  }))
+  return path
+}
+
+// The Android Publisher API as upload-google-play.mjs uses it, with edit E1.
+// `track` is the reply to reading the production track, `bundles` the reply
+// to the bundle upload.
+const PLAY_API = 'androidpublisher/v3/applications/com\\.byoky\\.app'
+export function playRoutes({ track = { body: { track: 'production', releases: [] } }, bundles = { body: { versionCode: 31 } } } = {}) {
+  return [
+    { method: 'POST', url: '^https://oauth2\\.googleapis\\.com/token$', body: { access_token: 'play-token' } },
+    { method: 'POST', url: `${PLAY_API}/edits$`, body: { id: 'E1' } },
+    { url: `${PLAY_API}/edits/E1/tracks/production$`, ...track },
+    { method: 'DELETE', url: `${PLAY_API}/edits/E1$`, status: 204 },
+    { method: 'POST', url: `upload/${PLAY_API}/edits/E1/bundles`, ...bundles },
+    { method: 'PUT', url: `${PLAY_API}/edits/E1/tracks/production$`, body: {} },
+    { method: 'POST', url: `${PLAY_API}/edits/E1:commit$`, body: { id: 'E1' } },
+  ]
+}
+export const onTrack = (...versionCodes) => ({ body: { track: 'production', releases: [{ name: 'r', status: 'completed', versionCodes }] } })
+// What Play answers a bundle whose version code it has seen.
+export const PLAY_VERSION_CODE_USED = {
+  status: 403,
+  body: { error: { code: 403, message: 'APK specifies a version code that has already been used.', status: 'PERMISSION_DENIED' } },
+}
+export const editDeleted = (calls) => calls.some((c) => c.method === 'DELETE' && c.url.endsWith('/edits/E1'))

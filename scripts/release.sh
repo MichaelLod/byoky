@@ -419,23 +419,44 @@ if [ "${1:-}" = "retry" ]; then
     done
   fi
 
-  # Google Play
+  # Google Play: the store page shows a version only once Google's review is
+  # through, so whether this build went up is read from the production track,
+  # where a release sits while it's reviewed. Play refuses a second upload of
+  # the same version code.
   if [ -n "${GOOGLE_PLAY_SERVICE_ACCOUNT_JSON:-}" ] && [ -f "dist/byoky-android-v${CURRENT}.aab" ]; then
     GP_LIVE=$(node -e "
       fetch('https://play.google.com/store/apps/details?id=com.byoky.app&hl=en',{headers:{'User-Agent':'Mozilla/5.0'}})
         .then(r=>r.text()).then(h=>{const m=h.match(/\[\[\[\"(\d+\.\d+\.\d+)\"\]\]/)||h.match(/Current Version.*?>([\d.]+)</);console.log(m?.[1]||'unknown')})
-    " 2>/dev/null)
-    if [ "$GP_LIVE" != "$NATIVE_VERSION" ]; then
-      echo "Google Play: v${GP_LIVE} → v${NATIVE_VERSION}"
-      if node scripts/upload-google-play.mjs "dist/byoky-android-v${CURRENT}.aab" production "$STORE_NOTES_FILE" 2>&1; then
-        RETRIED=$((RETRIED + 1))
-        store_result "Google Play" "uploaded to the production track"
-      else
-        echo "  WARN: Google Play upload failed"
-        store_result "Google Play" "FAILED (see the log above)"
-      fi
-    else
+    " 2>/dev/null || true)
+    GP_LIVE="${GP_LIVE:-unknown}"
+    if [ "$GP_LIVE" = "$NATIVE_VERSION" ]; then
       echo "Google Play: v${GP_LIVE} — up to date"
+    else
+      echo "Google Play: the store page shows v${GP_LIVE}; looking for versionCode ${VERSION_CODE} on the production track..."
+      GP_TRACK=0
+      node scripts/upload-google-play.mjs --track-has "$VERSION_CODE" production 2>&1 || GP_TRACK=$?
+      if [ "$GP_TRACK" -eq 0 ]; then
+        echo "Google Play: v${NATIVE_VERSION} is on the production track already (in review or live)"
+        store_result "Google Play" "v${NATIVE_VERSION} (versionCode ${VERSION_CODE}) is on the production track already, in review or live; nothing to upload"
+      elif [ "$GP_TRACK" -ne 5 ] && [ "$ALLOW_PENDING" = false ]; then
+        echo "Google Play: the production track couldn't be read"
+        store_result "Google Play" "NOT UPLOADED: its review state is unknown (the production track couldn't be read), and v${NATIVE_VERSION} may be in review already; run retry again, or pass --allow-pending"
+      else
+        echo "Google Play: v${GP_LIVE} → v${NATIVE_VERSION}"
+        GP_CODE=0
+        node scripts/upload-google-play.mjs "dist/byoky-android-v${CURRENT}.aab" production "$STORE_NOTES_FILE" 2>&1 || GP_CODE=$?
+        if [ "$GP_CODE" -eq 0 ]; then
+          RETRIED=$((RETRIED + 1))
+          store_result "Google Play" "uploaded to the production track"
+        elif [ "$GP_CODE" -eq 4 ] && [ "$GP_TRACK" -eq 5 ]; then
+          store_result "Google Play" "NOT UPLOADED: Google Play has versionCode ${VERSION_CODE} from an earlier upload, but not on the production track; see the Play Console"
+        elif [ "$GP_CODE" -eq 4 ]; then
+          store_result "Google Play" "versionCode ${VERSION_CODE} went up before (Google Play refuses it again); nothing uploaded"
+        else
+          echo "  WARN: Google Play upload failed"
+          store_result "Google Play" "FAILED (see the log above)"
+        fi
+      fi
     fi
   fi
 
