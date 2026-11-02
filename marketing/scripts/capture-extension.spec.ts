@@ -155,7 +155,6 @@ async function launchPopup(): Promise<{ ctx: BrowserContext; popup: Page; extId:
 async function openAddCredential(popup: Page) {
   await popup.click('button[title="Wallet"]').catch(() => {});
   await popup.click('.fab-button');
-  await popup.click('.fab-menu-item:has-text("Add credential")');
   await popup.waitForSelector('#provider', { timeout: 8000 });
 }
 
@@ -318,7 +317,7 @@ test('capture extension popup screens for marketing', async () => {
     await snap(popup, '11-connected-apps');
 
     await popup.locator('.allowance-edit-btn').first().click();
-    await popup.locator('.allowance-form input[type="number"]').first().fill('50000');
+    await popup.locator('.allowance-form').getByLabel('Total token limit').fill('50000');
     await popup.locator('.allowance-form button:has-text("Save")').click();
     await expect(popup.locator('.allowance-bar').first()).toBeVisible({ timeout: 5_000 });
     await snap(popup, '12-token-cap');
