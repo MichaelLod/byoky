@@ -41,13 +41,15 @@ final class BridgeSecurityTests: XCTestCase {
         _ string: String,
         main: Bool = true,
         targetFrame: Bool = true,
-        type: WKNavigationType = .other
+        type: WKNavigationType = .other,
+        isRedirect: Bool = false
     ) -> AppNavigationDecision {
         AppWebView.navigationDecision(
             for: URL(string: string)!,
             isMainFrame: main,
             hasTargetFrame: targetFrame,
             navigationType: type,
+            isRedirect: isRedirect,
             allowedOrigin: "https://chat.example.com"
         )
     }
@@ -81,10 +83,16 @@ final class BridgeSecurityTests: XCTestCase {
         let docs = URL(string: "https://docs.example.org/keys")!
         XCTAssertEqual(decision(docs.absoluteString, type: .linkActivated), .openExternally(docs))
         XCTAssertEqual(decision("http://example.org/", type: .linkActivated), .openExternally(URL(string: "http://example.org/")!))
-        // example.com → www.example.com, an OAuth hop, location.href = ...
+        // example.com → www.example.com, location.href = ..., a form post.
         let www = URL(string: "https://www.chat.example.com/")!
         XCTAssertEqual(decision(www.absoluteString, type: .other), .blockedRedirect(www))
         XCTAssertEqual(decision(www.absoluteString, type: .formSubmitted), .blockedRedirect(www))
+        // A tapped same-origin link (/login) the server redirects to another
+        // site (an OAuth hop): WebKit still reports .linkActivated (F050).
+        let auth = URL(string: "https://accounts.example.org/o/oauth2/auth")!
+        XCTAssertEqual(decision(auth.absoluteString, type: .linkActivated, isRedirect: true), .blockedRedirect(auth))
+        XCTAssertEqual(decision(auth.absoluteString, type: .linkActivated, isRedirect: false), .openExternally(auth))
+        XCTAssertEqual(decision("https://chat.example.com/home", type: .linkActivated, isRedirect: true), .allow)
         // Only http(s) leaves the app; every other scheme is dropped.
         XCTAssertEqual(decision("javascript:alert(1)", type: .linkActivated), .cancel)
         XCTAssertEqual(decision("file:///etc/passwd", type: .linkActivated), .cancel)
@@ -101,6 +109,46 @@ final class BridgeSecurityTests: XCTestCase {
         XCTAssertEqual(decision(other.absoluteString, targetFrame: false, type: .other), .openExternally(other))
         XCTAssertEqual(decision("about:blank", targetFrame: false), .cancel)
         XCTAssertEqual(decision("javascript:void(0)", targetFrame: false, type: .linkActivated), .cancel)
+    }
+
+    /// The coordinator reports a server redirect of the main frame's load
+    /// as one, also when the load began with a tap (F050): WebKit keeps
+    /// `.linkActivated` on the redirect, which alone would open Safari.
+    func testATappedLinkRedirectedOffOriginIsABlockedRedirect() {
+        let coordinator = AppWebView.Coordinator(allowedOrigin: "https://chat.example.com", browser: AppBrowserState())
+        let webView = WKWebView(frame: .zero)
+        let login = URL(string: "https://chat.example.com/login")!
+        let auth = URL(string: "https://accounts.example.org/o/oauth2/auth")!
+
+        // The tap on /login is allowed and its load starts; the server's 302
+        // to the identity provider is stopped with the notice.
+        XCTAssertEqual(coordinator.navigationDecision(for: login, targetFrame: true, navigationType: .linkActivated), .allow)
+        coordinator.webView(webView, didStartProvisionalNavigation: nil)
+        XCTAssertEqual(coordinator.navigationDecision(for: auth, targetFrame: true, navigationType: .linkActivated), .blockedRedirect(auth))
+        XCTAssertFalse(coordinator.mainFrameLoadInFlight)
+
+        // A #fragment link is allowed but starts no load: a tap after it on
+        // a link to another site still opens the browser.
+        XCTAssertEqual(coordinator.navigationDecision(for: URL(string: "https://chat.example.com/#faq")!, targetFrame: true, navigationType: .linkActivated), .allow)
+        XCTAssertEqual(coordinator.navigationDecision(for: auth, targetFrame: true, navigationType: .linkActivated), .openExternally(auth))
+        // Subframes and new windows aren't the main frame's load.
+        coordinator.webView(webView, didStartProvisionalNavigation: nil)
+        XCTAssertEqual(coordinator.navigationDecision(for: auth, targetFrame: false, navigationType: .linkActivated), .allow)
+        XCTAssertEqual(coordinator.navigationDecision(for: auth, targetFrame: nil, navigationType: .linkActivated), .openExternally(auth))
+        XCTAssertTrue(coordinator.mainFrameLoadInFlight)
+    }
+
+    /// Only a load that started counts: once it committed or failed, the
+    /// next main-frame request is a new navigation again.
+    func testTheMainFrameLoadEndsOnCommitOrFailure() {
+        let coordinator = AppWebView.Coordinator(allowedOrigin: "https://chat.example.com", browser: AppBrowserState())
+        let webView = WKWebView(frame: .zero)
+        coordinator.webView(webView, didStartProvisionalNavigation: nil)
+        coordinator.webView(webView, didCommit: nil)
+        XCTAssertFalse(coordinator.mainFrameLoadInFlight)
+        coordinator.webView(webView, didStartProvisionalNavigation: nil)
+        coordinator.webView(webView, didFailProvisionalNavigation: nil, withError: URLError(.cancelled))
+        XCTAssertFalse(coordinator.mainFrameLoadInFlight)
     }
 
     func testTheSameExternalLinkOpensOnceWithinTwoSeconds() {
@@ -380,3 +428,4 @@ final class BridgeSecurityTests: XCTestCase {
         XCTAssertEqual(try keychain.loadString(key: key), "second")
     }
 }
+

@@ -517,7 +517,10 @@ struct AppWebView: UIViewRepresentable {
     /// Navigation policy. The app's main frame may only show its own https
     /// origin (scheme, host and port): a link the user taps to another site
     /// opens in the system browser, and a page that sends itself elsewhere
-    /// (a server redirect, a script) is stopped with a notice. A new window
+    /// (a server redirect, a script) is stopped with a notice. `isRedirect`:
+    /// the main frame's load is already under way, so this request is its
+    /// server redirect, also when it started with a tap (WebKit keeps
+    /// `.linkActivated` on the redirect of a tapped link). A new window
     /// (target=_blank, window.open) for the app's own origin loads in place.
     /// Subframes may load any https site and `about:` / `blob:` documents
     /// (srcdoc and generated content); they get no bridge: the script is
@@ -528,6 +531,7 @@ struct AppWebView: UIViewRepresentable {
         isMainFrame: Bool,
         hasTargetFrame: Bool,
         navigationType: WKNavigationType,
+        isRedirect: Bool,
         allowedOrigin: String
     ) -> AppNavigationDecision {
         let scheme = url.scheme?.lowercased() ?? ""
@@ -541,7 +545,7 @@ struct AppWebView: UIViewRepresentable {
         if isMainFrame {
             if isAppOrigin { return .allow }
             guard isWeb else { return .cancel }
-            return navigationType == .linkActivated ? .openExternally(url) : .blockedRedirect(url)
+            return navigationType == .linkActivated && !isRedirect ? .openExternally(url) : .blockedRedirect(url)
         }
         if scheme == "https" && url.host != nil { return .allow }
         if scheme == "about" || scheme == "blob" { return .allow }
@@ -555,6 +559,11 @@ struct AppWebView: UIViewRepresentable {
         /// Shows a JavaScript dialog and calls back once with the answer
         /// (OK or Cancel, and the text for a prompt). Tests replace it.
         var presentDialog: (JSDialog, WKWebView, @escaping (_ ok: Bool, _ text: String?) -> Void) -> Void = Coordinator.presentAlert
+        /// A main-frame load started and hasn't committed or failed yet, so
+        /// a main-frame request now is its server redirect. Set when the load
+        /// starts (not when the policy allows it: a #fragment link is allowed
+        /// too and never commits).
+        private(set) var mainFrameLoadInFlight = false
         private var externalLinks = ExternalLinkThrottle()
         private var observations: [NSKeyValueObservation] = []
 
@@ -611,15 +620,33 @@ struct AppWebView: UIViewRepresentable {
                 decisionHandler(.cancel)
                 return
             }
-            let decision = AppWebView.navigationDecision(
+            let decision = navigationDecision(
                 for: url,
-                isMainFrame: navigationAction.targetFrame?.isMainFrame ?? true,
-                hasTargetFrame: navigationAction.targetFrame != nil,
-                navigationType: navigationAction.navigationType,
-                allowedOrigin: allowedOrigin
+                targetFrame: navigationAction.targetFrame?.isMainFrame,
+                navigationType: navigationAction.navigationType
             )
             decisionHandler(decision == .allow ? .allow : .cancel)
             perform(decision, request: navigationAction.request, in: webView)
+        }
+
+        /// The policy's decision for a navigation the page asked for, with a
+        /// main-frame load already under way taken as its redirect.
+        /// `targetFrame`: whether the target is the main frame, nil for a new
+        /// window.
+        func navigationDecision(for url: URL, targetFrame isMainFrame: Bool?, navigationType: WKNavigationType) -> AppNavigationDecision {
+            let decision = AppWebView.navigationDecision(
+                for: url,
+                isMainFrame: isMainFrame ?? true,
+                hasTargetFrame: isMainFrame != nil,
+                navigationType: navigationType,
+                isRedirect: mainFrameLoadInFlight,
+                allowedOrigin: allowedOrigin
+            )
+            // A main-frame load stopped here goes no further.
+            if isMainFrame == true && decision != .allow {
+                mainFrameLoadInFlight = false
+            }
+            return decision
         }
 
         /// window.open() from a tap. No second web view: the request goes
@@ -636,6 +663,7 @@ struct AppWebView: UIViewRepresentable {
                     isMainFrame: true,
                     hasTargetFrame: false,
                     navigationType: navigationAction.navigationType,
+                    isRedirect: false,
                     allowedOrigin: allowedOrigin
                 )
                 perform(decision, request: navigationAction.request, in: webView)
@@ -661,6 +689,7 @@ struct AppWebView: UIViewRepresentable {
         // MARK: Loading
 
         func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+            mainFrameLoadInFlight = true
             switch browser.notice {
             case .loadFailed, .stopped: browser.notice = nil
             default: break
@@ -668,6 +697,7 @@ struct AppWebView: UIViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+            mainFrameLoadInFlight = false
             // A new document replaced the app's page (Reload, a navigation,
             // a new window loaded in place): the old page's requests stop.
             // didCommit is for main-frame documents only, not pushState or
@@ -682,10 +712,12 @@ struct AppWebView: UIViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+            mainFrameLoadInFlight = false
             showLoadError(error)
         }
 
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+            mainFrameLoadInFlight = false
             showLoadError(error)
         }
 
@@ -698,6 +730,7 @@ struct AppWebView: UIViewRepresentable {
 
         func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
             // The page is gone with its process; so are its requests.
+            mainFrameLoadInFlight = false
             bridgeHandler?.pageDidChange()
             browser.notice = .stopped
         }
