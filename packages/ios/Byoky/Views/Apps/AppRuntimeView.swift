@@ -323,68 +323,89 @@ private struct InstalledAppLauncher: ViewModifier {
 
 /// "Reconnect?" for an app the user disconnected in Connected Apps — the
 /// one connection request on iPhone. Muninn is on alert until you decide.
+/// The text scrolls and Cancel / Reconnect stay pinned below it, so both
+/// remain on screen at every text size; at accessibility sizes the sheet
+/// opens full height, Muninn sits above the title and the buttons stack.
 private struct ReconnectRequestView: View {
     let app: InstalledApp
     let host: String
     let onCancel: () -> Void
     let onReconnect: () -> Void
 
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var nods = 0
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 12) {
-                Muninn(mood: .alert, size: 100, compact: true, nod: nods)
-                VStack(alignment: .leading, spacing: 6) {
-                    PromptLine("Connection request", size: 11)
-                    Text("Reconnect \(app.name)?")
-                        .uppercaseDisplay()
-                        .font(.display(22, relativeTo: .title2))
-                        .tracking(0.7)
+        let large = dynamicTypeSize.isAccessibilitySize
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                let header = large
+                    ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+                    : AnyLayout(HStackLayout(spacing: 12))
+                header {
+                    Muninn(mood: .alert, size: large ? 56 : 100, compact: true, nod: nods)
+                    VStack(alignment: .leading, spacing: 6) {
+                        PromptLine("Connection request", size: 11)
+                        Text("Reconnect \(app.name)?")
+                            .uppercaseDisplay()
+                            .font(.display(22, relativeTo: .title2))
+                            .tracking(0.7)
+                            .foregroundStyle(Theme.bone)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityAddTraits(.isHeader)
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(host)
+                        .font(.mono(15, relativeTo: .body))
                         .foregroundStyle(Theme.bone)
                         .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityAddTraits(.isHeader)
+                    Text("Disconnected in Connected Apps")
+                        .font(.footnote)
+                        .foregroundStyle(Theme.fog)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-            }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Theme.void)
+                .overlay(Rectangle().strokeBorder(Theme.seamStrong, lineWidth: 1))
+                .padding(.top, 16)
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text(host)
-                    .font(.mono(15, relativeTo: .body))
-                    .foregroundStyle(Theme.bone)
-                Text("Disconnected in Connected Apps")
-                    .font(.footnote)
+                Text("You disconnected \(host). Reconnecting lets it send AI requests through your keys again. It never sees the keys.")
+                    .font(.callout)
                     .foregroundStyle(Theme.fog)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 14)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.void)
-            .overlay(Rectangle().strokeBorder(Theme.seamStrong, lineWidth: 1))
-            .padding(.top, 16)
-
-            Text("You disconnected \(host). Reconnecting lets it send AI requests through your keys again. It never sees the keys.")
-                .font(.callout)
-                .foregroundStyle(Theme.fog)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.top, 14)
-
-            Spacer(minLength: 20)
-
-            HStack(spacing: 10) {
+            .padding(.horizontal, 20)
+            .padding(.top, 24)
+            .padding(.bottom, 20)
+        }
+        .scrollBounceBehavior(.basedOnSize)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            let buttons = large
+                ? AnyLayout(VStackLayout(spacing: 10))
+                : AnyLayout(HStackLayout(spacing: 10))
+            buttons {
                 Button("Cancel", action: onCancel)
                     .buttonStyle(RetroButtonStyle(kind: .ghost, height: 48))
+                    .accessibilityIdentifier("reconnect.cancel")
                 Button("Reconnect") {
                     nods += 1
                     onReconnect()
                 }
                 .buttonStyle(RetroButtonStyle(kind: .primary, height: 48))
+                .accessibilityIdentifier("reconnect.confirm")
             }
+            .padding(.horizontal, 20)
+            .padding(.top, 12)
+            .padding(.bottom, 12)
+            .background(Theme.crypt)
         }
-        .padding(.horizontal, 20)
-        .padding(.top, 24)
-        .padding(.bottom, 12)
         .overlay(Scanlines().ignoresSafeArea())
-        .presentationDetents([.medium])
+        .presentationDetents(large ? [.large] : [.medium, .large])
         .presentationDragIndicator(.visible)
         .presentationBackground(Theme.crypt)
     }
