@@ -1,6 +1,6 @@
 import type { ModelShapingContext, TranslationContext } from '../types.js';
 import { TranslationError } from '../types.js';
-import { getModel } from '../../models.js';
+import { capMaxTokens, getModel } from '../../models.js';
 import type { FamilyAdapter, IRStreamParser, IRStreamSerializer } from '../adapter.js';
 import type {
   IRRequest,
@@ -410,9 +410,11 @@ function serializeRequest(ctx: TranslationContext, ir: IRRequest): string {
   const requestedBudget = ir.thinking?.budgetTokens;
 
   // Anthropic requires max_tokens. Default to the destination model's max
-  // output, capped at 4096 (plus room for thinking), if the source omitted it.
+  // output, capped at 4096 (plus room for thinking), if the source omitted
+  // it; an app's own limit is capped at the destination's max output (before
+  // the thinking budget is fitted under it).
   const dst = getModel(ctx.dstModel);
-  let maxTokens = ir.maxTokens;
+  let maxTokens = typeof ir.maxTokens === 'number' ? capMaxTokens(ir.maxTokens, ctx.dstModel, ctx.dstProviderId) : undefined;
   if (typeof maxTokens !== 'number') {
     maxTokens = wantsThinking
       ? Math.min(
@@ -788,6 +790,19 @@ function claudeSampling(rules: ClaudeRequestRules, thinking: boolean, requested:
  */
 function shapeRequestForModel(body: Record<string, unknown>, ctx: ModelShapingContext): void {
   const rules = claudeRequestRules(ctx.dstModel);
+
+  if (typeof body.max_tokens === 'number') {
+    const capped = capMaxTokens(body.max_tokens, ctx.dstModel, ctx.dstProviderId);
+    if (capped !== body.max_tokens) {
+      body.max_tokens = capped;
+      // A thinking budget stays below max_tokens, as anthropicThinking keeps it.
+      const thinking = body.thinking;
+      if (isRecord(thinking) && typeof thinking.budget_tokens === 'number' && thinking.budget_tokens >= capped) {
+        if (capped - 1 >= MIN_THINKING_BUDGET) body.thinking = { ...thinking, budget_tokens: capped - 1 };
+        else delete body.thinking;
+      }
+    }
+  }
   const isForced = (choice: unknown): choice is Record<string, unknown> =>
     isRecord(choice) && (choice.type === 'any' || choice.type === 'tool');
 

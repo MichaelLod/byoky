@@ -305,6 +305,31 @@ export function getModel(id: string): ModelEntry | undefined {
 }
 
 /**
+ * The most tokens `model` writes in one response, when the registry knows
+ * it (OpenRouter's `openai/`-prefixed ids are looked up without the
+ * prefix); undefined for any other id, whose limit Byoky can't know.
+ * `providerId` is the provider the request goes to.
+ */
+export function maxOutputFor(model: string, providerId?: string): number | undefined {
+  const entry =
+    getModel(model) ??
+    (providerId === 'openrouter' && model.startsWith('openai/') ? getModel(model.slice('openai/'.length)) : undefined);
+  return entry?.maxOutput;
+}
+
+/**
+ * `maxTokens` capped at what `model` can write in one response: an app
+ * sizes its output limit for its own model, and a provider refuses a
+ * request whose limit is above the model's (Anthropic: "max_tokens: N >
+ * 64000, which is the maximum allowed number of output tokens"). Unknown
+ * models are left as they are.
+ */
+export function capMaxTokens(maxTokens: number, model: string, providerId?: string): number {
+  const cap = maxOutputFor(model, providerId);
+  return cap !== undefined && maxTokens > cap ? cap : maxTokens;
+}
+
+/**
  * List all known models for a given provider.
  */
 export function modelsForProvider(providerId: ProviderId): ModelEntry[] {

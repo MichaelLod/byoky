@@ -3,6 +3,8 @@ import {
   MODELS,
   DEFAULT_MODELS,
   getModel,
+  maxOutputFor,
+  capMaxTokens,
   modelsForProvider,
   modelsForFamily,
   capabilityGaps,
@@ -241,5 +243,20 @@ describe('capabilityLabel', () => {
     expect(capabilityLabel('vision')).toMatch(/image/i);
     expect(capabilityLabel('structuredOutput')).toMatch(/structured/i);
     expect(capabilityLabel('reasoning')).toMatch(/reasoning/i);
+  });
+});
+
+describe('maxOutputFor / capMaxTokens', () => {
+  it('knows registry models, OpenRouter\'s openai/ ids, and nothing else', () => {
+    expect(maxOutputFor('command-a-03-2025')).toBe(8_000);
+    expect(maxOutputFor('openai/gpt-5.4', 'openrouter')).toBe(128_000);
+    expect(maxOutputFor('openai/gpt-5.4', 'openai')).toBeUndefined();
+    expect(maxOutputFor('some-local-model')).toBeUndefined();
+  });
+
+  it('caps only above the max output of a known model', () => {
+    expect(capMaxTokens(32_000, 'command-a-03-2025')).toBe(8_000);
+    expect(capMaxTokens(4_000, 'command-a-03-2025')).toBe(4_000);
+    expect(capMaxTokens(1_000_000, 'some-local-model')).toBe(1_000_000);
   });
 });

@@ -927,3 +927,74 @@ describe('cross-family dispatch — structured outputs reach Claude as output_co
     expect(gemini.generationConfig.responseMimeType).toBe('application/json');
   });
 });
+
+describe('cross-family dispatch — an output limit above the destination model\'s max output', () => {
+  const claudeCode = JSON.stringify({ model: 'claude-opus-4-6', max_tokens: 32_000, messages: [{ role: 'user', content: 'x' }] });
+
+  it('anthropic → cohere: Claude Code\'s 32000 becomes Command A\'s 8000', () => {
+    expect(JSON.parse(translateRequest(ctx('anthropic', 'cohere'), claudeCode)).max_tokens).toBe(8_000);
+  });
+
+  it('anthropic → cohere: a thinking budget stays below the capped max_tokens', () => {
+    const body = JSON.stringify({
+      model: 'claude-sonnet-4-5', max_tokens: 32_000, thinking: { type: 'enabled', budget_tokens: 16_000 }, messages: [{ role: 'user', content: 'x' }],
+    });
+    const out = JSON.parse(translateRequest(ctx('anthropic', 'cohere'), body));
+    expect(out.max_tokens).toBe(8_000);
+    expect(out.thinking).toEqual({ type: 'enabled', token_budget: 7_999 });
+  });
+
+  it('openai → gemini: max_completion_tokens 100000 becomes 65536, the thinking budget fits', () => {
+    const out = JSON.parse(
+      translateRequest(
+        { ...ctx('openai', 'gemini'), dstModel: 'gemini-3.8-flash' },
+        JSON.stringify({ model: 'gpt-5.5', max_completion_tokens: 100_000, messages: [{ role: 'user', content: 'x' }] }),
+      ),
+    );
+    expect(out.generationConfig.maxOutputTokens).toBe(65_536);
+    const budget = JSON.parse(
+      translateRequest(
+        { ...ctx('anthropic', 'gemini'), dstModel: 'gemini-2.5-flash' },
+        JSON.stringify({ model: 'claude-sonnet-4-5', max_tokens: 100_000, thinking: { type: 'enabled', budget_tokens: 90_000 }, messages: [{ role: 'user', content: 'x' }] }),
+      ),
+    );
+    expect(budget.generationConfig.maxOutputTokens).toBe(65_536);
+    expect(budget.generationConfig.thinkingConfig.thinkingBudget).toBeLessThanOrEqual(65_536);
+  });
+
+  it('gemini → anthropic (Haiku 4.5): maxOutputTokens 65536 becomes 64000 and the budget stays below it', () => {
+    const out = JSON.parse(
+      translateRequest(
+        { ...ctx('gemini', 'anthropic'), dstModel: 'claude-haiku-4-5-20251001' },
+        JSON.stringify({
+          contents: [{ role: 'user', parts: [{ text: 'x' }] }],
+          generationConfig: { maxOutputTokens: 65_536, thinkingConfig: { thinkingBudget: 65_000 } },
+        }),
+      ),
+    );
+    expect(out.max_tokens).toBe(64_000);
+    expect(out.thinking).toEqual({ type: 'enabled', budget_tokens: 63_999 });
+  });
+
+  it('gemini → anthropic: a budget below the cap is kept', () => {
+    const out = JSON.parse(
+      translateRequest(
+        { ...ctx('gemini', 'anthropic'), dstModel: 'claude-haiku-4-5-20251001' },
+        JSON.stringify({
+          contents: [{ role: 'user', parts: [{ text: 'x' }] }],
+          generationConfig: { maxOutputTokens: 65_536, thinkingConfig: { thinkingBudget: 10_000 } },
+        }),
+      ),
+    );
+    expect(out.thinking).toEqual({ type: 'enabled', budget_tokens: 10_000 });
+  });
+
+  it('anthropic → openai: an unknown destination model is not capped', () => {
+    const out = JSON.parse(
+      translateRequest({ ...ctx('anthropic', 'openai'), dstModel: 'local-llm', dstProviderId: 'ollama' }, JSON.stringify({
+        model: 'claude-opus-4-6', max_tokens: 500_000, messages: [{ role: 'user', content: 'x' }],
+      })),
+    );
+    expect(out.max_tokens).toBe(500_000);
+  });
+});

@@ -15,6 +15,7 @@ import type {
 } from '../ir.js';
 import { isIRError } from '../ir.js';
 import { geminiError } from '../errors.js';
+import { capMaxTokens } from '../../models.js';
 
 /**
  * Google Gemini (Generative Language v1beta) adapter.
@@ -565,7 +566,7 @@ function serializeRequest(ctx: TranslationContext, ir: IRRequest): string {
   if (typeof ir.temperature === 'number') gc.temperature = ir.temperature;
   if (typeof ir.topP === 'number') gc.topP = ir.topP;
   if (typeof ir.topK === 'number') gc.topK = ir.topK;
-  if (typeof ir.maxTokens === 'number') gc.maxOutputTokens = ir.maxTokens;
+  if (typeof ir.maxTokens === 'number') gc.maxOutputTokens = capMaxTokens(ir.maxTokens, ctx.dstModel, ctx.dstProviderId);
   if (ir.stopSequences && ir.stopSequences.length > 0) gc.stopSequences = ir.stopSequences.slice();
   if (ir.responseFormat?.type === 'json') {
     gc.responseMimeType = 'application/json';
@@ -577,9 +578,11 @@ function serializeRequest(ctx: TranslationContext, ir: IRRequest): string {
     gc.responseJsonSchema = toGeminiJsonSchema(ir.responseFormat.schema);
   }
   if (ir.thinking?.enabled) {
+    // A budget no larger than the (capped) output limit.
+    const budget = ir.thinking.budgetTokens;
     gc.thinkingConfig = {
-      ...(typeof ir.thinking.budgetTokens === 'number'
-        ? { thinkingBudget: ir.thinking.budgetTokens }
+      ...(typeof budget === 'number'
+        ? { thinkingBudget: typeof gc.maxOutputTokens === 'number' ? Math.min(budget, gc.maxOutputTokens) : budget }
         : {}),
     };
   }

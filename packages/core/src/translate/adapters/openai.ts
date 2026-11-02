@@ -1,6 +1,6 @@
 import type { ModelShapingContext, TranslationContext } from '../types.js';
 import { TranslationError } from '../types.js';
-import { getModel } from '../../models.js';
+import { capMaxTokens, getModel } from '../../models.js';
 import type { FamilyAdapter, IRStreamParser, IRStreamSerializer } from '../adapter.js';
 import type {
   IRRequest,
@@ -430,8 +430,9 @@ function serializeRequest(ctx: TranslationContext, ir: IRRequest): string {
     reasoningOffForTools(ctx.dstModel, ctx.dstProviderId);
   if (reasoningOff) out.reasoning_effort = 'none';
   if (typeof ir.maxTokens === 'number') {
-    if (usesMaxCompletionTokens(isReasoningDst, ctx.dstProviderId)) out.max_completion_tokens = ir.maxTokens;
-    else out.max_tokens = ir.maxTokens;
+    const maxTokens = capMaxTokens(ir.maxTokens, ctx.dstModel, ctx.dstProviderId);
+    if (usesMaxCompletionTokens(isReasoningDst, ctx.dstProviderId)) out.max_completion_tokens = maxTokens;
+    else out.max_tokens = maxTokens;
   }
   if (typeof ir.temperature === 'number' && (!isReasoningDst || reasoningOff)) {
     out.temperature = ir.temperature;
@@ -501,6 +502,11 @@ function serializeRequest(ctx: TranslationContext, ir: IRRequest): string {
  * to the app's own body so every field they don't cover is kept.
  */
 function shapeRequestForModel(body: Record<string, unknown>, ctx: ModelShapingContext): void {
+  // An output limit sized for the app's own model, capped at the pinned one's.
+  for (const key of ['max_tokens', 'max_completion_tokens']) {
+    const limit = body[key];
+    if (typeof limit === 'number') body[key] = capMaxTokens(limit, ctx.dstModel, ctx.dstProviderId);
+  }
   if (!isOpenAIReasoningModel(ctx.dstModel)) return;
   if (Array.isArray(body.tools) && body.tools.length > 0 && reasoningOffForTools(ctx.dstModel, ctx.dstProviderId)) {
     body.reasoning_effort = 'none';
