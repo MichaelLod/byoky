@@ -142,7 +142,14 @@ fun AppsScreen(wallet: WalletStore) {
     ) { padding ->
         LazyColumn(
             modifier = Modifier.padding(padding),
-            contentPadding = PaddingValues(start = 20.dp, top = 16.dp, end = 20.dp, bottom = 96.dp),
+            // Room to scroll the last group out from under the add button,
+            // which in the compact layout sits in the rail instead.
+            contentPadding = PaddingValues(
+                start = 20.dp,
+                top = 16.dp,
+                end = 20.dp,
+                bottom = if (isCompactHeight()) 16.dp else 96.dp,
+            ),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item {

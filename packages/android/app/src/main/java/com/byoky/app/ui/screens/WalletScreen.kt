@@ -86,6 +86,7 @@ fun WalletScreen(
     var endpointTarget by remember { mutableStateOf<Credential?>(null) }
     var removeTarget by remember { mutableStateOf<Credential?>(null) }
     val gaze = rememberRavenGaze()
+    val compact = isCompactHeight()
     // Fixed for this visit to the tab, so the nod plays once and isn't cut short.
     val nodKey = remember { if (nodOnAppear) Any() else null }
     LaunchedEffect(Unit) {
@@ -119,6 +120,7 @@ fun WalletScreen(
                 keyCount = credentials.size,
                 gaze = gaze,
                 nodKey = nodKey,
+                compact = compact,
                 onOpenSettings = onNavigateToSettings,
             )
         },
@@ -144,7 +146,9 @@ fun WalletScreen(
         } else {
             LazyColumn(
                 modifier = Modifier.padding(padding),
-                contentPadding = PaddingValues(start = 20.dp, top = 16.dp, end = 20.dp, bottom = 96.dp),
+                // Room to scroll the last card out from under the add button,
+                // which in the compact layout sits in the rail instead.
+                contentPadding = PaddingValues(start = 20.dp, top = 16.dp, end = 20.dp, bottom = if (compact) 16.dp else 96.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 if (showUnreadableVaultNotice) {
@@ -225,15 +229,20 @@ fun WalletScreen(
 
 /**
  * Wallet header: the Byoky lockup and Settings, then the status line and the
- * screen title, with Muninn perched on the right watching the finger.
+ * screen title, with Muninn perched on the right watching the finger. In
+ * the [compact] layout (a phone in landscape) it is one row, the status line
+ * and a smaller Muninn beside the lockup, so the cards keep the height: the
+ * full header left them about 80 dp.
  */
 @Composable
 private fun WalletHeader(
     keyCount: Int,
     gaze: RavenGaze,
     nodKey: Any?,
+    compact: Boolean,
     onOpenSettings: () -> Unit,
 ) {
+    val status = "Unlocked · $keyCount key${if (keyCount == 1) "" else "s"}"
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -250,17 +259,29 @@ private fun WalletHeader(
         ) {
             BrandMark()
             Spacer(Modifier.weight(1f))
+            if (compact) {
+                StatusPill(status, color = Signal)
+                Spacer(Modifier.width(12.dp))
+                Muninn(
+                    RavenMood.WATCHING,
+                    modifier = Modifier.size(48.dp),
+                    frame = RavenFrame.BUST,
+                    gaze = gaze,
+                    nodKey = nodKey,
+                )
+            }
             IconButton(onClick = onOpenSettings) {
                 Icon(Icons.Default.Settings, "Settings", tint = Fog)
             }
         }
+        if (compact) return@Column
         Row(verticalAlignment = Alignment.Bottom) {
             Column(
                 modifier = Modifier
                     .weight(1f)
                     .padding(bottom = 16.dp),
             ) {
-                StatusPill("Unlocked · $keyCount key${if (keyCount == 1) "" else "s"}", color = Signal)
+                StatusPill(status, color = Signal)
                 Spacer(Modifier.height(6.dp))
                 CapsText(
                     "Wallet",
@@ -398,9 +419,12 @@ private fun EditEndpointDialog(
 
 @Composable
 private fun EmptyWallet(modifier: Modifier, onAdd: () -> Unit) {
+    // Centred when it fits; scrolls when it doesn't (a phone in landscape,
+    // large font sizes) instead of squashing the button into a sliver.
     Column(
         modifier = modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(40.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
