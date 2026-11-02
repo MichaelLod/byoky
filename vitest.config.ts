@@ -6,6 +6,10 @@ import { defineConfig } from 'vitest/config';
 const DOM_TESTS = ['packages/sdk/tests/**/*.test.{ts,tsx}', 'packages/web/tests/**/*.test.{ts,tsx}'];
 
 export default defineConfig({
+  // packages/web's tsconfig keeps JSX as is ("preserve", for Next). Compile
+  // it the way the extension's already is, or the coverage remapper can't
+  // parse the site's .tsx files and leaves them out.
+  oxc: { jsx: { runtime: 'automatic' } },
   resolve: {
     // Tests run against core's source, so they don't need a fresh core build
     // and the extension's background harness can import what it imports.
@@ -40,8 +44,16 @@ export default defineConfig({
     ],
     coverage: {
       provider: 'v8',
-      // Every package, so the untested ones show up at 0% instead of hiding.
-      include: ['packages/*/src/**', 'packages/extension/entrypoints/**', 'packages/extension/lib/**'],
+      // Every TypeScript package, so the untested ones show up at 0% instead
+      // of hiding (iOS and Android have their own toolchains). The extension
+      // and the web site keep their code outside src/.
+      include: [
+        'packages/*/src/**',
+        'packages/extension/entrypoints/**/*.{ts,tsx}',
+        'packages/extension/lib/**',
+        'packages/web/app/**/*.{ts,tsx}',
+        'packages/web/middleware.ts',
+      ],
       // Only the pure re-export barrels; other index.ts files hold real code.
       exclude: ['packages/core/src/index.ts', 'packages/sdk/src/index.ts', '**/*.d.ts'],
     },
