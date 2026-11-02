@@ -21,7 +21,7 @@ Your job — run these commands on my machine and report each step:
 
 3. Set the OpenClaw agent's default model to a byoky one. The onboarding wizard picks \`openai/gpt-5.4\` (the direct \`openai\` plugin, which has no key) — that causes "No API key found for provider openai" errors on every run. Ask me which provider I want as the default, then run:
      openclaw models set byoky-anthropic/claude-sonnet-4-6
-   (or byoky-openai/gpt-5.5, byoky-gemini/gemini-3.8-flash — \`openclaw models list --all\` shows every option.)
+   (or byoky-openai/gpt-5.5, byoky-gemini/gemini-3.6-flash — \`openclaw models list --all\` shows every option.)
 
 4. Verify the bridge is up and lists the connected providers (the token is passed via substitution, not pasted):
      curl -H "x-api-key: $(byoky-bridge token)" http://127.0.0.1:19280/health

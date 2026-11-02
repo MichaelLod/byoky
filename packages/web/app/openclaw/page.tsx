@@ -134,7 +134,7 @@ export default function OpenClawTutorial() {
           <Code>{`openclaw models set byoky-anthropic/claude-sonnet-4-6`}</Code>
           <p>
             Swap the model for whichever you actually have a key for:{' '}
-            <code>byoky-openai/gpt-5.5</code>, <code>byoky-gemini/gemini-3.8-flash</code>,{' '}
+            <code>byoky-openai/gpt-5.5</code>, <code>byoky-gemini/gemini-3.6-flash</code>,{' '}
             <code>byoky-xai/grok-3</code>, etc. <code>openclaw models list --all</code>{' '}
             shows every option.
           </p>
@@ -365,7 +365,7 @@ function Providers() {
   const rows: [string, string, string, string][] = [
     ['Anthropic', 'byoky-anthropic', 'Claude Opus 5.5, Sonnet 5.5, Haiku 5.5, Fable 5.1, Opus 4.7, Sonnet 4.6, Haiku 4.5', 'claude'],
     ['OpenAI', 'byoky-openai', 'GPT-5.5, GPT-5.4, GPT-5.4 Mini, GPT-5.4 Nano', 'openai'],
-    ['Google Gemini', 'byoky-gemini', 'Gemini 3.8 Flash (2.5 Pro and 2.5 Flash for past users)', 'gemini'],
+    ['Google Gemini', 'byoky-gemini', 'Gemini 3.6 Flash, 3.8 Flash (2.5 Pro and 2.5 Flash for past users)', 'gemini'],
     ['xAI', 'byoky-xai', 'Grok 3, Grok 3 Mini', 'grok'],
     ['DeepSeek', 'byoky-deepseek', 'DeepSeek V3, R1', 'deepseek'],
     ['Mistral', 'byoky-mistral', 'Mistral Large', 'mistral'],
