@@ -207,6 +207,7 @@ function CredentialCard({ cred, usage, shared, onOpenStats, onRemove }: Credenti
               onKeyDown={handleKey}
               onClick={(e) => e.stopPropagation()}
               maxLength={60}
+              aria-label={`Rename ${cred.label}`}
             />
           ) : (
             <span className="card-title">{cred.label}</span>

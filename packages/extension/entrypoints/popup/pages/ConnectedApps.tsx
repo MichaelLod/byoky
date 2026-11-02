@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useId, useRef, useState } from 'react';
 import { useWalletStore } from '../store';
 import { TrustResetNotice } from '../components/TrustResetNotice';
 import { LimitsHoldNotice } from '../components/LimitsHoldNotice';
@@ -596,6 +596,9 @@ function GroupForm({
   // Credential pin. Empty string means "no pin — any credential".
   const [credentialId, setCredentialId] = useState<string>(group?.credentialId ?? '');
   const [model, setModel] = useState(group?.model ?? '');
+  // The form shows for a new group and for each group being edited, so its
+  // ids (labels, the model list) must not repeat.
+  const uid = useId();
 
   const matchingCreds = credentials.filter((c) => c.providerId === providerId);
   // Pull the @byoky/core registry's known models for the chosen provider.
@@ -634,18 +637,21 @@ function GroupForm({
   return (
     <div style={{ marginTop: '8px' }}>
       <div className="form-group">
-        <label>Group name</label>
+        <label htmlFor={`${uid}-name`}>Group name</label>
         <input
+          id={`${uid}-name`}
           type="text"
           placeholder="e.g. Engineering"
           value={name}
           onChange={(e) => setName(e.target.value)}
           maxLength={200}
+          aria-describedby={error ? `${uid}-error` : undefined}
         />
       </div>
       <div className="form-group">
-        <label>Provider</label>
+        <label htmlFor={`${uid}-provider`}>Provider</label>
         <select
+          id={`${uid}-provider`}
           value={providerId}
           onChange={(e) => {
             setProviderId(e.target.value);
@@ -659,8 +665,8 @@ function GroupForm({
       </div>
       {matchingCreds.length > 0 ? (
         <div className="form-group">
-          <label>Credential (optional)</label>
-          <select value={credentialId} onChange={(e) => setCredentialId(e.target.value)}>
+          <label htmlFor={`${uid}-cred`}>Credential (optional)</label>
+          <select id={`${uid}-cred`} value={credentialId} onChange={(e) => setCredentialId(e.target.value)}>
             <option value="">Any {PROVIDERS[providerId]?.name ?? providerId} credential</option>
             {matchingCreds.map((c) => (
               <option key={c.id} value={c.id}>{c.label}</option>
@@ -685,28 +691,30 @@ function GroupForm({
         </div>
       )}
       <div className="form-group">
-        <label>Default model (optional)</label>
+        <label htmlFor={`${uid}-model`}>Default model (optional)</label>
         <input
+          id={`${uid}-model`}
           type="text"
           placeholder="e.g. claude-sonnet-5-5"
           value={model}
           onChange={(e) => setModel(e.target.value)}
           maxLength={200}
-          list={`group-models-${providerId}`}
+          list={`${uid}-models-${providerId}`}
+          aria-describedby={`${uid}-model-hint`}
         />
         {/* Native datalist gives the input a typeahead dropdown over the
             registry entries for the chosen provider, while still letting the
             user type custom model ids the registry doesn't know about. */}
-        <datalist id={`group-models-${providerId}`}>
+        <datalist id={`${uid}-models-${providerId}`}>
           {suggestedModels.map((m) => (
             <option key={m.id} value={m.id}>{m.displayName}</option>
           ))}
         </datalist>
-        <div className="card-subtitle" style={{ marginTop: '4px' }}>
+        <div id={`${uid}-model-hint`} className="card-subtitle" style={{ marginTop: '4px' }}>
           {modelInfo ?? modelHint}
         </div>
       </div>
-      {error && <FormError>{error}</FormError>}
+      {error && <FormError id={`${uid}-error`}>{error}</FormError>}
       <div style={{ display: 'flex', gap: '8px' }}>
         <button className="btn btn-primary btn-sm" onClick={handleSave} disabled={!trimmedName}>Save</button>
         <button className="btn btn-secondary btn-sm" onClick={onCancel}>Cancel</button>
@@ -761,6 +769,8 @@ function AllowanceForm({
       providers.map((id) => [id, allowance?.providerLimits?.[id] != null ? String(allowance.providerLimits[id]) : '']),
     ),
   );
+  // Each app card has its own form, so its ids must not repeat.
+  const uid = useId();
 
   function handleSave() {
     const parsed: TokenAllowance = { origin };
@@ -780,8 +790,9 @@ function AllowanceForm({
   return (
     <div className="allowance-form">
       <div className="allowance-field">
-        <label>Total token limit</label>
+        <label htmlFor={`${uid}-total`}>Total token limit</label>
         <input
+          id={`${uid}-total`}
           type="number"
           placeholder="Unlimited"
           value={totalLimit}
@@ -790,12 +801,13 @@ function AllowanceForm({
         />
       </div>
       {providers.length > 0 && (
-        <div className="allowance-provider-limits">
-          <label className="allowance-sub-label">Per provider</label>
+        <fieldset className="allowance-provider-limits">
+          <legend className="allowance-sub-label">Per provider</legend>
           {providers.map((id) => (
             <div key={id} className="allowance-field allowance-field-inline">
-              <span className="allowance-provider-name">{PROVIDERS[id]?.name ?? id}</span>
+              <span id={`${uid}-provider-${id}`} className="allowance-provider-name">{PROVIDERS[id]?.name ?? id}</span>
               <input
+                aria-labelledby={`${uid}-provider-${id}`}
                 type="number"
                 placeholder="Unlimited"
                 value={providerLimits[id] ?? ''}
@@ -804,7 +816,7 @@ function AllowanceForm({
               />
             </div>
           ))}
-        </div>
+        </fieldset>
       )}
       {error && <FormError>{error}</FormError>}
       <div className="allowance-actions">

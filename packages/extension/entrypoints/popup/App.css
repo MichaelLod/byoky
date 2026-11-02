@@ -1350,8 +1350,16 @@ html.popup .app {
   flex: 1;
 }
 
+/* A fieldset, for its legend; without the browser's frame. */
 .allowance-provider-limits {
-  margin-bottom: 8px;
+  min-width: 0;
+  margin: 0 0 8px;
+  padding: 0;
+  border: 0;
+}
+
+.allowance-provider-limits legend {
+  padding: 0;
 }
 
 .allowance-actions {
