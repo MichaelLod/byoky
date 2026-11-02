@@ -10,7 +10,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^1.3.0",
     "@byoky/sdk": "^{{SDK_VERSION}}",
-    "next": "^15.1.0",
+    "next": "^16.4.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
