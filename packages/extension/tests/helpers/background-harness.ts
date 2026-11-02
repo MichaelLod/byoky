@@ -307,6 +307,8 @@ export async function startBackground(opts: HarnessOptions = {}): Promise<Harnes
     onConnect: new FakeEvent(),
     onInstalled: new FakeEvent(),
     sendMessage: vi.fn(async (msg: unknown) => { broadcasts.push(wire(msg)); return undefined; }),
+    // The background's keepalive call while it holds the worker.
+    getPlatformInfo: vi.fn(async () => ({ os: 'mac', arch: 'arm64' })),
     connectNative: vi.fn((host: string) => {
       const conn = new FakeNativeConnection(host);
       conn.handler = (m, c) => harness.nativeHost(m, c);

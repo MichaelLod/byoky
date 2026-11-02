@@ -185,11 +185,12 @@ export default defineBackground(() => {
   const pendingApprovals = {
     get size() { return _pendingMap.size; },
     get(id: string) { return _pendingMap.get(id); },
-    set(id: string, entry: PendingEntry) { _pendingMap.set(id, entry); updateBadge(); notifyApprovalsChanged(); },
+    set(id: string, entry: PendingEntry) { _pendingMap.set(id, entry); updateBadge(); notifyApprovalsChanged(); syncApprovalHold(); },
     delete(id: string) {
       const r = _pendingMap.delete(id);
       updateBadge();
       if (r) notifyApprovalsChanged();
+      syncApprovalHold();
       return r;
     },
     values() { return _pendingMap.values(); },
@@ -199,6 +200,51 @@ export default defineBackground(() => {
   // connect from the same origin meanwhile waits on them rather than
   // queueing a second prompt (or being told it was rejected).
   const settlingApprovals = new Set<PendingEntry>();
+
+  // Chrome stops an MV3 service worker 30 s after the last extension event,
+  // and an open port doesn't count as one; Safari suspends its
+  // non-persistent background page the same way. Work that waits on
+  // something outside the extension would die with it: an upstream call cut
+  // off unlogged and uncharged, a connect request gone before the user
+  // answers. Such work holds the worker: while a hold is out, an extension
+  // API call every 20 s resets the idle timer (Chrome 110+). The content
+  // script also pings the ports it waits on (content.ts).
+  const KEEPALIVE_INTERVAL_MS = 20_000;
+  let workerHolds = 0;
+  let keepaliveTimer: ReturnType<typeof setInterval> | null = null;
+
+  /** Keep the worker running until the returned release is called (more calls do nothing). */
+  function holdWorker(): () => void {
+    workerHolds++;
+    keepaliveTimer ??= setInterval(() => {
+      try {
+        browser.runtime.getPlatformInfo().catch(() => {});
+      } catch { /* not available here */ }
+    }, KEEPALIVE_INTERVAL_MS);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      workerHolds--;
+      if (workerHolds === 0 && keepaliveTimer) {
+        clearInterval(keepaliveTimer);
+        keepaliveTimer = null;
+      }
+    };
+  }
+
+  // Queued and settling approvals hold the worker until the last one is
+  // answered, dropped or timed out (after two minutes).
+  let releaseApprovalHold: (() => void) | null = null;
+  function syncApprovalHold() {
+    const waiting = _pendingMap.size > 0 || settlingApprovals.size > 0;
+    if (waiting && !releaseApprovalHold) {
+      releaseApprovalHold = holdWorker();
+    } else if (!waiting && releaseApprovalHold) {
+      releaseApprovalHold();
+      releaseApprovalHold = null;
+    }
+  }
 
   function notifyApprovalsChanged() {
     browser.runtime.sendMessage({ type: 'BYOKY_INTERNAL', action: 'approvalsChanged' }).catch(() => {});
@@ -647,6 +693,9 @@ export default defineBackground(() => {
       // in Chrome MV3 when multiple listeners exist).
       port.onMessage.addListener(async (raw: unknown) => {
         const message = raw as Record<string, unknown>;
+        // The content script's ping while it waits for the answer: it only
+        // keeps the worker running (see holdWorker).
+        if (message?.type === 'BYOKY_KEEPALIVE') return;
         const sender = port.sender as Runtime.MessageSender;
         // Before any await: Chrome opens the side panel only within the
         // page's user gesture, which ends at this listener's first await.
@@ -746,6 +795,9 @@ export default defineBackground(() => {
     };
 
     port.onMessage.addListener(async (raw: unknown) => {
+      // Pings while the request runs only keep the worker running; they are
+      // not activity of the app (see holdWorker).
+      if ((raw as { type?: unknown } | null)?.type === 'BYOKY_KEEPALIVE') return;
       await sessionsRestored;
       const msg = raw as ProxyRequest;
       if (msg.sessionKey == null) return;
@@ -873,6 +925,9 @@ export default defineBackground(() => {
       let responseChunks: string[] | undefined;
       let streamComplete = false;
       let fetchSent = false;
+      // Until the response is through and counted: a slow upstream (a
+      // reasoning model, a long non-streamed answer) sends nothing for a while.
+      const releaseWorker = holdWorker();
 
       try {
         const apiKey = await decryptCredentialKey(credential);
@@ -1165,6 +1220,7 @@ export default defineBackground(() => {
           }
         } catch { /* usage bookkeeping must not break the response */ }
         reservation.release();
+        releaseWorker();
       }
     });
   });
@@ -1410,16 +1466,19 @@ export default defineBackground(() => {
     before?: () => Promise<void>,
   ): Promise<void> {
     settlingApprovals.add(entry);
+    syncApprovalHold();
     let session: Session;
     try {
       await before?.();
       session = await createSession(entry.approval.appOrigin, providers);
     } catch {
       settlingApprovals.delete(entry);
+      syncApprovalHold();
       rejectPending(entry, 'Could not create the session', 'UNKNOWN');
       return;
     }
     settlingApprovals.delete(entry);
+    syncApprovalHold();
     entry.resolve(buildSessionResponse(session, entry.originalMessageId));
     // Each waiter runs again: one the session covers reuses it at once, one
     // asking for more providers is queued for those.

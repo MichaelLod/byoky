@@ -1,12 +1,26 @@
 import { defineConfig } from 'wxt';
 
+/**
+ * The manifest changes that depend on the browser it is built for, which
+ * transformManifest can't tell apart.
+ *
+ * Safari's background page is non-persistent: Safari on iOS requires it.
+ * Firefox keeps the MV2 default, a persistent page: an event page is
+ * suspended 30 s after its last event, and the long requests and pending
+ * connects it holds would go with it.
+ */
+export function adjustManifestForBrowser(browser: string, manifest: { background?: object }): void {
+  if (browser === 'safari' && manifest.background && 'scripts' in manifest.background) {
+    (manifest.background as Record<string, unknown>).persistent = false;
+  }
+}
+
 export default defineConfig({
   modules: ['@wxt-dev/module-react'],
+  hooks: {
+    'build:manifestGenerated': (wxt, manifest) => adjustManifestForBrowser(wxt.config.browser, manifest),
+  },
   transformManifest(manifest) {
-    // Safari iOS requires persistent: false for MV2 background scripts
-    if (manifest.background && 'scripts' in manifest.background) {
-      (manifest.background as Record<string, unknown>).persistent = false;
-    }
     // Firefox: remove default_popup so icon click fires onClicked → opens sidebar
     const m = manifest as unknown as Record<string, unknown>;
     if (m.sidebar_action) {
