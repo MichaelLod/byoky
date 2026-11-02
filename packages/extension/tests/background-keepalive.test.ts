@@ -46,6 +46,12 @@ function pingsOver(h: Harness, ms: number): number {
   return h.browser.runtime.getPlatformInfo.mock.calls.length - before;
 }
 
+/** Resolves once the worker is no longer held (bookkeeping after a request takes a few storage writes). */
+async function released(h: Harness): Promise<void> {
+  await h.until(() => pingsOver(h, 20_000) === 0, 5_000, 'the worker let go');
+  expect(pingsOver(h, 60_000)).toBe(0);
+}
+
 /** fetch that answers only when the test says so. */
 function slowUpstream(h: Harness) {
   let answer: ((r: Response) => void) | undefined;
@@ -79,8 +85,7 @@ describe('background: holding the worker while work is outstanding (F001)', () =
     expect(res.meta.status).toBe(200);
     expect(res.done).toBe(true);
     await h.until(() => requestLog(h).length === 1 && requestLog(h)[0].inputTokens === 3, 5_000, 'the logged usage');
-    await h.settle();
-    expect(pingsOver(h, 60_000)).toBe(0);
+    await released(h);
   });
 
   it('lets go when the request fails or the app cancels it', async () => {
@@ -93,16 +98,14 @@ describe('background: holding the worker while work is outstanding (F001)', () =
     await h.until(upstream.started, 5_000, 'the upstream call');
     upstream.fail(new TypeError('network down'));
     expect((await failed.result).error.error.code).toBe('PROXY_ERROR');
-    await h.settle();
-    expect(pingsOver(h, 60_000)).toBe(0);
+    await released(h);
 
     upstream = slowUpstream(h);
     const cancelled = h.proxy(APP, chat(payload.sessionKey));
     await h.until(upstream.started, 5_000, 'the upstream call');
     expect(pingsOver(h, 20_000)).toBe(1);
     cancelled.port.close();
-    await h.settle();
-    expect(pingsOver(h, 60_000)).toBe(0);
+    await released(h);
   });
 
   it('keeps the worker running while a connect waits for the user, until it is answered', async () => {
@@ -115,7 +118,7 @@ describe('background: holding the worker while work is outstanding (F001)', () =
     const [approval] = (await h.internal('getPendingApprovals')).approvals;
     await h.internal('rejectConnect', { approvalId: approval.id });
     expect((await response).payload.code).toBe('USER_REJECTED');
-    expect(pingsOver(h, 60_000)).toBe(0);
+    await released(h);
   });
 
   it('holds once for any number of waiting requests', async () => {
