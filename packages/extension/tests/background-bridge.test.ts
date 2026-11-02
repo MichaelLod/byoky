@@ -268,3 +268,96 @@ describe('background: refusals on the bridge carry a status and code', () => {
       .toMatchObject({ type: 'proxy_http_error', status: 400, code: 'TRANSLATION_NOT_SUPPORTED' });
   });
 });
+
+// --- One bridge per app ---
+
+const CLAUDE_CODE = 'http://127.0.0.1:19281'; // `byoky-bridge connect`, bridge on 19280
+const OPENCLAW = 'http://127.0.0.1:19282'; // the OpenClaw login page, bridge on 19283
+
+/** The answer of the host on `bridge` to a request for `sessionKey`. */
+async function answerOn(h: Harness, bridge: FakeNativeConnection, sessionKey: string, req: Record<string, unknown>) {
+  const reply = await bridgeAnswer(h, bridge, sessionKey, req);
+  return reply.type === 'proxy_http_error' ? reply.error : reply.type;
+}
+
+async function twoApps() {
+  const h = await startBackground({
+    local: await walletStorage([
+      { id: 'a1', providerId: 'anthropic', key: 'sk-ant-1' },
+      { id: 'o1', providerId: 'openai', key: 'sk-o' },
+    ]),
+  });
+  await h.unlock();
+  h.fetch.mockImplementation(async () => new Response('{"usage":{"input_tokens":1,"output_tokens":1}}', {
+    status: 200, headers: { 'content-type': 'application/json' },
+  }));
+  const claude = (await connectApproved(h, CLAUDE_CODE, { providers: [{ id: 'anthropic' }] })).payload.sessionKey as string;
+  const openclaw = (await connectApproved(h, OPENCLAW, { providers: [{ id: 'openai' }] })).payload.sessionKey as string;
+  return { h, claude, openclaw };
+}
+
+// F018: the wallet held one bridge. An OpenClaw login replaced the session
+// `byoky-bridge connect` had started for Claude Code (whose requests then
+// got 404 for anthropic), and the reverse.
+describe('background: bridges of different apps', () => {
+  it('run side by side, each serving only its own app\'s session', async () => {
+    const { h, claude, openclaw } = await twoApps();
+    const claudeBridge = await startBridge(h, claude, CLAUDE_CODE, 19280);
+    const openclawBridge = await startBridge(h, openclaw, OPENCLAW, 19283);
+
+    expect(claudeBridge.closedByExtension).toBe(false);
+    expect(await answerOn(h, claudeBridge, claude, ANTHROPIC_CHAT)).toBe('proxy_http_response_meta');
+    expect(await answerOn(h, openclawBridge, openclaw, OPENAI_CHAT)).toBe('proxy_http_response_meta');
+    // A host can't use another app's session.
+    expect(await answerOn(h, claudeBridge, openclaw, OPENAI_CHAT)).toBe('Unauthorized session key');
+    // Each app's usage is its own.
+    await h.until(() => {
+      const totals = h.local.data.usageTotals as Record<string, Record<string, number>> | undefined;
+      return totals?.[CLAUDE_CODE]?.anthropic === 2 && totals?.[OPENCLAW]?.openai === 2;
+    }, 5_000, 'usage per app');
+    expect(h.session!.data._bridges).toEqual([{ port: 19280, key: claude }, { port: 19283, key: openclaw }]);
+  });
+
+  it('start again together after a worker restart', async () => {
+    const { h, claude, openclaw } = await twoApps();
+    await startBridge(h, claude, CLAUDE_CODE, 19280);
+    await startBridge(h, openclaw, OPENCLAW, 19283);
+
+    const restarted = await startBackground({ local: h.local.data, session: h.session!.data });
+    restarted.nativeHost = bridgeHost;
+    await restarted.until(() => restarted.nativeConnections.filter((c) => c.fromExtension.some((m) => m.type === 'start-proxy')).length === 2,
+      5_000, 'both bridges restarted');
+    const started = restarted.nativeConnections.flatMap((c) => c.fromExtension.filter((m) => m.type === 'start-proxy'));
+    expect(started.map((m) => [m.port, m.sessionKey]).sort()).toEqual([[19280, claude], [19283, openclaw]]);
+  });
+
+  it('replace only the same app\'s bridge, also on another port', async () => {
+    const { h, claude, openclaw } = await twoApps();
+    const claudeBridge = await startBridge(h, claude, CLAUDE_CODE, 19280);
+    const oldOpenclaw = await startBridge(h, openclaw, OPENCLAW, 19280 + 10);
+    const newOpenclaw = await startBridge(h, openclaw, OPENCLAW, 19283);
+
+    expect(oldOpenclaw.closedByExtension).toBe(true);
+    expect(claudeBridge.closedByExtension).toBe(false);
+    expect(h.session!.data._bridges).toEqual([{ port: 19280, key: claude }, { port: 19283, key: openclaw }]);
+    expect(await answerOn(h, newOpenclaw, openclaw, OPENAI_CHAT)).toBe('proxy_http_response_meta');
+  });
+
+  it('lose only their own session when one app disconnects, and all on lock', async () => {
+    const { h, claude, openclaw } = await twoApps();
+    const claudeBridge = await startBridge(h, claude, CLAUDE_CODE, 19280);
+    const openclawBridge = await startBridge(h, openclaw, OPENCLAW, 19283);
+
+    const page = h.openPort('byoky-message', OPENCLAW);
+    page.send({ type: 'BYOKY_DISCONNECT', id: 'd1', payload: { sessionKey: openclaw } });
+    await page.waitFor((m) => m.type === 'BYOKY_DISCONNECT_ACK');
+    await h.until(() => (h.session!.data._bridges as unknown[]).length === 1, 5_000, 'the session forgotten');
+    expect(h.session!.data._bridges).toEqual([{ port: 19280, key: claude }]);
+    expect(await answerOn(h, openclawBridge, openclaw, OPENAI_CHAT)).toBe('Unauthorized session key');
+    expect(await answerOn(h, claudeBridge, claude, ANTHROPIC_CHAT)).toBe('proxy_http_response_meta');
+
+    await h.internal('lock');
+    await h.until(() => h.session!.data._bridges === undefined, 5_000, 'every bridge session forgotten');
+    expect(await answerOn(h, claudeBridge, claude, ANTHROPIC_CHAT)).toBe('Unauthorized session key');
+  });
+});

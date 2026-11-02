@@ -34,7 +34,7 @@ RUN chmod +x fake-browser.sh run-test.sh
 # callback directly, completing the auth handshake without a real browser.
 RUN install -m 755 fake-browser.sh /usr/local/bin/xdg-open
 
-ENV BRIDGE_PORT=19280
+ENV BRIDGE_PORT=19283
 # OpenClaw's browser-open module skips xdg-open on Linux when no display is
 # set. We have no real display, but we need the shim to run — fake DISPLAY.
 ENV DISPLAY=:0

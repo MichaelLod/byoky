@@ -12,7 +12,7 @@ echo "[fake-browser] received URL: $URL" >&2
 curl -fsS "$URL" > /dev/null
 
 PROVIDER="${BYOKY_TEST_PROVIDER:-anthropic}"
-BRIDGE_PORT="${BRIDGE_PORT:-19280}"
+BRIDGE_PORT="${BRIDGE_PORT:-19283}"
 
 curl -fsS -X POST "$URL/callback" \
   -H 'Content-Type: application/json' \

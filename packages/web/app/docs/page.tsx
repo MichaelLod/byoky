@@ -1530,7 +1530,9 @@ byoky-bridge connect --providers anthropic,openai`}</Code>
         extension starts the proxy on <code>127.0.0.1:19280</code>. CLI tools then make HTTP
         requests to <code>http://127.0.0.1:19280/&#123;provider&#125;/</code>, which the bridge
         forwards to the extension. The OpenClaw plugin runs this connect step itself when you log
-        in.
+        in, for a bridge of its own on <code>127.0.0.1:19283</code>: each port is a separate
+        bridge with its own session, so OpenClaw and a tool on 19280 run side by side, each with
+        its own spending cap and routing group.
       </p>
       <p>
         The proxy comes back on its own when the browser recycles the extension&apos;s service

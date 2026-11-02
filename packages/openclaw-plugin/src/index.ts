@@ -58,7 +58,11 @@ interface ByokyProvider {
   models: ModelDef[];
 }
 
-const DEFAULT_BRIDGE_PORT = 19280;
+// OpenClaw's bridge port. Not the 19280 of `byoky-bridge connect`: the
+// wallet runs one bridge per port, each serving one app's session, so
+// OpenClaw and Claude Code (or Hermes) don't replace each other's session,
+// and each keeps its own providers, spending cap and routing group.
+export const BRIDGE_PORT = 19283;
 // The login page's port. Fixed: the wallet knows OpenClaw by the page's
 // origin, with its spending cap and routing group, so it must not change
 // between logins. (`byoky-bridge connect` uses 19281.)
@@ -443,7 +447,7 @@ async function checkBridgeHealth(): Promise<{ providers: string[] } | null> {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 3000);
-    const res = await fetch(`http://127.0.0.1:${DEFAULT_BRIDGE_PORT}/health`, {
+    const res = await fetch(`http://127.0.0.1:${BRIDGE_PORT}/health`, {
       headers: { authorization: `Bearer ${loadOrCreateToken()}` },
       signal: controller.signal,
     });
@@ -499,7 +503,7 @@ async function renderByokyStatus(): Promise<string> {
   const reg = getRegistrationStatus();
 
   const lines: string[] = [];
-  lines.push(`**Byoky Bridge**  ·  port ${DEFAULT_BRIDGE_PORT}`);
+  lines.push(`**Byoky Bridge**  ·  port ${BRIDGE_PORT}`);
   lines.push('');
 
   if (!health) {
@@ -609,12 +613,12 @@ async function runProviderAuth(
       );
     } else {
       const probeProviderId = selected[0];
-      const state = await probeBridgeSession(DEFAULT_BRIDGE_PORT, probeProviderId);
+      const state = await probeBridgeSession(BRIDGE_PORT, probeProviderId);
       if (state === 'ok') {
         await ctx.prompter.note(
-          `Reusing live Byoky Bridge on port ${DEFAULT_BRIDGE_PORT} — no browser round-trip needed.`,
+          `Reusing live Byoky Bridge on port ${BRIDGE_PORT} — no browser round-trip needed.`,
         );
-        return buildAuthResult(selected, DEFAULT_BRIDGE_PORT, provider, overrides);
+        return buildAuthResult(selected, BRIDGE_PORT, provider, overrides);
       }
       await ctx.prompter.note(
         state === 'bad-token'
@@ -891,7 +895,7 @@ export function startCallbackServer(opts: CallbackServerOptions): Promise<Callba
               providers: Array.isArray(data.providers)
                 ? data.providers.filter((id): id is string => typeof id === 'string' && VALID_PROVIDER_IDS.has(id))
                 : [],
-              port: isValidBridgePort(data.bridgePort) ? data.bridgePort : DEFAULT_BRIDGE_PORT,
+              port: isValidBridgePort(data.bridgePort) ? data.bridgePort : BRIDGE_PORT,
             });
           }
         });
@@ -1228,7 +1232,7 @@ function buildAuthPage(requestProviderId: string | null, nonce: string): string 
             type: 'BYOKY_INTERNAL_FROM_PAGE',
             requestId: bridgeRequestId,
             action: 'startBridgeProxy',
-            payload: { sessionKey, port: ${DEFAULT_BRIDGE_PORT} },
+            payload: { sessionKey, port: ${BRIDGE_PORT} },
           }, window.location.origin);
           setTimeout(() => {
             document.removeEventListener('byoky-message', handler);
@@ -1278,7 +1282,7 @@ function buildAuthPage(requestProviderId: string | null, nonce: string): string 
           if (!bridgeResult || !bridgeResult.success) {
             throw new Error((bridgeResult && bridgeResult.error) || 'Bridge proxy failed to start');
           }
-          const bridgePort = bridgeResult.port || ${DEFAULT_BRIDGE_PORT};
+          const bridgePort = bridgeResult.port || ${BRIDGE_PORT};
           const callbackBody = { providers: available, bridgePort };
 
           setStatus(

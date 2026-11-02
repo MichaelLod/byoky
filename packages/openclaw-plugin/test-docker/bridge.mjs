@@ -13,7 +13,7 @@ import {
 // the extension applies in production (imported from @byoky/core — no reimpl),
 // injects the real credential from the environment, and forwards upstream.
 
-const PORT = Number(process.env.BRIDGE_PORT ?? 19280);
+const PORT = Number(process.env.BRIDGE_PORT ?? 19283);
 
 const UPSTREAMS = {
   anthropic: { host: 'api.anthropic.com', envKey: 'ANTHROPIC_API_KEY' },
@@ -107,7 +107,7 @@ const server = createServer((req, res) => {
       apiKey,
       authMethod,
     );
-    // Strip forwarded Host (it still points at 127.0.0.1:19280) — https.request
+    // Strip forwarded Host (it still points at 127.0.0.1:19283) — https.request
     // will set the correct one from the hostname option.
     delete headers['host'];
     delete headers['connection'];

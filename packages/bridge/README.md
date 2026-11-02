@@ -79,6 +79,8 @@ Everything stays on your machine: the proxy only listens on `127.0.0.1` and talk
 
 The bridge is also started by pages that use the Byoky SDK (OpenClaw plugin, etc.) — no CLI action needed in that flow. See `@byoky/sdk`.
 
+The wallet runs one bridge per port, each serving one app's session. The OpenClaw plugin starts its own on port 19283, so it runs alongside `byoky-bridge connect` on 19280, and each keeps its own providers, spending cap and routing group. Starting a bridge replaces the one on the same port, and the same app's bridge on another port.
+
 Once running, the HTTP surface is:
 
 - **Health check:** `GET http://127.0.0.1:19280/health` → `{"status":"ok"}`; with the token, `{"status":"ok","providers":[...]}`

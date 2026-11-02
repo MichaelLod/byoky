@@ -124,13 +124,13 @@ describe('login', () => {
     const run = authRuns().byoky(context({ plugins: { entries: { byoky: { config: { anthropicMaxTokens: 2048 } } } } }));
     await expect.poll(() => opened.length).toBe(1);
     expect(opened[0]).toBe(`http://127.0.0.1:${callbackPort}`);
-    expect(await post('/callback', { nonce: await pageNonce(), providers: ['anthropic', 'azure_openai'], bridgePort: 19280 }))
+    expect(await post('/callback', { nonce: await pageNonce(), providers: ['anthropic', 'azure_openai'], bridgePort: 19283 }))
       .toBe(200);
 
     const result = await run;
     const providers = (result.configPatch as { models: { providers: Record<string, { baseUrl: string; apiKey: string; models: Array<{ maxTokens: number }> }> } }).models.providers;
-    expect(providers['byoky-azure_openai'].baseUrl).toBe('http://127.0.0.1:19280/azure_openai/openai/v1');
-    expect(providers['byoky-anthropic'].baseUrl).toBe('http://127.0.0.1:19280/anthropic');
+    expect(providers['byoky-azure_openai'].baseUrl).toBe('http://127.0.0.1:19283/azure_openai/openai/v1');
+    expect(providers['byoky-anthropic'].baseUrl).toBe('http://127.0.0.1:19283/anthropic');
     expect(providers['byoky-anthropic'].apiKey).toBe('test-token');
     expect(providers['byoky-anthropic'].models.every((m) => m.maxTokens === 2048)).toBe(true);
     expect(stops).toContain('Wallet connected');
@@ -140,7 +140,7 @@ describe('login', () => {
     registeredHome();
     const run = authRuns().byoky(context());
     await expect.poll(() => opened.length).toBe(1);
-    await post('/callback', { nonce: await pageNonce(), providers: ['anthropic', 'openai', 'gemini'], bridgePort: 19280 });
+    await post('/callback', { nonce: await pageNonce(), providers: ['anthropic', 'openai', 'gemini'], bridgePort: 19283 });
     const result = await run;
     type Model = { id: string; input: string[]; contextWindow: number; maxTokens: number; reasoning: boolean };
     const providers = (result.configPatch as { models: { providers: Record<string, { models: Model[] }> } }).models.providers;
@@ -218,6 +218,43 @@ describe('login', () => {
     expect(existsSync(brave.path)).toBe(true);
     await post('/callback', { nonce: await pageNonce(), providers: ['openai'] });
     await run;
+  });
+});
+
+describe('a bridge that is already running', () => {
+  /** Bridges answering on these ports, with the providers of their session; any other port is closed. */
+  function runningBridges(bridges: Record<number, string[]>) {
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL) => {
+      const url = new URL(String(input));
+      const providers = bridges[Number(url.port)];
+      if (!providers) throw new Error('ECONNREFUSED');
+      return new Response(JSON.stringify(url.pathname === '/health' ? { status: 'ok', providers } : { data: [] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }));
+  }
+
+  it('is reused when it is OpenClaw\'s own', async () => {
+    registeredHome();
+    runningBridges({ 19283: ['anthropic', 'openai'] });
+    const result = await authRuns()['byoky-anthropic'](context());
+    expect(opened).toEqual([]);
+    const providers = (result.configPatch as { models: { providers: Record<string, { baseUrl: string }> } }).models.providers;
+    expect(providers['byoky-anthropic'].baseUrl).toBe('http://127.0.0.1:19283/anthropic');
+  });
+
+  // F018: OpenClaw reused the bridge `byoky-bridge connect` started for
+  // Claude Code, whose session is another app's, with its spending cap and
+  // routing group, and for `byoky` configured only that session's providers.
+  it.each(['byoky', 'byoky-anthropic'])('is not reused for %s when it is Claude Code\'s', async (id) => {
+    registeredHome();
+    runningBridges({ 19280: ['anthropic'] });
+    const run = authRuns()[id](context());
+    await expect.poll(() => opened.length).toBe(1);
+    await post('/callback', { nonce: await pageNonce(), providers: ['anthropic', 'openai'], bridgePort: 19283 });
+    const providers = (await run).configPatch as { models: { providers: Record<string, { baseUrl: string }> } };
+    expect(providers.models.providers['byoky-anthropic'].baseUrl).toBe('http://127.0.0.1:19283/anthropic');
   });
 });
 

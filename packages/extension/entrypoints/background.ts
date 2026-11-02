@@ -315,7 +315,7 @@ export default defineBackground(() => {
         // was idle long enough, else keep counting from the last activity.
         const last = typeof data._lastActivity === 'number' ? data._lastActivity : 0;
         if (Date.now() - last >= IDLE_TIMEOUT_MS) {
-          await browser.storage.session.remove(['_mp', '_lastActivity', '_sessions', '_bridgeKey', '_bridgePort', '_silentTrust']);
+          await browser.storage.session.remove(['_mp', '_lastActivity', '_sessions', '_bridges', '_silentTrust']);
           // An open side panel still shows the unlocked wallet; tell it.
           browser.runtime.sendMessage({ type: 'BYOKY_INTERNAL', action: 'sessionChanged' }).catch(() => {});
           return;
@@ -372,59 +372,70 @@ export default defineBackground(() => {
     } catch {}
   }
 
-  // The bridge's authorized sessionKey + port survive MV3 service worker
+  // The bridges' authorized sessionKeys + ports survive MV3 service worker
   // evictions. Without persisting these, every CLI request after a worker
   // recycle hits ECONNREFUSED (the bridge process exits when its native-
   // messaging port closes) and the user has to re-run `byoky-bridge connect`.
   // Storage is browser-close-bounded (storage.session) — same security
   // profile as the sessions Map.
-  async function persistAuthorizedBridgeSessionKey() {
+  async function persistAuthorizedBridges() {
     if (!hasSessionStorage) return;
     try {
-      if (authorizedBridgeSessionKey && authorizedBridgePort) {
+      if (authorizedBridges.size > 0) {
         await browser.storage.session.set({
-          _bridgeKey: authorizedBridgeSessionKey,
-          _bridgePort: authorizedBridgePort,
+          _bridges: [...authorizedBridges].map(([port, key]) => ({ port, key })),
         });
       } else {
-        await browser.storage.session.remove(['_bridgeKey', '_bridgePort']);
+        await browser.storage.session.remove('_bridges');
       }
     } catch {}
   }
 
-  async function restoreAuthorizedBridgeSessionKey() {
+  async function restoreAuthorizedBridges() {
     if (!hasSessionStorage) return;
     try {
-      const data = await browser.storage.session.get(['_bridgeKey', '_bridgePort']);
-      if (typeof data._bridgeKey === 'string' && data._bridgeKey) {
-        // Only honor it if the session itself is still in the Map. If autoLock
+      const data = await browser.storage.session.get('_bridges');
+      const saved = Array.isArray(data._bridges) ? data._bridges as Array<{ port?: unknown; key?: unknown }> : [];
+      for (const { port, key } of saved) {
+        // Only honor one whose session is still in the Map. If autoLock
         // cleared sessions, the cached bridge key is also dead.
-        if (sessions.has(data._bridgeKey)) {
-          authorizedBridgeSessionKey = data._bridgeKey;
-          if (typeof data._bridgePort === 'number') {
-            authorizedBridgePort = data._bridgePort;
-          }
-        } else {
-          await browser.storage.session.remove(['_bridgeKey', '_bridgePort']);
+        if (typeof port === 'number' && typeof key === 'string' && sessions.has(key)) {
+          authorizedBridges.set(port, key);
         }
       }
+      if (authorizedBridges.size !== saved.length) await persistAuthorizedBridges();
     } catch {}
   }
 
-  // Re-open the native-messaging port after a service-worker recycle so the
-  // bridge process respawns and re-binds :19280 without the user having to
-  // re-run `byoky-bridge connect`. Idempotent — no-op if the bridge is
-  // already connected, the wallet is locked, or the bridge isn't installed.
+  /** Forgets the bridges serving `sessionKey`, or every bridge's session. */
+  function forgetBridgeSessions(sessionKey?: string) {
+    for (const [port, key] of [...authorizedBridges]) {
+      if (sessionKey === undefined || key === sessionKey) authorizedBridges.delete(port);
+    }
+    persistAuthorizedBridges();
+  }
+
+  // Re-open the native-messaging ports after a service-worker recycle so
+  // each bridge process respawns and re-binds its port (:19280 for
+  // `byoky-bridge connect`) without the user having to re-run `byoky-bridge
+  // connect`. Idempotent — no-op for a bridge that is already connected or
+  // starting, when the wallet is locked, or the bridge isn't installed.
   // Called from two places: the SW boot chain (cold start) and the periodic
   // keepalive alarm (warm-state health check).
+  const autoStartingBridges = new Set<number>();
   async function maybeAutoStartBridgeProxy() {
-    if (bridge) return;
-    if (!authorizedBridgeSessionKey || !authorizedBridgePort) return;
     if (!masterPassword) return;
-    if (!sessions.has(authorizedBridgeSessionKey)) return;
-    try {
-      await startBridgeProxy(authorizedBridgeSessionKey, authorizedBridgePort);
-    } catch {}
+    await Promise.all([...authorizedBridges].map(async ([port, key]) => {
+      if (bridges.has(port) || autoStartingBridges.has(port) || !sessions.has(key)) return;
+      autoStartingBridges.add(port);
+      try {
+        await startBridgeProxy(key, port);
+      } catch {
+        // The keepalive tries again.
+      } finally {
+        autoStartingBridges.delete(port);
+      }
+    }));
   }
 
   // Auto-lock after 20 minutes of inactivity. Chrome stops an idle MV3
@@ -464,9 +475,7 @@ export default defineBackground(() => {
     forgetWalletKeys();
     sessions.clear();
     clearPersistedSessions();
-    authorizedBridgeSessionKey = null;
-    authorizedBridgePort = null;
-    persistAuthorizedBridgeSessionKey();
+    forgetBridgeSessions();
     clearSessionStorage();
     browser.runtime.sendMessage({
       type: 'BYOKY_INTERNAL',
@@ -515,7 +524,7 @@ export default defineBackground(() => {
     // restoreSession drops the password when the wallet idled out while the
     // worker was stopped; the app sessions loaded alongside go with it.
     .then(() => { if (!masterPassword) sessions.clear(); sessionsRestoredDone = true; })
-    .then(() => restoreAuthorizedBridgeSessionKey())
+    .then(() => restoreAuthorizedBridges())
     .then(() => maybeAutoStartBridgeProxy());
 
   // --- Retired features: one-time storage cleanup ---
@@ -666,11 +675,7 @@ export default defineBackground(() => {
             if (disconnectOrigin !== 'unknown' && disconnectOrigin === session.appOrigin) {
               sessions.delete(sessionKey);
               persistSessions();
-              if (authorizedBridgeSessionKey === sessionKey) {
-                authorizedBridgeSessionKey = null;
-                authorizedBridgePort = null;
-                persistAuthorizedBridgeSessionKey();
-              }
+              forgetBridgeSessions(sessionKey);
               browser.runtime.sendMessage({
                 type: 'BYOKY_INTERNAL',
                 action: 'sessionChanged',
@@ -1610,9 +1615,7 @@ export default defineBackground(() => {
         forgetWalletKeys();
         sessions.clear();
         clearPersistedSessions();
-        authorizedBridgeSessionKey = null;
-        authorizedBridgePort = null;
-        persistAuthorizedBridgeSessionKey();
+        forgetBridgeSessions();
         clearSessionStorage();
         if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
         // An open side panel or another popup switches to the unlock screen.
@@ -1731,9 +1734,7 @@ export default defineBackground(() => {
         forgetWalletKeys();
         sessions.clear();
         clearPersistedSessions();
-        authorizedBridgeSessionKey = null;
-        authorizedBridgePort = null;
-        persistAuthorizedBridgeSessionKey();
+        forgetBridgeSessions();
         clearSessionStorage();
         if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
         clearPasswordFailures();
@@ -1763,11 +1764,7 @@ export default defineBackground(() => {
           if (s.id === sessionId) {
             sessions.delete(key);
             persistSessions();
-            if (authorizedBridgeSessionKey === key) {
-              authorizedBridgeSessionKey = null;
-              authorizedBridgePort = null;
-              persistAuthorizedBridgeSessionKey();
-            }
+            forgetBridgeSessions(key);
             // Recorded before the app hears of it, so its reconnect is already
             // held for approval.
             await recordRevocation(s.appOrigin);
@@ -2305,6 +2302,8 @@ export default defineBackground(() => {
    * didn't send.
    */
   interface BridgeConnection {
+    /** The port the host listens on for its clients. */
+    readonly port: number;
     readonly open: boolean;
     reply(msg: Record<string, unknown>): void;
     /**
@@ -2314,14 +2313,22 @@ export default defineBackground(() => {
     awaitDirectDone(requestId: string, onEnd: (report?: Record<string, unknown>) => void): void;
   }
 
-  /** The running bridge connection; close() ends what still runs on it. */
-  let bridge: { close: () => void } | null = null;
-  let authorizedBridgeSessionKey: string | null = null;
-  let authorizedBridgePort: number | null = null;
+  /**
+   * The running bridge connections, one host process per port. Each serves
+   * one app's session, so `byoky-bridge connect` (Claude Code, Hermes) and
+   * OpenClaw run side by side, each with its own providers, spending cap
+   * and routing group. close() ends what still runs on one.
+   */
+  const bridges = new Map<number, { close: () => void }>();
+  /**
+   * The session each bridge port was started for. Kept while its host is
+   * gone (see the onDisconnect note below), so the keepalive starts it again.
+   */
+  const authorizedBridges = new Map<number, string>();
 
-  function closeBridge() {
-    const current = bridge;
-    bridge = null;
+  function closeBridge(port: number) {
+    const current = bridges.get(port);
+    bridges.delete(port);
     current?.close();
   }
 
@@ -2333,7 +2340,7 @@ export default defineBackground(() => {
    * released. Called when the connection ends, whether the host went away
    * or a new start replaced it.
    */
-  function serveBridgeConnection(nativePort: Runtime.Port): () => void {
+  function serveBridgeConnection(nativePort: Runtime.Port, port: number): () => void {
     // A body too big for one native message (1 MiB) arrives first in
     // slices, then the request with `bodyChunked`. `proxy_http_cancel`
     // means the client hung up: abort that request's upstream fetch.
@@ -2350,6 +2357,7 @@ export default defineBackground(() => {
     };
 
     const conn: BridgeConnection = {
+      port,
       get open() { return open; },
       reply(msg) {
         if (!open) return;
@@ -2421,22 +2429,29 @@ export default defineBackground(() => {
     if (providerIds.length === 0) return { success: false, error: 'No providers available' };
 
     try {
-      // Close the existing connection, ending what still runs on it.
-      closeBridge();
+      // One connection per port, and one per app: this replaces the
+      // connection on the port, and the app's own one on another port,
+      // ending what still runs on them. Other apps' bridges keep running.
+      for (const [otherPort, key] of [...authorizedBridges]) {
+        if (otherPort !== port && sessions.get(key)?.appOrigin === session.appOrigin) {
+          authorizedBridges.delete(otherPort);
+          closeBridge(otherPort);
+        }
+      }
+      closeBridge(port);
 
       const nativePort = browser.runtime.connectNative(BRIDGE_HOST);
-      const settle = serveBridgeConnection(nativePort);
+      const settle = serveBridgeConnection(nativePort, port);
       const entry = {
         close: () => {
           settle();
           try { nativePort.disconnect(); } catch { /* already gone */ }
         },
       };
-      bridge = entry;
+      bridges.set(port, entry);
 
-      authorizedBridgeSessionKey = sessionKey;
-      authorizedBridgePort = port;
-      persistAuthorizedBridgeSessionKey();
+      authorizedBridges.set(port, sessionKey);
+      persistAuthorizedBridges();
 
       // The bridge answers start-proxy with proxy-started once it listens,
       // or proxy_error when it can't (port taken). Wait for that, so callers
@@ -2471,9 +2486,9 @@ export default defineBackground(() => {
       });
 
       nativePort.onDisconnect.addListener(() => {
-        if (bridge === entry) bridge = null;
+        if (bridges.get(port) === entry) bridges.delete(port);
         settle();
-        // Note: do NOT clear authorizedBridgeSessionKey here. The native-host
+        // Note: do NOT clear the bridge's authorized session here. The native-host
         // port disconnects on every MV3 service-worker recycle (which is
         // frequent and unrelated to user intent). Keeping the key authorized
         // means the next bridge respawn lands in a working state instead of
@@ -2485,7 +2500,7 @@ export default defineBackground(() => {
       const error = await startError;
       if (error) {
         // Drop the port so the keepalive's auto-start can try again later.
-        if (bridge === entry) closeBridge();
+        if (bridges.get(port) === entry) closeBridge(port);
         return { success: false, error };
       }
       return { success: true, port };
@@ -2542,7 +2557,8 @@ export default defineBackground(() => {
     resetIdleTimer();
 
     // Validate the session key matches the one authorized at proxy start
-    if (sessionKey !== authorizedBridgeSessionKey) {
+    // for this bridge's port.
+    if (sessionKey !== authorizedBridges.get(conn.port)) {
       conn.reply({
         type: 'proxy_http_error',
         requestId,
@@ -2560,9 +2576,7 @@ export default defineBackground(() => {
         sessions.delete(sessionKey);
         persistSessions();
       }
-      authorizedBridgeSessionKey = null;
-      authorizedBridgePort = null;
-      persistAuthorizedBridgeSessionKey();
+      forgetBridgeSessions(sessionKey);
       conn.reply({
         type: 'proxy_http_error',
         requestId,
@@ -4227,7 +4241,7 @@ export default defineBackground(() => {
   }
 
   // Wake the SW every minute to re-spawn the byoky-bridge native host if it
-  // died with the SW (Hermes/OpenClaw need :19280 stable).
+  // died with the SW (Claude Code, Hermes and OpenClaw need their ports stable).
   const BRIDGE_KEEPALIVE_ALARM = 'byoky:bridge-keepalive';
   browser.alarms.create(BRIDGE_KEEPALIVE_ALARM, {
     periodInMinutes: 1,
