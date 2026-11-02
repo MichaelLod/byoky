@@ -6,6 +6,11 @@
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "typesVersions": {
+    "*": {
+      "server": ["./dist/server.d.cts"]
+    }
+  },
   "exports": {
     ".": {
       "import": {
