@@ -13,6 +13,7 @@
 
 import { ByokyError, ByokyErrorCode } from '@byoky/core';
 import type { ByokySession } from './byoky.js';
+import { fetchParts } from './body.js';
 import { fetchModelsList } from './list-models-fetch.js';
 import { randomId } from './id.js';
 
@@ -80,12 +81,12 @@ function makeMockFetch(
   baseUrl: string | undefined,
 ): typeof fetch {
   return async (input, init) => {
-    let url = typeof input === 'string'
-      ? input
-      : input instanceof URL ? input.toString() : input.url;
-    url = maybeRewriteHost(url, baseUrl);
+    // A bare Request input (Mistral's SDK sends one) keeps its method,
+    // headers, body and signal, as with a real session's createFetch.
+    const parts = await fetchParts(input, init);
+    let url = maybeRewriteHost(parts.url, baseUrl);
 
-    const headers = new Headers(init?.headers);
+    const headers = new Headers(parts.headers);
 
     if (providerId === 'anthropic') {
       headers.set('x-api-key', key);
@@ -104,7 +105,7 @@ function makeMockFetch(
       headers.set('Authorization', `Bearer ${key}`);
     }
 
-    return fetch(url, { ...init, headers });
+    return fetch(url, { ...init, method: parts.method, headers, body: parts.body, signal: parts.signal });
   };
 }
 
