@@ -118,4 +118,27 @@ describe('docs snippets', () => {
     }
     expect(hits).toEqual([]);
   });
+
+  it('catch relay rejections inside the async connection listener', () => {
+    // handleConnection() and relay fetches reject when the browser never says
+    // hello or closes the tab mid-request. EventEmitter drops the promise an
+    // async listener returns, so without a try the rejection ends Node.
+    const unguarded: string[] = [];
+    let listeners = 0;
+    for (const file of SNIPPET_FILES) {
+      const text = read(file);
+      const re = /\.on\('connection',\s*async\b/g;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(text)) !== null) {
+        const call = text.indexOf('handleConnection(', m.index);
+        if (call === -1) continue;
+        listeners++;
+        if (!/\btry\s*\{/.test(text.slice(m.index, call))) {
+          unguarded.push(`${file}:${text.slice(0, m.index).split('\n').length}`);
+        }
+      }
+    }
+    expect(listeners).toBeGreaterThanOrEqual(4);
+    expect(unguarded).toEqual([]);
+  });
 });

@@ -222,24 +222,30 @@ const wss = new WebSocketServer({ port: 3001 });
 const byoky = new ByokyServer();
 
 wss.on('connection', async (ws) => {
-  const client = await byoky.handleConnection(ws);
-  console.log('Providers:', Object.keys(client.providers));
+  try {
+    const client = await byoky.handleConnection(ws);
+    console.log('Providers:', Object.keys(client.providers));
 
-  // Make LLM calls as if you had the API key
-  const fetch = client.createFetch('anthropic');
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 1024,
-      messages: [{ role: 'user', content: 'Hello!' }],
-    }),
-  });
-  const data = await res.json();
+    // Make LLM calls as if you had the API key
+    const fetch = client.createFetch('anthropic');
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 1024,
+        messages: [{ role: 'user', content: 'Hello!' }],
+      }),
+    });
+    const data = await res.json();
+  } catch (err) {
+    // Rejects when the browser never says hello or the tab closes
+    // mid-request. Uncaught, it would end the Node process.
+    console.error('[relay]', err);
+  }
 });`,
   },
   {

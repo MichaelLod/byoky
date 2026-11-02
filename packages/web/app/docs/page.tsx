@@ -1485,22 +1485,38 @@ const relay = session.createRelay('wss://your-app.com/ws/relay');`}</Code>
 const byoky = new ByokyServer();
 
 wss.on('connection', async (ws) => {
-  const client = await byoky.handleConnection(ws);
-  const fetch = client.createFetch('anthropic');
+  try {
+    const client = await byoky.handleConnection(ws);
+    const fetch = client.createFetch('anthropic');
 
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 1024,
-      messages: [{ role: 'user', content: 'Hello!' }],
-    }),
-  });
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 1024,
+        messages: [{ role: 'user', content: 'Hello!' }],
+      }),
+    });
+  } catch (err) {
+    // The browser never said hello, or the tab closed mid-request.
+    console.error('[relay]', err);
+  }
 });`}</Code>
+
+      <p>
+        Keep the <code>try</code>/<code>catch</code>. <code>handleConnection()</code> rejects with{' '}
+        <code>RELAY_CONNECTION_FAILED</code> when the browser closes the socket or stays silent
+        instead of sending its <code>relay:hello</code> (after at most <code>helloTimeout</code>,
+        10 seconds by default). Relay fetches, and their response bodies, reject with{' '}
+        <code>RELAY_DISCONNECTED</code> when the browser goes away mid-request, and with the
+        wallet&apos;s error when the wallet refuses. An unhandled rejection in an async{' '}
+        <code>connection</code> listener ends the Node process, so one closed tab would take your
+        backend down.
+      </p>
     </Section>
   );
 }

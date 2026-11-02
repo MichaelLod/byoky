@@ -123,17 +123,23 @@ import { ByokyServer } from '@byoky/sdk/server';
 
 const byoky = new ByokyServer();
 wss.on('connection', async (ws) => {
-  const client = await byoky.handleConnection(ws);
-  const fetch = client.createFetch('anthropic');
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', 'anthropic-version': '2023-06-01' },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 1024,
-      messages: [{ role: 'user', content: 'Hello!' }],
-    }),
-  });
+  try {
+    const client = await byoky.handleConnection(ws);
+    const fetch = client.createFetch('anthropic');
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 1024,
+        messages: [{ role: 'user', content: 'Hello!' }],
+      }),
+    });
+  } catch (err) {
+    // Rejects when the browser never says hello or closes the tab mid-request.
+    // Catch it: an unhandled rejection here ends the Node process.
+    console.error('[relay]', err);
+  }
 });
 ```
 
