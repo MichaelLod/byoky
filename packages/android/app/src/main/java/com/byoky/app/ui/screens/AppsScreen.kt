@@ -7,10 +7,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -839,12 +837,8 @@ private fun GroupEditorDialog(
             else -> "Edit Group"
         },
         text = {
-            Column(
-                modifier = Modifier
-                    .heightIn(max = 480.dp)
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
+            // RetroDialog scrolls this.
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 if (!isDefault) {
                     RetroTextField(
                         value = name,
@@ -1053,7 +1047,7 @@ private fun GroupEditorDialog(
  * + optional per-provider caps. The proxy enforces these on every request.
  */
 @Composable
-private fun AllowanceDialog(
+internal fun AllowanceDialog(
     origin: String,
     providers: List<String>,
     allowance: TokenAllowance?,

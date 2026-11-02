@@ -25,9 +25,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Button
@@ -606,7 +608,11 @@ fun RetroTextField(
 
 /**
  * AlertDialog in the retro style: crypt panel with a seam border, square
- * corners, an uppercase Chakra Petch title and fog body text.
+ * corners, an uppercase Chakra Petch title and fog body text. The body
+ * scrolls: AlertDialog only gives it the height left between the title and
+ * the buttons, which in landscape, at large font sizes or with the keyboard
+ * up is less than a form needs, and its last fields would be squashed or
+ * dropped instead.
  */
 @Composable
 fun RetroDialog(
@@ -627,7 +633,7 @@ fun RetroDialog(
         dismissButton = dismissButton,
         icon = icon,
         title = { CapsText(title, color = titleColor) },
-        text = text,
+        text = text?.let { body -> { Column(Modifier.verticalScroll(rememberScrollState())) { body() } } },
         shape = RectangleShape,
         containerColor = Crypt,
         iconContentColor = Phosphor,
