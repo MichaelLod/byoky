@@ -4,6 +4,12 @@
 
 When the Chrome Web Store version is behind (pending review), you can install the latest version directly from source.
 
+### Before you switch
+
+- **It's a separate, empty wallet.** The release ZIP and a source build load under their own extension ID (`idlmdfkobnkdakcpiihighchdbbmbpep`), not the Web Store one, and Chrome keeps each extension's data apart. In the store wallet, open Settings → **Export backup** to save an encrypted `.byoky` file, then use **Import backup** in the new wallet.
+- **Claude Code, OpenClaw and Hermes need `--dev`.** By default the bridge only lets the Web Store build launch it. Run `byoky-bridge install --dev` and restart Chrome before `byoky-bridge connect` or `openclaw models auth login`. (When the bridge isn't registered yet, the OpenClaw login registers it for the store build only.)
+- **No auto-updates.** Chrome won't update an unpacked extension, security releases included. Update it yourself (see [Updating](#updating)).
+
 ### Option 1: Download the release ZIP
 
 1. Go to the [latest GitHub release](https://github.com/MichaelLod/byoky/releases/latest)
@@ -37,7 +43,7 @@ When using a source install, Chrome won't auto-update. To update:
 - **Option 1**: Download the latest release ZIP and replace the files
 - **Option 2**: `git pull && pnpm build`, then click the reload button on `chrome://extensions/`
 
-Once the Chrome Web Store version catches up, you can switch back to the store version for automatic updates.
+Once the Chrome Web Store version catches up, you can switch back to the store version for automatic updates. Export a backup from this wallet first and import it into the store wallet, then run `byoky-bridge install` again without `--dev`.
 
 ## Firefox
 

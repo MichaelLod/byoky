@@ -118,4 +118,56 @@ describe('docs snippets', () => {
     }
     expect(hits).toEqual([]);
   });
+
+  it('catch relay rejections inside the async connection listener', () => {
+    // handleConnection() and relay fetches reject when the browser never says
+    // hello or closes the tab mid-request. EventEmitter drops the promise an
+    // async listener returns, so without a try the rejection ends Node.
+    const unguarded: string[] = [];
+    let listeners = 0;
+    for (const file of SNIPPET_FILES) {
+      const text = read(file);
+      const re = /\.on\('connection',\s*async\b/g;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(text)) !== null) {
+        const call = text.indexOf('handleConnection(', m.index);
+        if (call === -1) continue;
+        listeners++;
+        if (!/\btry\s*\{/.test(text.slice(m.index, call))) {
+          unguarded.push(`${file}:${text.slice(0, m.index).split('\n').length}`);
+        }
+      }
+    }
+    expect(listeners).toBeGreaterThanOrEqual(4);
+    expect(unguarded).toEqual([]);
+  });
+
+  it('turn files into base64 without spreading the bytes into fromCharCode', () => {
+    // fromCharCode(...bytes) passes one argument per byte and overflows the
+    // stack from about 125 KB, so any real photo throws a RangeError.
+    const hits: string[] = [];
+    for (const file of [...SNIPPET_FILES, 'packages/web/app/page.tsx']) {
+      const text = read(file);
+      const re = /fromCharCode\(\s*\.\.\./g;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(text)) !== null) hits.push(`${file}:${text.slice(0, m.index).split('\n').length}`);
+    }
+    expect(hits).toEqual([]);
+  });
+
+  it('show streamed text in the page, not on process.stdout, in browser samples', () => {
+    // A browser has no `process`, so the first text delta would throw. Only
+    // Node samples (connectMock(), @byoky/sdk/server) may write to stdout.
+    const hits: string[] = [];
+    for (const file of SNIPPET_FILES) {
+      const text = read(file);
+      for (let at = text.indexOf('process.stdout'); at !== -1; at = text.indexOf('process.stdout', at + 1)) {
+        // The snippet runs from its opening fence or template literal to here.
+        const start = Math.max(text.lastIndexOf('```', at), text.lastIndexOf('{`', at), text.lastIndexOf('code: `', at));
+        if (/connectMock\(|@byoky\/sdk\/server/.test(text.slice(start, at))) continue;
+        hits.push(`${file}:${text.slice(0, at).split('\n').length}`);
+      }
+    }
+    expect(hits).toEqual([]);
+  });
 });

@@ -191,7 +191,7 @@ custom_providers:
             directly and doesn&apos;t read <code>ANTHROPIC_BASE_URL</code>.
             <code>--provider anthropic</code>, <code>hermes model → Anthropic</code>,
             and any leftover <code>ANTHROPIC_API_KEY</code> in{' '}
-            <code>~/.hermes/.env</code> all bypass byoky. Routing has to go
+            <code>~/.hermes/.env</code> all bypass Byoky. Routing has to go
             through a <code>custom_providers</code> entry, which is what the
             edits above set up.
           </p>

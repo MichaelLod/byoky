@@ -291,24 +291,29 @@ function buildConnectPage(opts: ConnectOptions, nonce: string): string {
   <title>Byoky — Connect Claude Code</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
   <style>
+    /* Byoky's brand (docs/brand/README.md): dark, violet, square. */
     :root {
-      --bg: #fafaf9;
-      --bg-card: #ffffff;
-      --bg-elevated: #f5f5f4;
-      --border: #e7e5e4;
-      --text: #1c1917;
-      --text-secondary: #57534e;
-      --text-muted: #a8a29e;
-      --teal: #FF4F00;
-      --teal-dark: #e64500;
-      --green: #16a34a;
+      --bg: #07060A;
+      --bg-card: #100D16;
+      --bg-elevated: #17121F;
+      --border: #2A2236;
+      --border-strong: #3B2D55;
+      --text: #ECE8F4;
+      --text-secondary: #A79FB8;
+      --text-muted: #857C95;
+      --teal: #7C3AED;
+      --teal-dark: #8B5CF6;
+      --phosphor: #A78BFA;
+      --green: #4ADE80;
+      --red: #F87171;
+      --display: 'Chakra Petch', system-ui, -apple-system, sans-serif;
     }
     *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
     html { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
     body {
-      font-family: 'Sora', system-ui, -apple-system, sans-serif;
+      font-family: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
       background: var(--bg);
       color: var(--text);
       min-height: 100vh;
@@ -321,12 +326,10 @@ function buildConnectPage(opts: ConnectOptions, nonce: string): string {
     .card {
       background: var(--bg-card);
       border: 1px solid var(--border);
-      border-radius: 16px;
       padding: 40px 36px 32px;
       max-width: 440px;
       width: 100%;
       text-align: center;
-      box-shadow: 0 4px 24px rgba(28, 25, 23, 0.04);
     }
     .eyebrow {
       display: inline-block;
@@ -334,14 +337,14 @@ function buildConnectPage(opts: ConnectOptions, nonce: string): string {
       font-weight: 600;
       letter-spacing: 0.12em;
       text-transform: uppercase;
-      color: var(--teal);
-      background: rgba(255, 79, 0, 0.08);
-      border: 1px solid rgba(255, 79, 0, 0.25);
+      color: var(--phosphor);
+      background: rgba(124, 58, 237, 0.18);
+      border: 1px solid var(--border-strong);
       padding: 5px 11px;
-      border-radius: 999px;
       margin-bottom: 18px;
     }
     h1 {
+      font-family: var(--display);
       font-size: 26px;
       font-weight: 700;
       letter-spacing: -0.02em;
@@ -349,7 +352,7 @@ function buildConnectPage(opts: ConnectOptions, nonce: string): string {
       margin-bottom: 8px;
     }
     h1 .grad {
-      background: linear-gradient(90deg, var(--teal), var(--teal-dark));
+      background: linear-gradient(90deg, var(--phosphor), #C4B5FD);
       -webkit-background-clip: text;
       background-clip: text;
       color: transparent;
@@ -369,35 +372,34 @@ function buildConnectPage(opts: ConnectOptions, nonce: string): string {
       color: var(--text-secondary);
       background: var(--bg-elevated);
       border: 1px solid var(--border);
-      border-radius: 999px;
       padding: 8px 14px;
       margin-bottom: 20px;
     }
-    .status .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--teal); animation: pulse 1.4s ease-in-out infinite; }
+    .status .dot { width: 7px; height: 7px; background: var(--teal); animation: pulse 1.4s ease-in-out infinite; }
     .status.success { color: var(--green); }
     .status.success .dot { background: var(--green); animation: none; }
-    .status.error { color: #b91c1c; }
-    .status.error .dot { background: #dc2626; animation: none; }
+    .status.error { color: var(--red); }
+    .status.error .dot { background: var(--red); animation: none; }
     @keyframes pulse {
-      0%, 100% { box-shadow: 0 0 0 0 rgba(255, 79, 0, 0.35); }
-      50% { box-shadow: 0 0 0 6px rgba(255, 79, 0, 0); }
+      0%, 100% { box-shadow: 0 0 0 0 rgba(124, 58, 237, 0.45); }
+      50% { box-shadow: 0 0 0 6px rgba(124, 58, 237, 0); }
     }
     .connect-btn {
       display: block;
       width: 100%;
       padding: 13px 20px;
       border: none;
-      border-radius: 10px;
       background: var(--teal);
       color: #fff;
-      font-family: inherit;
+      font-family: var(--display);
       font-size: 15px;
-      font-weight: 700;
-      letter-spacing: -0.01em;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
       cursor: pointer;
-      transition: background 0.15s ease, transform 0.15s ease;
+      transition: background 0.15s ease;
     }
-    .connect-btn:hover { background: var(--teal-dark); transform: translateY(-1px); }
+    .connect-btn:hover { background: var(--teal-dark); }
     .connect-btn:disabled { opacity: 0.6; cursor: default; transform: none; }
     .info {
       color: var(--text-muted);

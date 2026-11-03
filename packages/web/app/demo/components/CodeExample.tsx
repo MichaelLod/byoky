@@ -72,7 +72,9 @@ const extraction = await client.chat.completions.create({
   }],
 });
 
-const contact = JSON.parse(extraction.choices[0].message.content);
+const { content, refusal } = extraction.choices[0].message;
+if (!content) throw new Error(refusal ?? 'No content in the reply');
+const contact = JSON.parse(content);
 // { name: "Jane", email: "jane@acme.co", company: "Acme Inc" }`,
   },
   {
@@ -101,10 +103,11 @@ const stream = client.messages.stream({
   messages: [{ role: 'user', content: 'Write a haiku about security.' }],
 });
 
+const output = document.querySelector('#output')!;
 for await (const event of stream) {
   if (event.type === 'content_block_delta'
     && event.delta.type === 'text_delta') {
-    process.stdout.write(event.delta.text);
+    output.textContent += event.delta.text;
   }
 }`,
   },
@@ -174,9 +177,12 @@ const client = new Anthropic({
 
 // Read a file from an <input> or drag-and-drop
 const file: File = document.querySelector('input')!.files![0];
-const base64 = btoa(
-  String.fromCharCode(...new Uint8Array(await file.arrayBuffer())),
-);
+const bytes = new Uint8Array(await file.arrayBuffer());
+let binary = '';
+// One byte at a time: spreading a whole photo into fromCharCode
+// overflows the call stack.
+for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+const base64 = btoa(binary);
 
 const response = await client.messages.create({
   model: 'claude-sonnet-4-6',
@@ -222,24 +228,30 @@ const wss = new WebSocketServer({ port: 3001 });
 const byoky = new ByokyServer();
 
 wss.on('connection', async (ws) => {
-  const client = await byoky.handleConnection(ws);
-  console.log('Providers:', Object.keys(client.providers));
+  try {
+    const client = await byoky.handleConnection(ws);
+    console.log('Providers:', Object.keys(client.providers));
 
-  // Make LLM calls as if you had the API key
-  const fetch = client.createFetch('anthropic');
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 1024,
-      messages: [{ role: 'user', content: 'Hello!' }],
-    }),
-  });
-  const data = await res.json();
+    // Make LLM calls as if you had the API key
+    const fetch = client.createFetch('anthropic');
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 1024,
+        messages: [{ role: 'user', content: 'Hello!' }],
+      }),
+    });
+    const data = await res.json();
+  } catch (err) {
+    // Rejects when the browser never says hello or the tab closes
+    // mid-request. Uncaught, it would end the Node process.
+    console.error('[relay]', err);
+  }
 });`,
   },
   {
@@ -308,9 +320,16 @@ const results = await Promise.all(
       'CLI and desktop apps route API calls through the local Byoky Bridge. API keys never leave the extension; a Claude setup token goes to the local bridge, which makes that call from Node.',
     code: `# Install the bridge
 npm install -g @byoky/bridge
-byoky-bridge install
+byoky-bridge install   # registers the bridge; doesn't start the proxy
+byoky-bridge connect   # approve a session; the extension starts the proxy on 127.0.0.1:19280
 
-# The bridge starts an HTTP proxy on localhost
+# More than one provider:
+#   byoky-bridge connect --providers anthropic,openai
+#
+# Run connect again after a browser restart, a wallet lock or the
+# 24 h session expiry. ECONNREFUSED 127.0.0.1:19280 means the proxy
+# isn't running.
+#
 # CLI tools send requests to the bridge instead of the real API:
 #
 #   POST http://127.0.0.1:19280/anthropic/v1/messages

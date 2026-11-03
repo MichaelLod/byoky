@@ -129,7 +129,7 @@ export default function OpenClawTutorial() {
         <Step
           n={5}
           title="Pick your default model"
-          subtitle="OpenClaw's onboarding picks a non-byoky default. Point it at a byoky model so chat works out of the box."
+          subtitle="OpenClaw's onboarding picks a non-Byoky default. Point it at a Byoky model so chat works out of the box."
         >
           <Code>{`openclaw models set byoky-anthropic/claude-sonnet-4-6`}</Code>
           <p>
@@ -293,7 +293,7 @@ function Troubleshooting() {
     [
       'HTTP 401 "Missing or invalid bridge token"',
       <>
-        OpenClaw&apos;s byoky providers don&apos;t carry the current bridge
+        OpenClaw&apos;s Byoky providers don&apos;t carry the current bridge
         token (setups from older plugin versions sent a placeholder). Re-run{' '}
         <code>openclaw models auth login --provider byoky</code> to write it.
       </>,
@@ -303,7 +303,7 @@ function Troubleshooting() {
       <>
         OpenClaw is still pointing at the direct <code>openai</code> plugin's
         default. Run <code>openclaw models set byoky-anthropic/claude-sonnet-4-6</code>{' '}
-        (or another byoky model) to fix. Optionally{' '}
+        (or another Byoky model) to fix. Optionally{' '}
         <code>openclaw plugins disable openai</code> if you never plan to use
         it directly.
       </>,
@@ -337,7 +337,7 @@ function Troubleshooting() {
       <>
         Your Anthropic key or Pro/Max subscription is being throttled upstream
         (the limit is on your Anthropic account, not on Byoky). Switch the chat
-        model to a non-Anthropic byoky provider, or wait for the window to
+        model to a non-Anthropic Byoky provider, or wait for the window to
         clear.
       </>,
     ],

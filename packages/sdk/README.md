@@ -65,9 +65,15 @@ import { ByokyServer } from '@byoky/sdk/server';
 
 const server = new ByokyServer();
 wss.on('connection', async (ws) => {
-  const client = await server.handleConnection(ws);
-  const fetch = client.createFetch('anthropic');
-  // Make API calls -- proxied through the user's wallet
+  try {
+    const client = await server.handleConnection(ws);
+    const fetch = client.createFetch('anthropic');
+    // Make API calls -- proxied through the user's wallet
+  } catch (err) {
+    // A browser that never says hello, or a tab closed mid-request, rejects.
+    // Catch it: an unhandled rejection here ends the Node process.
+    console.error('[relay]', err);
+  }
 });
 ```
 
@@ -185,7 +191,7 @@ streams, and the relay carries binary responses such as audio as bytes.
 
 ```typescript
 const server = new ByokyServer({ pingInterval: 30000, helloTimeout: 10000 });
-const client = await server.handleConnection(ws);
+const client = await server.handleConnection(ws); // rejects, see below
 
 client.sessionId;                    // Session identifier
 client.providers;                    // Available providers
@@ -195,11 +201,21 @@ client.close();                      // Close connection
 client.onClose(() => { ... });       // Disconnect callback
 ```
 
+`handleConnection()` rejects with `RELAY_CONNECTION_FAILED` when the browser
+closes the socket or stays silent instead of sending its `relay:hello` (after
+at most `helloTimeout`). `client.createFetch` requests, and their response
+bodies, reject with `RELAY_DISCONNECTED` when the browser goes away
+mid-request (a closed tab, a dropped network), and with the wallet's error when
+the wallet refuses the request. Catch these inside an async `'connection'`
+listener: Node ends the process on an unhandled rejection.
+
 A request sent over the relay may be at most 1 MB once serialized (URL, headers and body); a larger one throws `ByokyError` `PROXY_ERROR` ("Request too large for the relay") before it is sent. Inline images count at their base64 size. Responses aren't capped.
 
 ### Connect Modal
 
 The built-in modal connects to the wallet when one is present, and otherwise shows install guidance (store link for the current browser, a hint to use the Byoky app's built-in browser on phones). If the user dismisses it without a wallet, `connect()` rejects with `WALLET_NOT_INSTALLED`; a cancelled approval rejects with `Error('User cancelled')`.
+
+By default it uses Byoky's dark violet look with square corners. A `theme` overrides the accent, background, text colour and corner radius; raised surfaces, borders and secondary text follow your background and text colours, so set both together.
 
 ```typescript
 const session = await byoky.connect({

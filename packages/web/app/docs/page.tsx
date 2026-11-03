@@ -546,12 +546,17 @@ const byoky = new Byoky({
       <Code lang="typescript">{`interface ModalOptions {
   container?: HTMLElement;      // mount point (defaults to document.body)
   theme?: {
-    accentColor?: string;
-    backgroundColor?: string;
-    textColor?: string;
-    borderRadius?: string;
+    accentColor?: string;       // default '#7C3AED'
+    backgroundColor?: string;   // default '#100D16'
+    textColor?: string;         // default '#ECE8F4'
+    borderRadius?: string;      // default '0px'
   };
 }`}</Code>
+      <p>
+        By default the modal uses Byoky&apos;s dark violet look with square corners. Raised
+        surfaces, borders and secondary text follow your <code>backgroundColor</code> and{' '}
+        <code>textColor</code>, so a light theme works as well as a dark one; set both together.
+      </p>
       <p>
         Without <code>modal</code>, <code>connect()</code> throws a <code>ByokyError</code> with code{' '}
         <code>WALLET_NOT_INSTALLED</code> when no wallet is present (and opens the store page for the
@@ -865,10 +870,11 @@ const stream = client.messages.stream({
   messages: [{ role: 'user', content: 'Write a haiku.' }],
 });
 
+const output = document.querySelector('#output')!;
 for await (const event of stream) {
   if (event.type === 'content_block_delta'
     && event.delta.type === 'text_delta') {
-    process.stdout.write(event.delta.text);
+    output.textContent += event.delta.text;
   }
 }`}</Code>
 
@@ -892,10 +898,11 @@ const res = await fetch('https://api.anthropic.com/v1/messages', {
   }),
 });
 
+const output = document.querySelector('#output')!;
 const reader = res.body!.getReader();
 const decoder = new TextDecoder();
 let buf = '';
-while (true) {
+read: while (true) {
   const { done, value } = await reader.read();
   if (done) break;
   buf += decoder.decode(value, { stream: true });
@@ -903,11 +910,11 @@ while (true) {
   buf = lines.pop() || '';
   for (const line of lines) {
     if (!line.startsWith('data: ')) continue;
-    const data = line.slice(6);
-    if (data === '[DONE]') return;
-    const event = JSON.parse(data);
-    if (event.type === 'content_block_delta') {
-      process.stdout.write(event.delta.text);
+    const event = JSON.parse(line.slice(6));
+    if (event.type === 'message_stop') break read;
+    if (event.type === 'content_block_delta'
+      && event.delta.type === 'text_delta') {
+      output.textContent += event.delta.text;
     }
   }
 }`}</Code>
@@ -1281,8 +1288,8 @@ function Errors() {
             ['INVALID_KEY', <>Only from <code>listModels()</code>: the models endpoint answered 401 or 403. Proxied requests never carry it; a provider&apos;s 401 reaches you as the provider sent it.</>, 'Prompt the user to check the credential in their wallet.'],
             ['TOKEN_EXPIRED', 'Reserved; no wallet sends it. An expired Claude setup token comes back as Anthropic\'s own 401 response.', 'Nothing to handle. On a 401 from the provider, ask the user to replace the credential in their wallet.'],
             ['PROXY_ERROR', <>Generic proxy-layer failure: the provider couldn&apos;t be reached, the extension crashed, a native message was dropped (HTTP 502), or a request got no response headers within <code>requestTimeout</code>.</>, 'Safe to retry once. Surface a generic error if it repeats.'],
-            ['RELAY_CONNECTION_FAILED', 'Your backend relay WebSocket could not reach the browser.', 'Check your relay URL and that the user\'s tab is still open; retry with backoff.'],
-            ['RELAY_DISCONNECTED', 'Relay peer disconnected mid-request (user closed tab, network drop).', <>Reopen the relay via <code>session.createRelay(url)</code>.</>],
+            ['RELAY_CONNECTION_FAILED', <>Server side, from <code>handleConnection()</code>: the browser&apos;s relay socket closed, or sent no <code>relay:hello</code> within <code>helloTimeout</code>.</>, <>Catch it in your <code>connection</code> listener (an unhandled rejection ends the Node process) and drop that socket. Check the relay URL the page passes to <code>session.createRelay()</code>.</>],
+            ['RELAY_DISCONNECTED', <>Server side: the browser went away mid-request (user closed the tab, network drop). Relay fetches and their response bodies reject with it.</>, <>Catch it like any failed fetch. The page reopens the relay with <code>session.createRelay(url)</code>.</>],
             ['UNKNOWN', 'Anything that doesn\'t map to a specific code (last-resort fallback).', 'Log the original message and surface a generic error. Treat as transient.'],
           ].map(([code, meaning, action]) => (
             <tr key={code as string}>
@@ -1485,22 +1492,38 @@ const relay = session.createRelay('wss://your-app.com/ws/relay');`}</Code>
 const byoky = new ByokyServer();
 
 wss.on('connection', async (ws) => {
-  const client = await byoky.handleConnection(ws);
-  const fetch = client.createFetch('anthropic');
+  try {
+    const client = await byoky.handleConnection(ws);
+    const fetch = client.createFetch('anthropic');
 
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 1024,
-      messages: [{ role: 'user', content: 'Hello!' }],
-    }),
-  });
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 1024,
+        messages: [{ role: 'user', content: 'Hello!' }],
+      }),
+    });
+  } catch (err) {
+    // The browser never said hello, or the tab closed mid-request.
+    console.error('[relay]', err);
+  }
 });`}</Code>
+
+      <p>
+        Keep the <code>try</code>/<code>catch</code>. <code>handleConnection()</code> rejects with{' '}
+        <code>RELAY_CONNECTION_FAILED</code> when the browser closes the socket or stays silent
+        instead of sending its <code>relay:hello</code> (after at most <code>helloTimeout</code>,
+        10 seconds by default). Relay fetches, and their response bodies, reject with{' '}
+        <code>RELAY_DISCONNECTED</code> when the browser goes away mid-request, and with the
+        wallet&apos;s error when the wallet refuses. An unhandled rejection in an async{' '}
+        <code>connection</code> listener ends the Node process, so one closed tab would take your
+        backend down.
+      </p>
     </Section>
   );
 }

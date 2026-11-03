@@ -539,8 +539,9 @@ function OpenClawCTA() {
               <p>
                 Use the keys already in your wallet, or an existing <strong>Claude Pro/Max</strong>{' '}
                 subscription via a setup token. The plugin routes through the local
-                bridge, so your keys stay in the wallet even when the agent runs in
-                your terminal.
+                bridge, so API keys stay in the wallet even when the agent runs in
+                your terminal. A setup token goes only as far as the bridge on your
+                computer.
               </p>
               <div className="openclaw-cta-actions">
                 <a href="/openclaw" className="btn btn-primary">
@@ -720,7 +721,8 @@ function ForDevelopers() {
                     <h4>CLI &amp; local apps</h4>
                     <p>
                       The Byoky Bridge lets CLI tools and desktop apps route
-                      through the wallet via a local HTTP proxy. Keys stay in the extension.
+                      through the wallet via a local HTTP proxy. API keys stay in the
+                      extension; a setup token goes only to the local bridge.
                     </p>
                   </div>
                 </div>
