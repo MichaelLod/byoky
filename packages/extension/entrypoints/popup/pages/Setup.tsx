@@ -67,7 +67,7 @@ export function Setup() {
         <div className="center-body">
           <p className="setup-copy" style={{ textAlign: 'center' }}>
             Apps connect to your wallet and send their AI requests through it.
-            Your keys stay encrypted on this device and never leave it.
+            Your keys are stored encrypted on this device and only sent to the provider you add them for.
           </p>
 
           <button
