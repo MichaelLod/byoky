@@ -419,6 +419,12 @@ class WalletStore(context: Context) {
             result
         }
 
+    /**
+     * Whether a key is stored for this credential. A local server (Ollama,
+     * LM Studio) can be added without one, for a server with no auth.
+     */
+    fun hasSecret(credentialId: String): Boolean = prefs.contains("key_$credentialId")
+
     fun decryptKey(credential: Credential): String {
         val password = masterPassword ?: throw IllegalStateException("Wallet locked")
         val encrypted = prefs.getString("key_${credential.id}", null)

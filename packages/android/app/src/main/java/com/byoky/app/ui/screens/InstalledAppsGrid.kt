@@ -8,6 +8,8 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.*
@@ -42,9 +44,12 @@ fun InstalledAppsGrid(
     val apps by wallet.installedApps.collectAsState()
 
     if (apps.isEmpty()) {
+        // Centred when it fits; scrolls when it doesn't (a phone in landscape,
+        // large font sizes) instead of squashing the button into a sliver.
         Column(
             modifier = modifier
                 .fillMaxSize()
+                .verticalScroll(rememberScrollState())
                 .padding(32.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,

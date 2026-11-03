@@ -7,10 +7,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -65,8 +63,8 @@ import kotlinx.coroutines.withContext
  * (assign an app to a group → its requests use that group's credential and,
  * when the group's destination is in a different family, get translated on
  * the fly). Mirrors the extension's `ConnectedApps.tsx` page; the mobile
- * gesture is long-press → "Move to group" sheet rather than drag-and-drop
- * since touch drag is awkward for small targets.
+ * gesture is tap → "Move to group" sheet rather than drag-and-drop since
+ * touch drag is awkward for small targets.
  */
 /**
  * Pending capability-gap confirmation. Set when the user has tapped a target
@@ -144,7 +142,14 @@ fun AppsScreen(wallet: WalletStore) {
     ) { padding ->
         LazyColumn(
             modifier = Modifier.padding(padding),
-            contentPadding = PaddingValues(start = 20.dp, top = 16.dp, end = 20.dp, bottom = 96.dp),
+            // Room to scroll the last group out from under the add button,
+            // which in the compact layout sits in the rail instead.
+            contentPadding = PaddingValues(
+                start = 20.dp,
+                top = 16.dp,
+                end = 20.dp,
+                bottom = if (isCompactHeight()) 16.dp else 96.dp,
+            ),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item {
@@ -400,8 +405,9 @@ private fun ConfirmDestructiveDialog(
 /**
  * One group with its assigned apps. Header shows the group name + provider/model
  * pin, body lists the connected apps, footer is empty placeholder when nothing's
- * assigned. Long-press an app to move it.
+ * assigned. Tap an app to move it.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun GroupBucket(
     group: Group,
@@ -433,31 +439,36 @@ private fun GroupBucket(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    CapsText(
-                        group.name,
-                        style = HeadingStyle.copy(fontSize = 16.sp),
-                        color = Bone,
-                        maxLines = 1,
-                        modifier = Modifier.weight(1f, fill = false),
-                    )
-                    if (group.providerId.isNotEmpty()) {
-                        Spacer(Modifier.width(8.dp))
-                        Tag(provider?.name ?: group.providerId)
-                    }
-                    if (!group.model.isNullOrEmpty()) {
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            group.model!!,
-                            color = Fog,
-                            style = MonoStyle.copy(fontSize = 10.sp),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier
-                                .weight(1f, fill = false)
-                                .border(1.dp, Seam)
-                                .padding(horizontal = 6.dp, vertical = 2.dp),
-                        )
+                // The name and the pinned model are what this screen is for:
+                // each gets the full width and wraps, instead of sharing one
+                // line with the provider and ending up as a few letters.
+                CapsText(
+                    group.name,
+                    style = HeadingStyle.copy(fontSize = 16.sp),
+                    color = Bone,
+                    maxLines = 3,
+                )
+                if (group.providerId.isNotEmpty() || !group.model.isNullOrEmpty()) {
+                    Spacer(Modifier.height(6.dp))
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        if (group.providerId.isNotEmpty()) {
+                            Tag(provider?.name ?: group.providerId)
+                        }
+                        if (!group.model.isNullOrEmpty()) {
+                            Text(
+                                group.model!!,
+                                color = Fog,
+                                style = MonoStyle.copy(fontSize = 10.sp),
+                                maxLines = 3,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier
+                                    .border(1.dp, Seam)
+                                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                            )
+                        }
                     }
                 }
                 Spacer(Modifier.height(4.dp))
@@ -508,7 +519,7 @@ private fun GroupBucket(
         if (sessions.isEmpty()) {
             Text(
                 if (isDefault) "Apps without an assigned group land here."
-                else "Long-press an app and pick this group to move it here.",
+                else "Tap an app and pick this group to move it here.",
                 color = Dim,
                 fontSize = 12.sp,
                 modifier = Modifier
@@ -912,12 +923,8 @@ private fun GroupEditorDialog(
             else -> "Edit Group"
         },
         text = {
-            Column(
-                modifier = Modifier
-                    .heightIn(max = 480.dp)
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
+            // RetroDialog scrolls this.
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 if (!isDefault) {
                     RetroTextField(
                         value = name,
@@ -1128,7 +1135,7 @@ private fun GroupEditorDialog(
  * + optional per-provider caps. The proxy enforces these on every request.
  */
 @Composable
-private fun AllowanceDialog(
+internal fun AllowanceDialog(
     origin: String,
     providers: List<String>,
     allowance: TokenAllowance?,

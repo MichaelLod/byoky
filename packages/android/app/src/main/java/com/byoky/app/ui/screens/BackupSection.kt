@@ -258,7 +258,7 @@ internal fun PasswordField(
  * password following the extension's rule: 12+ characters, strength ≥ 2.
  */
 @Composable
-private fun ExportPasswordDialog(wallet: WalletStore, onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
+internal fun ExportPasswordDialog(wallet: WalletStore, onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
     val scope = rememberCoroutineScope()
     var walletPassword by remember { mutableStateOf("") }
     var walletPasswordError by remember { mutableStateOf<String?>(null) }

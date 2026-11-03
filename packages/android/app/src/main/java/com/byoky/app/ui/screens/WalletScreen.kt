@@ -88,6 +88,7 @@ fun WalletScreen(
     var endpointTarget by remember { mutableStateOf<Credential?>(null) }
     var removeTarget by remember { mutableStateOf<Credential?>(null) }
     val gaze = rememberRavenGaze()
+    val compact = isCompactHeight()
     // Fixed for this visit to the tab, so the nod plays once and isn't cut short.
     val nodKey = remember { if (nodOnAppear) Any() else null }
     LaunchedEffect(Unit) {
@@ -121,6 +122,7 @@ fun WalletScreen(
                 keyCount = credentials.size,
                 gaze = gaze,
                 nodKey = nodKey,
+                compact = compact,
                 onOpenSettings = onNavigateToSettings,
             )
         },
@@ -146,7 +148,9 @@ fun WalletScreen(
         } else {
             LazyColumn(
                 modifier = Modifier.padding(padding),
-                contentPadding = PaddingValues(start = 20.dp, top = 16.dp, end = 20.dp, bottom = 96.dp),
+                // Room to scroll the last card out from under the add button,
+                // which in the compact layout sits in the rail instead.
+                contentPadding = PaddingValues(start = 20.dp, top = 16.dp, end = 20.dp, bottom = if (compact) 16.dp else 96.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 if (showUnreadableVaultNotice) {
@@ -162,8 +166,11 @@ fun WalletScreen(
                     )
                 }
                 items(credentials, key = { it.id }) { credential ->
+                    // The key is stored before the credential is listed, and never replaced.
+                    val hasKey = remember(credential.id) { wallet.hasSecret(credential.id) }
                     CredentialCard(
                         credential = credential,
+                        hasKey = hasKey,
                         usage = usageByProvider[credential.providerId],
                         onOpenStats = { statsCredentialId = credential.id },
                         onRename = { renameTarget = credential },
@@ -221,15 +228,20 @@ fun WalletScreen(
 
 /**
  * Wallet header: the Byoky lockup and Settings, then the status line and the
- * screen title, with Muninn perched on the right watching the finger.
+ * screen title, with Muninn perched on the right watching the finger. In
+ * the [compact] layout (a phone in landscape) it is one row, the status line
+ * and a smaller Muninn beside the lockup, so the cards keep the height: the
+ * full header left them about 80 dp.
  */
 @Composable
 private fun WalletHeader(
     keyCount: Int,
     gaze: RavenGaze,
     nodKey: Any?,
+    compact: Boolean,
     onOpenSettings: () -> Unit,
 ) {
+    val status = "Unlocked · $keyCount key${if (keyCount == 1) "" else "s"}"
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -246,17 +258,29 @@ private fun WalletHeader(
         ) {
             BrandMark()
             Spacer(Modifier.weight(1f))
+            if (compact) {
+                StatusPill(status, color = Signal)
+                Spacer(Modifier.width(12.dp))
+                Muninn(
+                    RavenMood.WATCHING,
+                    modifier = Modifier.size(48.dp),
+                    frame = RavenFrame.BUST,
+                    gaze = gaze,
+                    nodKey = nodKey,
+                )
+            }
             IconButton(onClick = onOpenSettings) {
                 Icon(Icons.Default.Settings, "Settings", tint = Fog)
             }
         }
+        if (compact) return@Column
         Row(verticalAlignment = Alignment.Bottom) {
             Column(
                 modifier = Modifier
                     .weight(1f)
                     .padding(bottom = 16.dp),
             ) {
-                StatusPill("Unlocked · $keyCount key${if (keyCount == 1) "" else "s"}", color = Signal)
+                StatusPill(status, color = Signal)
                 Spacer(Modifier.height(6.dp))
                 CapsText(
                     "Wallet",
@@ -421,9 +445,12 @@ private fun EditEndpointDialog(
 
 @Composable
 private fun EmptyWallet(modifier: Modifier, onAdd: () -> Unit) {
+    // Centred when it fits; scrolls when it doesn't (a phone in landscape,
+    // large font sizes) instead of squashing the button into a sliver.
     Column(
         modifier = modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(40.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
@@ -440,7 +467,7 @@ private fun EmptyWallet(modifier: Modifier, onAdd: () -> Unit) {
         CapsText("No credentials yet", style = HeadingStyle, color = Bone)
         Spacer(Modifier.height(8.dp))
         Text(
-            "Add your first API key to get started. Keys are encrypted with your master password and never leave this device.",
+            "Add your first API key to get started. Keys are encrypted with your master password, stored on this device and only sent to the provider you add them for.",
             color = Fog,
             textAlign = TextAlign.Center,
             fontSize = 14.sp,
@@ -454,6 +481,7 @@ private fun EmptyWallet(modifier: Modifier, onAdd: () -> Unit) {
 @Composable
 private fun CredentialCard(
     credential: Credential,
+    hasKey: Boolean,
     usage: CredentialUsageStats?,
     onOpenStats: () -> Unit,
     onRename: () -> Unit,
@@ -486,8 +514,7 @@ private fun CredentialCard(
                 )
                 Spacer(Modifier.height(2.dp))
                 val providerName = provider?.name ?: credential.providerId
-                // OAuth on Android is always an Anthropic setup token; say so, as the add sheet does.
-                val typeLabel = if (credential.authMethod == AuthMethod.API_KEY) "API Key" else "Setup Token"
+                val typeLabel = credentialTypeLabel(credential.providerId, credential.authMethod, hasKey)
                 // One text, so at large font sizes it wraps between words
                 // instead of cutting the provider name down to an ellipsis.
                 Text(
@@ -537,6 +564,17 @@ private fun CredentialCard(
             )
         }
     }
+}
+
+/**
+ * What a credential card calls its credential. OAuth on Android is always an
+ * Anthropic setup token; say so, as the add sheet does. An Ollama or LM
+ * Studio server added without a key (it has no auth) has no API key.
+ */
+internal fun credentialTypeLabel(providerId: String, authMethod: AuthMethod, hasKey: Boolean): String = when {
+    authMethod != AuthMethod.API_KEY -> "Setup Token"
+    !hasKey && (providerId == "ollama" || providerId == "lm_studio") -> "No auth"
+    else -> "API Key"
 }
 
 /**

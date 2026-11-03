@@ -14,6 +14,8 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
@@ -41,6 +43,16 @@ import com.byoky.app.ui.components.panel
 import com.byoky.app.ui.theme.*
 
 private const val APP_RUNTIME_ROUTE = "app/{appId}"
+
+/**
+ * A window this short (a phone in landscape) gets the compact layout of the
+ * main tabs: a navigation rail at the side, holding the add button, instead
+ * of the bottom bar and the floating button, and a one-row Wallet header.
+ * The lock screens use the same limit (LockScreenFrame).
+ */
+@Composable
+@ReadOnlyComposable
+internal fun isCompactHeight(): Boolean = LocalConfiguration.current.screenHeightDp < 500
 
 /**
  * The installed app to reopen after unlocking: the one on screen when the
@@ -118,57 +130,41 @@ private fun MainScreen(wallet: WalletStore, resumeAppId: String?, onAppShown: (S
         }
     }
 
+    fun selectTab(route: String) {
+        navController.navigate(route) {
+            popUpTo("wallet") { inclusive = false }
+            launchSingleTop = true
+        }
+    }
+
+    val addButton: @Composable () -> Unit = {
+        AddButton(
+            menuOpen = fabMenuOpen,
+            onMenuOpenChange = { fabMenuOpen = it },
+            onAddCredential = { showAddCredential = true },
+            onAddApp = { showAddApp = true },
+        )
+    }
+
+    // On a phone in landscape, a bottom bar and a floating add button left
+    // the tabs a strip about 80 dp tall, and the button sat on the cards'
+    // trailing buttons. A rail at the side holds both instead.
+    val rail = isCompactHeight() && !inAppRuntime
+    // The rail's background runs under the status bar and under a navigation
+    // bar or camera cutout on its side, and its items keep clear of them. The
+    // tabs keep clear of a navigation bar or cutout on the other side.
+    val railInsets = WindowInsets.systemBars.union(WindowInsets.displayCutout)
+
     Scaffold(
         containerColor = Void,
         // Each tab draws its own header under the status bar; only the
-        // navigation bar is reserved here.
-        contentWindowInsets = WindowInsets.navigationBars,
+        // navigation bar is reserved here, or with the rail nothing.
+        contentWindowInsets = if (rail) WindowInsets(0, 0, 0, 0) else WindowInsets.navigationBars,
         floatingActionButton = {
-            if (showFab) {
-                Box {
-                    Box(
-                        modifier = Modifier
-                            .drawBehind {
-                                val ring = 4.dp.toPx()
-                                drawRect(
-                                    Violet.copy(alpha = 0.2f),
-                                    topLeft = Offset(-ring, -ring),
-                                    size = Size(size.width + 2 * ring, size.height + 2 * ring),
-                                )
-                            }
-                            .background(Violet)
-                            .size(56.dp)
-                            .clickable { fabMenuOpen = true },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(Icons.Default.Add, contentDescription = "Open add menu", tint = Color.White)
-                    }
-                    RetroDropdownMenu(
-                        expanded = fabMenuOpen,
-                        onDismissRequest = { fabMenuOpen = false },
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text("Add credential", color = Bone) },
-                            leadingIcon = { Icon(Icons.Default.Key, null, tint = Phosphor) },
-                            onClick = {
-                                fabMenuOpen = false
-                                showAddCredential = true
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Add app", color = Bone) },
-                            leadingIcon = { Icon(Icons.Default.Apps, null, tint = Phosphor) },
-                            onClick = {
-                                fabMenuOpen = false
-                                showAddApp = true
-                            },
-                        )
-                    }
-                }
-            }
+            if (showFab && !rail) addButton()
         },
         bottomBar = {
-            if (!inAppRuntime) {
+            if (!inAppRuntime && !rail) {
                 NavigationBar(
                     containerColor = Ink,
                     tonalElevation = 0.dp,
@@ -179,27 +175,12 @@ private fun MainScreen(wallet: WalletStore, resumeAppId: String?, onAppShown: (S
                         drawRect(Seam, size = Size(size.width, 1.dp.toPx()))
                     },
                 ) {
-                    // One line, never broken mid-word; at the largest font
-                    // sizes the tracking goes so "CONNECTED" still fits.
-                    val labelTracking = if (LocalDensity.current.fontScale > 1.5f) 0.em else 0.1.em
                     tabs.forEachIndexed { index, (label, icon, route) ->
                         NavigationBarItem(
-                            icon = { Icon(icon, contentDescription = label, modifier = Modifier.size(22.dp)) },
-                            label = {
-                                CapsText(
-                                    label,
-                                    style = MonoStyle.copy(fontSize = 10.sp, letterSpacing = labelTracking),
-                                    maxLines = 1,
-                                    softWrap = false,
-                                )
-                            },
+                            icon = { TabIcon(icon, label) },
+                            label = { TabLabel(label) },
                             selected = selectedTab == index,
-                            onClick = {
-                                navController.navigate(route) {
-                                    popUpTo("wallet") { inclusive = false }
-                                    launchSingleTop = true
-                                }
-                            },
+                            onClick = { selectTab(route) },
                             colors = NavigationBarItemDefaults.colors(
                                 selectedIconColor = Lilac,
                                 selectedTextColor = Lilac,
@@ -213,42 +194,88 @@ private fun MainScreen(wallet: WalletStore, resumeAppId: String?, onAppShown: (S
             }
         },
     ) { padding ->
-        NavHost(
-            navController = navController,
-            startDestination = "wallet",
-            modifier = Modifier.padding(padding),
+        // What the bar takes is consumed here: the tabs' own Scaffolds
+        // reserved the navigation bar a second time, 24 dp of dead space.
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .consumeWindowInsets(padding),
         ) {
-            composable("wallet") {
-                WalletScreen(
-                    wallet = wallet,
-                    onNavigateToSettings = {
-                        navController.navigate("settings") { launchSingleTop = true }
+            if (rail) {
+                NavigationRail(
+                    containerColor = Ink,
+                    header = if (showFab) ({ addButton() }) else null,
+                    windowInsets = railInsets.only(WindowInsetsSides.Vertical + WindowInsetsSides.Start),
+                    modifier = Modifier.drawBehind {
+                        val seam = 1.dp.toPx()
+                        drawRect(Seam, topLeft = Offset(size.width - seam, 0f), size = Size(seam, size.height))
                     },
-                    nodOnAppear = unlockNodPending,
-                    onNodShown = { unlockNodPending = false },
-                )
+                ) {
+                    tabs.forEachIndexed { index, (label, icon, route) ->
+                        NavigationRailItem(
+                            icon = { TabIcon(icon, label) },
+                            label = { TabLabel(label) },
+                            selected = selectedTab == index,
+                            onClick = { selectTab(route) },
+                            colors = NavigationRailItemDefaults.colors(
+                                selectedIconColor = Lilac,
+                                selectedTextColor = Lilac,
+                                indicatorColor = Color.Transparent,
+                                unselectedIconColor = Dim,
+                                unselectedTextColor = Dim,
+                            ),
+                        )
+                    }
+                }
             }
-            composable("apps") {
-                InstalledAppsScreen(
-                    wallet = wallet,
-                    onOpenApp = { openApp(it) },
-                    onAddApp = { showAddApp = true },
-                )
-            }
-            composable("connected") { AppsScreen(wallet) }
-            composable(APP_RUNTIME_ROUTE) { entry ->
-                AppRuntimeScreen(
-                    wallet = wallet,
-                    appId = entry.arguments?.getString("appId").orEmpty(),
-                    // Pops this app off and nothing else: a second tap (or a
-                    // renderer crash) mid-animation finds no app to pop
-                    // instead of popping the tab under it to a blank screen.
-                    onClose = { navController.popBackStack(APP_RUNTIME_ROUTE, inclusive = true) },
-                )
-            }
-            composable("settings") {
-                // Back to the Wallet tab; a second tap mid-animation can't pop past it.
-                SettingsScreen(wallet, onBack = { navController.popBackStack("wallet", inclusive = false) })
+            NavHost(
+                navController = navController,
+                startDestination = "wallet",
+                modifier = if (rail) {
+                    Modifier
+                        .weight(1f)
+                        .consumeWindowInsets(railInsets.only(WindowInsetsSides.Start))
+                        .windowInsetsPadding(
+                            WindowInsets.navigationBars.union(WindowInsets.displayCutout)
+                                .only(WindowInsetsSides.End + WindowInsetsSides.Bottom),
+                        )
+                } else {
+                    Modifier.weight(1f)
+                },
+            ) {
+                composable("wallet") {
+                    WalletScreen(
+                        wallet = wallet,
+                        onNavigateToSettings = {
+                            navController.navigate("settings") { launchSingleTop = true }
+                        },
+                        nodOnAppear = unlockNodPending,
+                        onNodShown = { unlockNodPending = false },
+                    )
+                }
+                composable("apps") {
+                    InstalledAppsScreen(
+                        wallet = wallet,
+                        onOpenApp = { openApp(it) },
+                        onAddApp = { showAddApp = true },
+                    )
+                }
+                composable("connected") { AppsScreen(wallet) }
+                composable(APP_RUNTIME_ROUTE) { entry ->
+                    AppRuntimeScreen(
+                        wallet = wallet,
+                        appId = entry.arguments?.getString("appId").orEmpty(),
+                        // Pops this app off and nothing else: a second tap (or a
+                        // renderer crash) mid-animation finds no app to pop
+                        // instead of popping the tab under it to a blank screen.
+                        onClose = { navController.popBackStack(APP_RUNTIME_ROUTE, inclusive = true) },
+                    )
+                }
+                composable("settings") {
+                    // Back to the Wallet tab; a second tap mid-animation can't pop past it.
+                    SettingsScreen(wallet, onBack = { navController.popBackStack("wallet", inclusive = false) })
+                }
             }
         }
     }
@@ -279,6 +306,76 @@ private fun MainScreen(wallet: WalletStore, resumeAppId: String?, onAppShown: (S
             onDismiss = { reconnectPrompt = null },
         )
     }
+}
+
+/** The violet add button and its menu: add a credential or an app. */
+@Composable
+private fun AddButton(
+    menuOpen: Boolean,
+    onMenuOpenChange: (Boolean) -> Unit,
+    onAddCredential: () -> Unit,
+    onAddApp: () -> Unit,
+) {
+    Box {
+        Box(
+            modifier = Modifier
+                .drawBehind {
+                    val ring = 4.dp.toPx()
+                    drawRect(
+                        Violet.copy(alpha = 0.2f),
+                        topLeft = Offset(-ring, -ring),
+                        size = Size(size.width + 2 * ring, size.height + 2 * ring),
+                    )
+                }
+                .background(Violet)
+                .size(56.dp)
+                .clickable { onMenuOpenChange(true) },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Default.Add, contentDescription = "Open add menu", tint = Color.White)
+        }
+        RetroDropdownMenu(
+            expanded = menuOpen,
+            onDismissRequest = { onMenuOpenChange(false) },
+        ) {
+            DropdownMenuItem(
+                text = { Text("Add credential", color = Bone) },
+                leadingIcon = { Icon(Icons.Default.Key, null, tint = Phosphor) },
+                onClick = {
+                    onMenuOpenChange(false)
+                    onAddCredential()
+                },
+            )
+            DropdownMenuItem(
+                text = { Text("Add app", color = Bone) },
+                leadingIcon = { Icon(Icons.Default.Apps, null, tint = Phosphor) },
+                onClick = {
+                    onMenuOpenChange(false)
+                    onAddApp()
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun TabIcon(icon: ImageVector, label: String) {
+    Icon(icon, contentDescription = label, modifier = Modifier.size(22.dp))
+}
+
+/**
+ * A tab's name: one line, never broken mid-word; at the largest font sizes
+ * the tracking goes so "CONNECTED" still fits.
+ */
+@Composable
+private fun TabLabel(label: String) {
+    val tracking = if (LocalDensity.current.fontScale > 1.5f) 0.em else 0.1.em
+    CapsText(
+        label,
+        style = MonoStyle.copy(fontSize = 10.sp, letterSpacing = tracking),
+        maxLines = 1,
+        softWrap = false,
+    )
 }
 
 /**
