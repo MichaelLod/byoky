@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest';
-import { bg, mount, run, typeInto, type Mounted } from './helpers/popup-harness';
+import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
+import { bg, mount, run, typeInto, buttonByText, type Mounted } from './helpers/popup-harness';
 
 type Store = typeof import('../entrypoints/popup/store');
 let useWalletStore: Store['useWalletStore'];
@@ -83,5 +83,39 @@ describe('add-credential Save says when it can work (F123)', () => {
     await fill(c, '#baseUrl', '');
     expect(c.querySelector('.error')).toBeNull();
     expect(save(c).disabled).toBe(true);
+  });
+});
+
+// F021: the background refuses setup tokens in Safari (it can't reach the
+// Byoky Bridge), so the form must not offer one or send the user to npm.
+describe('setup tokens are offered only where the bridge can work', () => {
+  afterEach(() => { vi.unstubAllEnvs(); });
+
+  it('Chrome and Firefox offer the Setup Token toggle for Anthropic', async () => {
+    const c = await openForm();
+    expect(buttonByText(c, 'Setup Token')).toBeDefined();
+  });
+
+  it('Safari offers only an API key, and never the bridge install', async () => {
+    vi.stubEnv('SAFARI', 'true');
+    const c = await openForm();
+    expect(c.querySelector<HTMLSelectElement>('#provider')!.value).toBe('anthropic');
+    expect(buttonByText(c, 'Setup Token')).toBeUndefined();
+    expect(c.textContent).not.toContain('byoky-bridge install');
+    expect(c.querySelector('label[for=apiKey]')?.textContent).toContain('API Key');
+    expect(bg.actions()).not.toContain('checkBridge');
+  });
+
+  it('Safari says a setup token from a backup won\'t work there', async () => {
+    vi.stubEnv('SAFARI', 'true');
+    bg.state.credentials = [
+      { id: 'c1', providerId: 'anthropic', label: 'Claude Max', authMethod: 'oauth', createdAt: 1 },
+      { id: 'c2', providerId: 'anthropic', label: 'Console', authMethod: 'api_key', createdAt: 2 },
+    ];
+    view = await mount(App);
+    const notes = [...view.container.querySelectorAll('.credential-card')]
+      .map((card) => card.querySelector('.warning-note')?.textContent ?? null);
+    expect(notes[0]).toContain('Requests with this one fail in Safari');
+    expect(notes[1]).toBeNull();
   });
 });

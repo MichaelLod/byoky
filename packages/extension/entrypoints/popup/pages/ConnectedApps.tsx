@@ -1,7 +1,8 @@
-import { useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { useWalletStore } from '../store';
 import { TrustResetNotice } from '../components/TrustResetNotice';
 import { LimitsHoldNotice } from '../components/LimitsHoldNotice';
+import { FormError } from '../components/FormError';
 import {
   PROVIDERS,
   type TokenAllowance, type Group, type Session, type CredentialMeta,
@@ -16,6 +17,7 @@ import {
 } from '@byoky/core';
 import { describeOrigin } from '../utils/origin';
 import { useFormInUse } from '../hooks/useFormInUse';
+import { parseTokenLimit } from '../utils/token-limit';
 
 function timeAgo(timestamp: number): string {
   const seconds = Math.floor((Date.now() - timestamp) / 1000);
@@ -52,6 +54,10 @@ export function ConnectedApps() {
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
   const [showCreateGroup, setShowCreateGroup] = useState(false);
   const [dragOriginOver, setDragOriginOver] = useState<string | null>(null);
+  // Destructive actions ask first, inline (see InlineConfirm).
+  const [confirmingDisconnectAll, setConfirmingDisconnectAll] = useState(false);
+  const [confirmingDeleteGroup, setConfirmingDeleteGroup] = useState<string | null>(null);
+  const [confirmingRemoveSite, setConfirmingRemoveSite] = useState<string | null>(null);
   // Set while the pointer is down on a card's Group select, so pressing it
   // doesn't start dragging the card.
   const pressingGroupSelect = useRef(false);
@@ -62,6 +68,11 @@ export function ConnectedApps() {
     targetGroupName: string;
     targetModel: string;
   } | null>(null);
+
+  // Disconnect all goes when one app or none is left; so does its question.
+  useEffect(() => {
+    if (sessions.length <= 1) setConfirmingDisconnectAll(false);
+  }, [sessions.length]);
 
   // Lifetime totals, the numbers allowances are enforced against (the
   // request log only keeps the last 500 entries).
@@ -149,8 +160,9 @@ export function ConnectedApps() {
     const usage = getOriginUsage(origin);
     const allowance = tokenAllowances.find((a) => a.origin === origin);
     const isEditing = editingOrigin === origin;
-    const pct = allowance?.totalLimit ? Math.min(100, (usage.total / allowance.totalLimit) * 100) : 0;
     const isOver = allowance?.totalLimit != null && usage.total >= allowance.totalLimit;
+    // A limit of 0 blocks the app: always full.
+    const pct = allowance?.totalLimit == null ? 0 : isOver ? 100 : (usage.total / allowance.totalLimit) * 100;
     return (
       <>
         <div className="allowance-section">
@@ -211,19 +223,33 @@ export function ConnectedApps() {
     <div>
       <LimitsHoldNotice />
       <TrustResetNotice />
-      {error && !formOpen && <div className="error">{error}</div>}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+      {error && !formOpen && <FormError>{error}</FormError>}
+      <div className="page-title-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
         <h2 className="page-title" style={{ marginBottom: 0 }}>Connected Apps</h2>
         {sessions.length > 1 && (
           <button
             className="text-link bracket-link"
             style={{ color: 'var(--danger)', fontSize: '11px' }}
-            onClick={() => sessions.forEach((s) => revokeSession(s.id))}
+            onClick={() => setConfirmingDisconnectAll(true)}
           >
             Disconnect all
           </button>
         )}
       </div>
+
+      {confirmingDisconnectAll && (
+        <InlineConfirm
+          confirmLabel="Disconnect all"
+          onCancel={() => setConfirmingDisconnectAll(false)}
+          onConfirm={() => {
+            setConfirmingDisconnectAll(false);
+            sessions.forEach((s) => revokeSession(s.id));
+          }}
+        >
+          Disconnect {sessions.length} apps? Every connected app loses access to your keys until
+          you approve it again.
+        </InlineConfirm>
+      )}
 
       {sessions.length > 0 && (
         <div className="warning-box" style={{ marginBottom: '12px' }}>
@@ -396,17 +422,26 @@ export function ConnectedApps() {
                   <button
                     className="text-link bracket-link"
                     style={{ fontSize: '11px', color: 'var(--danger)' }}
-                    onClick={() => {
-                      if (confirm(`Delete group "${group.name}"? Apps in this group will move back to Default.`)) {
-                        deleteGroup(group.id);
-                      }
-                    }}
+                    onClick={() => setConfirmingDeleteGroup(group.id)}
                   >
                     Delete
                   </button>
                 </div>
               )}
             </div>
+
+            {confirmingDeleteGroup === group.id && (
+              <InlineConfirm
+                confirmLabel="Delete"
+                onCancel={() => setConfirmingDeleteGroup(null)}
+                onConfirm={() => {
+                  setConfirmingDeleteGroup(null);
+                  deleteGroup(group.id);
+                }}
+              >
+                Delete group &ldquo;{group.name}&rdquo;? Apps in this group will move back to Default.
+              </InlineConfirm>
+            )}
 
             {editingGroupId === group.id && (
               <GroupForm
@@ -531,37 +566,107 @@ export function ConnectedApps() {
           <p className="card-subtitle" style={{ marginBottom: '12px' }}>
             These sites connect without asking for approval.
           </p>
-          {trustedSites.map((site) => (
-            <div key={site.origin} className="card">
-              <div className="card-header">
-                <div style={{ minWidth: 0 }}>
-                  <span className="card-title" title={site.origin} style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {formatOrigin(site.origin)}
-                  </span>
-                  <div className="card-subtitle mono">
-                    Trusted {timeAgo(site.trustedAt)}
-                  </div>
-                </div>
-                <button
-                  className="btn btn-danger btn-sm"
-                  onClick={() => removeTrustedSite(site.origin)}
-                >
-                  Remove
-                </button>
-              </div>
-              {site.allowedProviders && site.allowedProviders.length > 0 && (
-                <div className="connected-providers" style={{ marginTop: '8px' }}>
-                  {site.allowedProviders.map((id: string) => (
-                    <span key={id} className="badge badge-provider">
-                      {PROVIDERS[id]?.name ?? id}
+          {trustedSites.map((site) => {
+            // Trusted before plain-http sites couldn't be: it asks again, and
+            // shows its scheme so it can't pass for the https site.
+            const { label, insecure } = describeOrigin(site.origin);
+            return (
+              <div key={site.origin} className="card">
+                <div className="card-header">
+                  <div style={{ minWidth: 0 }}>
+                    <span className="card-title" title={site.origin} style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {insecure ? site.origin : label}
                     </span>
-                  ))}
+                    <div className="card-subtitle mono">
+                      Trusted {timeAgo(site.trustedAt)}
+                    </div>
+                    {insecure && (
+                      <div className="card-subtitle trusted-site-insecure">
+                        <span className="result-tag alarm">Not secure</span>
+                        {' '}Plain http, so it asks before connecting.
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    className="btn btn-danger btn-sm"
+                    onClick={() => setConfirmingRemoveSite(site.origin)}
+                  >
+                    Remove
+                  </button>
                 </div>
-              )}
-            </div>
-          ))}
+                {confirmingRemoveSite === site.origin && (
+                  <InlineConfirm
+                    confirmLabel="Remove"
+                    onCancel={() => setConfirmingRemoveSite(null)}
+                    onConfirm={() => {
+                      setConfirmingRemoveSite(null);
+                      removeTrustedSite(site.origin);
+                    }}
+                  >
+                    Stop trusting {insecure ? site.origin : label}? Its next connect will ask for approval.
+                  </InlineConfirm>
+                )}
+                {site.allowedProviders && site.allowedProviders.length > 0 && (
+                  <div className="connected-providers" style={{ marginTop: '8px' }}>
+                    {site.allowedProviders.map((id: string) => (
+                      <span key={id} className="badge badge-provider">
+                        {PROVIDERS[id]?.name ?? id}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Asks before a destructive action, inline: popups can't rely on
+ * window.confirm (Firefox doesn't show dialogs from extension popups).
+ * Focus starts on Cancel; Escape cancels, and cancelling gives focus back
+ * to the button that asked.
+ */
+function InlineConfirm({ children, confirmLabel, onConfirm, onCancel }: {
+  children: ReactNode;
+  confirmLabel: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const id = useId();
+  // Read while rendering, before Cancel takes focus.
+  const [opener] = useState(() => document.activeElement);
+
+  function cancel() {
+    onCancel();
+    if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
+  }
+
+  return (
+    <div
+      className="warning-box inline-confirm"
+      role="group"
+      aria-labelledby={id}
+      onKeyDown={(e) => {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          e.stopPropagation();
+          cancel();
+        }
+      }}
+    >
+      <div id={id}>{children}</div>
+      <div className="inline-confirm-actions">
+        <button type="button" className="btn btn-secondary btn-sm" onClick={cancel} autoFocus>
+          Cancel
+        </button>
+        <button type="button" className="btn btn-danger btn-sm" onClick={onConfirm}>
+          {confirmLabel}
+        </button>
+      </div>
     </div>
   );
 }
@@ -586,6 +691,9 @@ function GroupForm({
   // Credential pin. Empty string means "no pin — any credential".
   const [credentialId, setCredentialId] = useState<string>(group?.credentialId ?? '');
   const [model, setModel] = useState(group?.model ?? '');
+  // The form shows for a new group and for each group being edited, so its
+  // ids (labels, the model list) must not repeat.
+  const uid = useId();
 
   const matchingCreds = credentials.filter((c) => c.providerId === providerId);
   // Pull the @byoky/core registry's known models for the chosen provider.
@@ -624,18 +732,21 @@ function GroupForm({
   return (
     <div style={{ marginTop: '8px' }}>
       <div className="form-group">
-        <label>Group name</label>
+        <label htmlFor={`${uid}-name`}>Group name</label>
         <input
+          id={`${uid}-name`}
           type="text"
           placeholder="e.g. Engineering"
           value={name}
           onChange={(e) => setName(e.target.value)}
           maxLength={200}
+          aria-describedby={error ? `${uid}-error` : undefined}
         />
       </div>
       <div className="form-group">
-        <label>Provider</label>
+        <label htmlFor={`${uid}-provider`}>Provider</label>
         <select
+          id={`${uid}-provider`}
           value={providerId}
           onChange={(e) => {
             setProviderId(e.target.value);
@@ -649,8 +760,8 @@ function GroupForm({
       </div>
       {matchingCreds.length > 0 ? (
         <div className="form-group">
-          <label>Credential (optional)</label>
-          <select value={credentialId} onChange={(e) => setCredentialId(e.target.value)}>
+          <label htmlFor={`${uid}-cred`}>Credential (optional)</label>
+          <select id={`${uid}-cred`} value={credentialId} onChange={(e) => setCredentialId(e.target.value)}>
             <option value="">Any {PROVIDERS[providerId]?.name ?? providerId} credential</option>
             {matchingCreds.map((c) => (
               <option key={c.id} value={c.id}>{c.label}</option>
@@ -675,28 +786,30 @@ function GroupForm({
         </div>
       )}
       <div className="form-group">
-        <label>Default model (optional)</label>
+        <label htmlFor={`${uid}-model`}>Default model (optional)</label>
         <input
+          id={`${uid}-model`}
           type="text"
           placeholder="e.g. claude-sonnet-5-5"
           value={model}
           onChange={(e) => setModel(e.target.value)}
           maxLength={200}
-          list={`group-models-${providerId}`}
+          list={`${uid}-models-${providerId}`}
+          aria-describedby={`${uid}-model-hint`}
         />
         {/* Native datalist gives the input a typeahead dropdown over the
             registry entries for the chosen provider, while still letting the
             user type custom model ids the registry doesn't know about. */}
-        <datalist id={`group-models-${providerId}`}>
+        <datalist id={`${uid}-models-${providerId}`}>
           {suggestedModels.map((m) => (
             <option key={m.id} value={m.id}>{m.displayName}</option>
           ))}
         </datalist>
-        <div className="card-subtitle" style={{ marginTop: '4px' }}>
+        <div id={`${uid}-model-hint`} className="card-subtitle" style={{ marginTop: '4px' }}>
           {modelInfo ?? modelHint}
         </div>
       </div>
-      {error && <div className="error">{error}</div>}
+      {error && <FormError id={`${uid}-error`}>{error}</FormError>}
       <div style={{ display: 'flex', gap: '8px' }}>
         <button className="btn btn-primary btn-sm" onClick={handleSave} disabled={!trimmedName}>Save</button>
         <button className="btn btn-secondary btn-sm" onClick={onCancel}>Cancel</button>
@@ -752,52 +865,95 @@ function AllowanceForm({
       providers.map((id) => [id, allowance?.providerLimits?.[id] != null ? String(allowance.providerLimits[id]) : '']),
     ),
   );
+  // Each app card has its own form, so its ids must not repeat.
+  const uid = useId();
+  // Fields that don't hold a whole number of tokens, by 'total' or provider
+  // id, from the last Save; editing one clears it.
+  const [invalid, setInvalid] = useState<string[]>([]);
+  const errorId = `${uid}-error`;
 
+  function edited(field: string) {
+    if (invalid.includes(field)) setInvalid(invalid.filter((f) => f !== field));
+  }
+
+  // A field that doesn't parse never saves as "no limit": the app would run
+  // uncapped. Empty is no limit, 0 blocks the app.
   function handleSave() {
-    const parsed: TokenAllowance = { origin };
-    const total = parseInt(totalLimit, 10);
-    if (!isNaN(total) && total > 0) parsed.totalLimit = total;
+    const total = parseTokenLimit(totalLimit);
+    const perProvider = Object.entries(providerLimits).map(([id, val]) => [id, parseTokenLimit(val)] as const);
+    const bad = [
+      ...(total === 'invalid' ? ['total'] : []),
+      ...perProvider.filter(([, n]) => n === 'invalid').map(([id]) => id),
+    ];
+    setInvalid(bad);
+    if (bad.length > 0) return;
 
+    const parsed: TokenAllowance = { origin };
+    if (typeof total === 'number') parsed.totalLimit = total;
     const pLimits: Record<string, number> = {};
-    for (const [id, val] of Object.entries(providerLimits)) {
-      const n = parseInt(val, 10);
-      if (!isNaN(n) && n > 0) pLimits[id] = n;
-    }
+    for (const [id, n] of perProvider) if (typeof n === 'number') pLimits[id] = n;
     if (Object.keys(pLimits).length > 0) parsed.providerLimits = pLimits;
 
+    // Nothing left to limit: no record that reads as "Edit limit" but holds none.
+    if (parsed.totalLimit === undefined && !parsed.providerLimits) {
+      if (allowance) onRemove();
+      else onCancel();
+      return;
+    }
     onSave(parsed);
+  }
+
+  /** Marks a field that didn't parse and points it at the message. */
+  function fieldError(field: string) {
+    const bad = invalid.includes(field);
+    return { 'aria-invalid': bad, 'aria-describedby': bad ? errorId : undefined };
   }
 
   return (
     <div className="allowance-form">
       <div className="allowance-field">
-        <label>Total token limit</label>
+        <label htmlFor={`${uid}-total`}>Total token limit</label>
         <input
-          type="number"
+          id={`${uid}-total`}
+          type="text"
+          inputMode="numeric"
+          autoComplete="off"
           placeholder="Unlimited"
           value={totalLimit}
-          onChange={(e) => setTotalLimit(e.target.value)}
-          min="0"
+          onChange={(e) => {
+            setTotalLimit(e.target.value);
+            edited('total');
+          }}
+          {...fieldError('total')}
         />
       </div>
       {providers.length > 0 && (
-        <div className="allowance-provider-limits">
-          <label className="allowance-sub-label">Per provider</label>
+        <fieldset className="allowance-provider-limits">
+          <legend className="allowance-sub-label">Per provider</legend>
           {providers.map((id) => (
             <div key={id} className="allowance-field allowance-field-inline">
-              <span className="allowance-provider-name">{PROVIDERS[id]?.name ?? id}</span>
+              <span id={`${uid}-provider-${id}`} className="allowance-provider-name">{PROVIDERS[id]?.name ?? id}</span>
               <input
-                type="number"
+                aria-labelledby={`${uid}-provider-${id}`}
+                type="text"
+                inputMode="numeric"
+                autoComplete="off"
                 placeholder="Unlimited"
                 value={providerLimits[id] ?? ''}
-                onChange={(e) => setProviderLimits({ ...providerLimits, [id]: e.target.value })}
-                min="0"
+                onChange={(e) => {
+                  setProviderLimits({ ...providerLimits, [id]: e.target.value });
+                  edited(id);
+                }}
+                {...fieldError(id)}
               />
             </div>
           ))}
-        </div>
+        </fieldset>
       )}
-      {error && <div className="error">{error}</div>}
+      <p className="allowance-hint">Empty means no limit; 0 blocks the app.</p>
+      {invalid.length > 0
+        ? <FormError id={errorId}>Enter a whole number of tokens, or leave it empty for no limit.</FormError>
+        : error && <FormError>{error}</FormError>}
       <div className="allowance-actions">
         <button className="btn btn-primary btn-sm" onClick={handleSave}>Save</button>
         {allowance && (

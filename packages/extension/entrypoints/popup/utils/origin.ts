@@ -1,3 +1,5 @@
+import { isInsecureOrigin } from '../../../lib/origin';
+
 export interface OriginDescription {
   /** Host with any non-default port ("localhost:3000"), or the raw string if it doesn't parse. */
   label: string;
@@ -14,18 +16,8 @@ export function describeOrigin(origin: string): OriginDescription {
   try {
     const url = new URL(origin);
     if (!url.host) return { label: origin, insecure: false };
-    return { label: url.host, insecure: url.protocol === 'http:' && !isLoopback(url.hostname) };
+    return { label: url.host, insecure: isInsecureOrigin(origin) };
   } catch {
     return { label: origin, insecure: false };
   }
-}
-
-// Browsers treat these as potentially trustworthy even over http.
-function isLoopback(hostname: string): boolean {
-  return (
-    hostname === 'localhost' ||
-    hostname.endsWith('.localhost') ||
-    hostname === '[::1]' ||
-    /^127(\.\d{1,3}){3}$/.test(hostname)
-  );
 }

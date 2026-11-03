@@ -168,3 +168,66 @@ describe('export re-authentication shares the lockout countdown (F118)', () => {
     expect(errorText(container)).toBeNull();
   });
 });
+
+// F031: errors are announced (role=alert) and tied to the field they're
+// about. A lockout's countdown changes every second, so screen readers get
+// a fixed alert instead and, when it ends, one polite status.
+describe('unlock errors reach screen readers (F031)', () => {
+  beforeEach(() => { bg.state.unlocked = false; });
+
+  const alerts = (c: HTMLElement) => [...c.querySelectorAll('[role=alert]')].map((a) => a.textContent);
+  const status = (c: HTMLElement) => [...c.querySelectorAll('[role=status]')].map((s) => s.textContent).join('');
+
+  it('announces a wrong password and marks the field', async () => {
+    bg.handlers.unlock = () => ({ success: false, attemptsLeft: 2 });
+    view = await mount(App);
+    const { container } = view;
+    const input = container.querySelector<HTMLInputElement>('#password')!;
+    expect(input.getAttribute('aria-invalid')).toBe('false');
+    await submitPassword(container, 'wrong');
+
+    expect(alerts(container)).toEqual(['Incorrect password. 2 tries left before a short lockout.']);
+    expect(input.getAttribute('aria-invalid')).toBe('true');
+    const describedBy = input.getAttribute('aria-describedby')!;
+    expect(document.getElementById(describedBy)?.getAttribute('role')).toBe('alert');
+  });
+
+  it('announces a lockout once, with text that does not tick, and says when it is over', async () => {
+    bg.handlers.unlock = () => ({
+      success: false,
+      error: 'Too many attempts. Try again in 60s',
+      lockedUntil: Date.now() + 60_000,
+    });
+    view = await mount(App);
+    const { container } = view;
+    await submitPassword(container, 'wrong-5');
+
+    expect(alerts(container)).toEqual(['Too many attempts. Try again in about 60 seconds.']);
+    // The countdown on screen is hidden from screen readers.
+    expect(container.querySelector('.error')?.getAttribute('aria-hidden')).toBe('true');
+    const input = container.querySelector<HTMLInputElement>('#password')!;
+    expect(document.getElementById(input.getAttribute('aria-describedby')!)?.textContent)
+      .toBe('Too many attempts. Try again in about 60 seconds.');
+
+    await tick(2_000);
+    expect(errorText(container)).toBe('Too many attempts. Try again in 58s');
+    expect(alerts(container)).toEqual(['Too many attempts. Try again in about 60 seconds.']);
+    expect(status(container)).toBe('');
+
+    await tick(58_000);
+    expect(alerts(container)).toEqual([]);
+    expect(status(container)).toBe('You can try again now.');
+    expect(input.getAttribute('aria-invalid')).toBe('false');
+
+    typeInto(input, 'again');
+    await run(() => {});
+    expect(status(container)).toBe('');
+  });
+
+  it('rounds a long lockout to minutes', async () => {
+    bg.handlers.unlock = () => ({ success: false, lockedUntil: Date.now() + 240_000 });
+    view = await mount(App);
+    await submitPassword(view.container, 'wrong');
+    expect(alerts(view.container)).toEqual(['Too many attempts. Try again in about 4 minutes.']);
+  });
+});

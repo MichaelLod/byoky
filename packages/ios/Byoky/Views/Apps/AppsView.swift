@@ -313,9 +313,11 @@ private struct AppSessionRow: View {
                     .foregroundStyle(Theme.fog)
 
                 if let allowance, let limit = allowance.totalLimit {
+                    // A limit of 0 blocks the app: full, not 0/0.
+                    let used = limit > 0 ? min(Double(tokensUsed) / Double(limit), 1.0) : 1.0
                     HStack(spacing: 8) {
-                        ProgressView(value: min(Double(tokensUsed) / Double(limit), 1.0))
-                            .tint(Double(tokensUsed) / Double(limit) >= 0.8 ? Theme.amber : Theme.violet)
+                        ProgressView(value: used)
+                            .tint(used >= 0.8 ? Theme.amber : Theme.violet)
                         Text("\(formatTokenCount(tokensUsed)) / \(formatTokenCount(limit))")
                             .font(.mono(11, relativeTo: .caption2))
                             .foregroundStyle(Theme.fog)
@@ -784,10 +786,16 @@ struct AllowanceFormView: View {
                     TextField("Unlimited", text: $totalLimit)
                         .font(.mono(15))
                         .keyboardType(.numberPad)
+                        // The number pad has digits only; a paste or a
+                        // hardware keyboard doesn't.
+                        .onChange(of: totalLimit) { _, new in
+                            let digits = TokenAllowance.limitDigits(new)
+                            if digits != new { totalLimit = digits }
+                        }
                 } header: {
                     ListHeader("Total token limit")
                 } footer: {
-                    ListFooter("Leave empty for unlimited.")
+                    ListFooter("Leave empty for unlimited. 0 blocks the app.")
                 }
                 .retroRow()
 
@@ -850,28 +858,17 @@ struct AllowanceFormView: View {
     private func binding(for providerId: String) -> Binding<String> {
         Binding(
             get: { providerLimits[providerId] ?? "" },
-            set: { providerLimits[providerId] = $0 }
+            set: { providerLimits[providerId] = TokenAllowance.limitDigits($0) }
         )
     }
 
     private func save() {
-        var parsed = TokenAllowance(origin: origin)
-
-        if let total = Int(totalLimit), total > 0 {
-            parsed.totalLimit = total
+        // Every field emptied: no allowance record that limits nothing.
+        if let edited = TokenAllowance.fromFields(origin: origin, total: totalLimit, perProvider: providerLimits) {
+            wallet.setAllowance(edited)
+        } else if allowance != nil {
+            wallet.removeAllowance(origin: origin)
         }
-
-        var pLimits: [String: Int] = [:]
-        for (id, val) in providerLimits {
-            if let n = Int(val), n > 0 {
-                pLimits[id] = n
-            }
-        }
-        if !pLimits.isEmpty {
-            parsed.providerLimits = pLimits
-        }
-
-        wallet.setAllowance(parsed)
         dismiss()
     }
 }

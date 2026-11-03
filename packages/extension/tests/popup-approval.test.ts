@@ -98,6 +98,25 @@ describe('approval headline names the full origin (F093)', () => {
   });
 });
 
+describe('a plain-http site can\'t be trusted (F035)', () => {
+  it('offers no Trust checkbox, says why, and approves without trust', async () => {
+    bg.state.approvals = [approval('a1', 'http://insecure.example')];
+    view = await mount(App);
+    const { container } = view;
+    expect(container.querySelector('.approval-trust')).toBeNull();
+    expect(container.querySelector('.approval-trust-note')?.textContent).toContain("can't be trusted");
+    await run(() => buttonByText(container, 'Approve')!.click());
+    expect(bg.payloads('approveConnect')).toEqual([{ approvalId: 'a1', trust: false }]);
+  });
+
+  it.each(['https://app.example', 'http://localhost:3000', 'http://127.0.0.1:5173'])('offers it for %s', async (origin) => {
+    bg.state.approvals = [approval('a1', origin)];
+    view = await mount(App);
+    expect(trustBox(view.container)).not.toBeNull();
+    expect(view.container.querySelector('.approval-trust-note')).toBeNull();
+  });
+});
+
 describe('a malformed request or record does not blank the popup (F076)', () => {
   // React reports errors caught by a boundary on the console.
   beforeEach(() => { vi.spyOn(console, 'error').mockImplementation(() => {}); });
@@ -207,6 +226,32 @@ describe('approval says which key will serve each provider (F092)', () => {
     bg.state.approvals = [approval('a1', 'https://app.example', [{ id: 'anthropic', required: true }])];
     view = await mount(App);
     expect(tags(view.container)).toEqual([['Anthropic', 'No key · required']]);
+  });
+});
+
+describe('approval lists each provider once (F069)', () => {
+  const rows = (container: HTMLElement) => [...container.querySelectorAll('.approval-provider-row')].map((row) => [
+    row.querySelector('span')?.textContent,
+    row.querySelector('.result-tag')?.textContent,
+  ]);
+
+  it('an app that names no providers sees one row per provider, not per key', async () => {
+    bg.state.credentials = [
+      { id: 'a1', providerId: 'anthropic', label: 'Personal', authMethod: 'api_key', createdAt: 1 },
+      { id: 'a2', providerId: 'anthropic', label: 'Work', authMethod: 'api_key', createdAt: 2 },
+      { id: 'o1', providerId: 'openai', label: 'Work', authMethod: 'api_key', createdAt: 3 },
+    ];
+    bg.state.approvals = [approval('a1', 'https://app.example', [])];
+    view = await mount(App);
+    expect(rows(view.container)).toEqual([['Anthropic', 'Key ready'], ['OpenAI', 'Key ready']]);
+  });
+
+  it('a provider the app names twice is one row, required if either says so', async () => {
+    bg.state.approvals = [approval('a1', 'https://app.example', [
+      { id: 'anthropic' }, { id: 'openai' }, { id: 'anthropic', required: true },
+    ])];
+    view = await mount(App);
+    expect(rows(view.container)).toEqual([['Anthropic', 'Key ready · required'], ['OpenAI', 'Uses your Anthropic key (translated)']]);
   });
 });
 

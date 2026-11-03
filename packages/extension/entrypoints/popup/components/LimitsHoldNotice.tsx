@@ -11,6 +11,10 @@ export function LimitsHoldNotice() {
 
   if (!limitsHold) return null;
 
+  // Connected Apps is the Connect tab's Sessions list, where this notice
+  // also shows: there, the limits are right below it.
+  const onConnectedApps = currentPage === 'connect' || currentPage === 'connected-apps';
+
   return (
     <div className="notice notice-warning" role="status">
       <div className="notice-title">
@@ -24,8 +28,8 @@ export function LimitsHoldNotice() {
       </div>
 
       <div style={{ display: 'flex', gap: '8px' }}>
-        {currentPage !== 'connected-apps' && (
-          <button type="button" className="btn btn-secondary btn-sm" onClick={() => navigate('connected-apps')}>
+        {!onConnectedApps && (
+          <button type="button" className="btn btn-secondary btn-sm" onClick={() => navigate('connect')}>
             Check limits
           </button>
         )}

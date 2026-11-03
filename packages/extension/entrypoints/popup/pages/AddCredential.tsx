@@ -2,6 +2,7 @@ import { useState, useEffect, type FormEvent } from 'react';
 import { useWalletStore } from '../store';
 import { PROVIDERS } from '@byoky/core';
 import { ProviderIcon } from '../components/ProviderIcon';
+import { FormError } from '../components/FormError';
 
 const providerOptions = Object.values(PROVIDERS);
 
@@ -41,7 +42,10 @@ export function AddCredential() {
   const [bridgeOnline, setBridgeOnline] = useState<boolean | null>(null);
 
   const provider = PROVIDERS[providerId];
-  const supportsOAuth = provider?.authMethods.includes('oauth');
+  // Setup tokens go through the Byoky Bridge, which Safari can't reach (an
+  // iPhone or iPad has none, and on a Mac Safari's native messaging goes to
+  // the Byoky app), so the background refuses them there: no toggle.
+  const supportsOAuth = !import.meta.env.SAFARI && provider?.authMethods.includes('oauth');
   const isLocalProvider = providerId === 'ollama' || providerId === 'lm_studio';
   const requiresBaseUrl = provider?.requiresCustomBaseUrl === true;
 
@@ -110,13 +114,21 @@ export function AddCredential() {
   };
   const apiKeyHint = apiKeyHints[providerId] ?? 'your provider console';
 
+  // The field the background's error is about (the endpoint, or the key), so
+  // it can be marked; "Wallet is locked" is about neither.
+  const errorField = !error ? null : /base url/i.test(error) ? 'baseUrl' : /key|token/i.test(error) ? 'apiKey' : null;
+  const fieldError = (field: 'baseUrl' | 'apiKey') => ({
+    'aria-invalid': errorField === field,
+    'aria-describedby': errorField === field ? 'add-credential-error' : undefined,
+  });
+
   return (
     <div>
       <p className="page-subtitle">
         Add a credential for {provider?.name ?? 'an LLM provider'}.
       </p>
 
-      {error && <div className="error">{error}</div>}
+      {error && <FormError id="add-credential-error">{error}</FormError>}
 
       <form onSubmit={handleSubmit}>
         <div className="form-group">
@@ -189,6 +201,7 @@ export function AddCredential() {
                 type="text"
                 value={baseUrl}
                 onChange={(e) => edited(setBaseUrl)(e.target.value)}
+                {...fieldError('baseUrl')}
                 required
                 placeholder={
                   LOCAL_PROVIDER_DEFAULT_BASE_URL[providerId] ??
@@ -234,6 +247,7 @@ export function AddCredential() {
               value={apiKey}
               onChange={(e) => edited(setApiKey)(e.target.value)}
               {...SECRET_INPUT_PROPS}
+              {...fieldError('apiKey')}
               required={keyRequired}
               placeholder={
                 providerId === 'anthropic' ? 'sk-ant-api03-...'
@@ -265,6 +279,7 @@ export function AddCredential() {
               value={apiKey}
               onChange={(e) => edited(setApiKey)(e.target.value)}
               {...SECRET_INPUT_PROPS}
+              {...fieldError('apiKey')}
               required
               placeholder="sk-ant-oat01-..."
               rows={3}
@@ -286,8 +301,8 @@ export function AddCredential() {
             </div>
             <div className="warning-note" style={{ marginTop: '10px' }}>
               <strong>Online only.</strong> Setup tokens proxy through this
-              extension and the local Byoky Bridge. If the browser or bridge
-              isn't running, apps using this credential will get 401.
+              extension and the local Byoky Bridge. While the browser or the
+              bridge isn't running, apps' requests with this credential fail.
             </div>
             {bridgeOnline === false && (
               <div className="warning-note" style={{ marginTop: '10px' }}>

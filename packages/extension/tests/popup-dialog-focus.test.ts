@@ -43,9 +43,6 @@ async function openAddCredential(container: HTMLElement) {
   const fab = container.querySelector<HTMLButtonElement>('.fab-button')!;
   fab.focus();
   await run(() => fab.click());
-  const item = container.querySelector<HTMLButtonElement>('.fab-menu-item')!;
-  item.focus();
-  await run(() => item.click());
   return container.querySelector<HTMLElement>('[role=dialog]')!;
 }
 
@@ -110,5 +107,41 @@ describe('dialogs move, keep and give back focus (F125)', () => {
     await press('Escape');
     expect(container.querySelector('[role=alertdialog]')).not.toBeNull();
     await run(() => reply.resolve({ success: true }));
+  });
+});
+
+// F067: the + button opened a one-item menu that sat before it in the page,
+// so Tab left the popup instead of reaching "Add credential".
+describe('the + button adds a credential itself (F067)', () => {
+  it('is named for it and opens the sheet in one press', async () => {
+    view = await mount(App);
+    const { container } = view;
+    const fab = container.querySelector<HTMLButtonElement>('.fab-button')!;
+    expect(fab.getAttribute('aria-label')).toBe('Add credential');
+    expect(fab.hasAttribute('aria-expanded')).toBe(false);
+    expect(container.querySelector('[role=menu]')).toBeNull();
+    await run(() => fab.click());
+    expect(container.querySelector('[role=dialog]')?.getAttribute('aria-label')).toBe('Add credential');
+  });
+});
+
+// F067: "Forgot password?" swapped itself for the reset panel, so focus fell
+// to the page, and Escape didn't close the panel.
+describe('the unlock screen\'s reset panel keeps focus', () => {
+  beforeEach(() => { bg.state.unlocked = false; });
+
+  it('focus moves to Cancel, Escape cancels and focus goes back to the password', async () => {
+    view = await mount(App);
+    const { container } = view;
+    const forgot = buttonByText(container, 'Forgot password?')!;
+    forgot.focus();
+    await run(() => forgot.click());
+    expect(container.textContent).toContain('Reset Wallet?');
+    expect(document.activeElement).toBe(buttonByText(container, 'Cancel'));
+
+    await press('Escape');
+    expect(container.textContent).not.toContain('Reset Wallet?');
+    expect(document.activeElement).toBe(container.querySelector('#password'));
+    expect(bg.actions()).not.toContain('resetWallet');
   });
 });

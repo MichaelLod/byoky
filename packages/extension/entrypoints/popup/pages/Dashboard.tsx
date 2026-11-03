@@ -82,7 +82,7 @@ export function Dashboard() {
       <LimitsHoldNotice />
       <TrustResetNotice />
       <RetiredFeaturesNotice />
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+      <div className="page-title-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
         <h2 className="page-title" style={{ marginBottom: 0 }}>Credentials</h2>
         <button className="text-link bracket-link" onClick={() => lock()}>
           Lock
@@ -209,6 +209,7 @@ function CredentialCard({ cred, usage, shared, onOpenStats, onRemove }: Credenti
               onKeyDown={handleKey}
               onClick={(e) => e.stopPropagation()}
               maxLength={60}
+              aria-label={`Rename ${cred.label}`}
             />
           ) : (
             <span className="card-title">{cred.label}</span>
@@ -261,6 +262,13 @@ function CredentialCard({ cred, usage, shared, onOpenStats, onRemove }: Credenti
           Added {new Date(cred.createdAt).toLocaleDateString()}
         </span>
       </div>
+      {/* Safari can't add one, but a backup from Chrome or Firefox can bring one in. */}
+      {import.meta.env.SAFARI && cred.authMethod === 'oauth' && (
+        <div className="warning-note" style={{ marginTop: '8px' }}>
+          Setup tokens need the Byoky Bridge, which works with Chrome and Firefox on a computer.
+          Requests with this one fail in Safari; use an Anthropic API key here.
+        </div>
+      )}
 
       <button
         type="button"

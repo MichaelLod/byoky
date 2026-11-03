@@ -3,6 +3,7 @@ import { useWalletStore } from '../store';
 import { checkPasswordStrength, MIN_PASSWORD_LENGTH } from '@byoky/core';
 import { PasswordMeter } from '../components/PasswordMeter';
 import { Raven } from '../components/Raven';
+import { FormError } from '../components/FormError';
 
 type Step = 'welcome' | 'password' | 'confirm';
 
@@ -96,7 +97,7 @@ export function Setup() {
             lose it, your keys are gone.
           </p>
 
-          {displayError && <div className="error">{displayError}</div>}
+          {displayError && <FormError id="setup-error">{displayError}</FormError>}
 
           <div className="form-group">
             <label htmlFor="confirm">Confirm password</label>
@@ -107,6 +108,8 @@ export function Setup() {
               onChange={(e) => setConfirm(e.target.value)}
               placeholder="Repeat your password"
               autoComplete="new-password"
+              aria-invalid={!!displayError}
+              aria-describedby={displayError ? 'setup-error' : undefined}
               autoFocus
             />
           </div>
@@ -144,7 +147,7 @@ export function Setup() {
           This password encrypts your keys on this device. Nothing leaves your browser.
         </p>
 
-        {displayError && <div className="error">{displayError}</div>}
+        {displayError && <FormError id="setup-error">{displayError}</FormError>}
 
         <div className="form-group">
           <label htmlFor="password">Password</label>
@@ -155,6 +158,8 @@ export function Setup() {
             onChange={(e) => setPassword(e.target.value)}
             placeholder="At least 12 characters"
             autoComplete="new-password"
+            aria-invalid={!!displayError}
+            aria-describedby={displayError ? 'setup-error' : undefined}
             autoFocus
           />
           {password.length > 0 && <PasswordMeter strength={strength} />}

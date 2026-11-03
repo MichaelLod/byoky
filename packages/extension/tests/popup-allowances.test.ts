@@ -115,6 +115,7 @@ describe('a refused limit or usage edit says why', () => {
     };
     const container = await openConnectedApps();
     await run(() => buttonByText(card(container, CONNECTED)!, 'Set limit')!.click());
+    typeInto(card(container, CONNECTED)!.querySelector<HTMLInputElement>('.allowance-form input')!, '100');
     await run(() => buttonByText(card(container, CONNECTED)!, 'Save')!.click());
     expect(card(container, CONNECTED)).toBeUndefined();
     expect(errors(container)).toEqual(['Wallet is locked']);
@@ -172,5 +173,89 @@ describe('while apps are paused, every app with a limit or usage can be checked'
     expect(container.textContent).not.toContain('Apps not connected now');
     expect(card(container, LIMITED)).toBeUndefined();
     expect(card(container, CONNECTED)).toBeDefined();
+  });
+});
+
+// F015: the form saved "0" (meant to block the app) as no limit, read "1e6"
+// as a 1-token cap, and saved a record with no limit in it when every field
+// was empty.
+describe('a limit is saved as typed, or not at all', () => {
+  beforeEach(() => {
+    bg.handlers.setAllowance = (p: { allowance: Allowances['allowances'][number] }) => {
+      stored.allowances = [p.allowance];
+      return { success: true };
+    };
+    bg.handlers.removeAllowance = () => {
+      stored.allowances = [];
+      return { success: true };
+    };
+    bg.state.sessions = [{
+      id: 's1', sessionKey: 'k', appOrigin: CONNECTED, createdAt: Date.now(), expiresAt: Date.now() + 1e6,
+      providers: [
+        { providerId: 'openai', credentialId: 'o1', available: true, authMethod: 'api_key' },
+        { providerId: 'anthropic', credentialId: 'a1', available: true, authMethod: 'api_key' },
+      ],
+    }];
+  });
+
+  async function setLimit(values: string[]) {
+    const container = await openConnectedApps();
+    const app = card(container, CONNECTED)!;
+    await run(() => buttonByText(app, app.querySelector('.allowance-edit-btn')!.textContent!)!.click());
+    const inputs = app.querySelectorAll<HTMLInputElement>('.allowance-form input');
+    values.forEach((v, i) => typeInto(inputs[i], v));
+    await run(() => {});
+    await run(() => buttonByText(app, 'Save')!.click());
+    return { container, app };
+  }
+
+  it('0 blocks the app', async () => {
+    const { app } = await setLimit(['0']);
+    expect(bg.payloads('setAllowance')).toEqual([{ allowance: { origin: CONNECTED, totalLimit: 0 } }]);
+    expect(app.querySelector('.allowance-limit')?.textContent).toBe('/ 0');
+    expect(app.querySelector('.allowance-limit')?.classList.contains('over')).toBe(true);
+    expect(app.querySelector<HTMLElement>('.allowance-bar-fill')?.style.width).toBe('100%');
+  });
+
+  it('reads thousands separators, per provider too', async () => {
+    await setLimit(['100,000', '', '1.000']);
+    expect(bg.payloads('setAllowance')).toEqual([{
+      allowance: { origin: CONNECTED, totalLimit: 100_000, providerLimits: { anthropic: 1000 } },
+    }]);
+  });
+
+  it('refuses what isn\'t a whole number, says so at the field, and saves nothing', async () => {
+    const { container, app } = await setLimit(['1e6', '-5', '200']);
+    expect(bg.payloads('setAllowance')).toEqual([]);
+    expect(app.querySelector('.allowance-form')).not.toBeNull();
+    expect(errors(container)).toEqual(['Enter a whole number of tokens, or leave it empty for no limit.']);
+    const [total, openai, anthropic] = app.querySelectorAll<HTMLInputElement>('.allowance-form input');
+    expect([total, openai, anthropic].map((i) => i.getAttribute('aria-invalid'))).toEqual(['true', 'true', 'false']);
+    expect(document.getElementById(total.getAttribute('aria-describedby')!)?.getAttribute('role')).toBe('alert');
+
+    typeInto(total, '1000000');
+    typeInto(openai, '');
+    await run(() => {});
+    expect(errors(container)).toEqual([]);
+    await run(() => buttonByText(app, 'Save')!.click());
+    expect(bg.payloads('setAllowance')).toEqual([{
+      allowance: { origin: CONNECTED, totalLimit: 1_000_000, providerLimits: { anthropic: 200 } },
+    }]);
+  });
+
+  it('emptying every field removes the limit instead of saving one that holds none', async () => {
+    stored.allowances = [{ origin: CONNECTED, totalLimit: 5000 }];
+    const { app } = await setLimit(['']);
+    expect(bg.payloads('setAllowance')).toEqual([]);
+    expect(bg.payloads('removeAllowance')).toEqual([{ origin: CONNECTED }]);
+    expect(app.querySelector('.allowance-form')).toBeNull();
+    expect(app.querySelector('.allowance-edit-btn')?.textContent).toBe('Set limit');
+  });
+
+  it('saving an empty form for an app without a limit just closes it', async () => {
+    const { app } = await setLimit([]);
+    expect(bg.payloads('setAllowance')).toEqual([]);
+    expect(bg.payloads('removeAllowance')).toEqual([]);
+    expect(app.querySelector('.allowance-form')).toBeNull();
   });
 });

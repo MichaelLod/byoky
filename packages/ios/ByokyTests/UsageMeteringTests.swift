@@ -247,6 +247,29 @@ final class UsageMeteringTests: XCTestCase {
         XCTAssertEqual(ledger.used(origin: "https://a.example", providerId: "openai"), 35)
     }
 
+    // F015: the limit form read its fields with Int(...) and kept only
+    // values above 0, so 0 and a pasted "100,000" saved as no limit.
+    func testAllowanceFormFields() {
+        XCTAssertEqual(TokenAllowance.limitDigits("100,000"), "100000")
+        XCTAssertEqual(TokenAllowance.limitDigits("1.000.000"), "1000000")
+        XCTAssertEqual(TokenAllowance.limitDigits("-5"), "5")
+        XCTAssertEqual(TokenAllowance.limitDigits("abc"), "")
+
+        XCTAssertEqual(TokenAllowance.limit(fromField: "100,000"), 100_000)
+        XCTAssertEqual(TokenAllowance.limit(fromField: "0"), 0)
+        XCTAssertEqual(TokenAllowance.limit(fromField: "007"), 7)
+        XCTAssertEqual(TokenAllowance.limit(fromField: "3000000000"), 3_000_000_000)
+        XCTAssertEqual(TokenAllowance.limit(fromField: "99999999999999999999999"), Int.max)
+        XCTAssertNil(TokenAllowance.limit(fromField: ""))
+        XCTAssertNil(TokenAllowance.limit(fromField: "abc"))
+
+        let edited = TokenAllowance.fromFields(origin: "https://a.example", total: "0", perProvider: ["openai": "1,000", "anthropic": ""])
+        XCTAssertEqual(edited?.totalLimit, 0)
+        XCTAssertEqual(edited?.providerLimits, ["openai": 1_000])
+        XCTAssertFalse(AllowanceCheck.compute(allowance: edited, totalUsed: 0, providerUsed: 0, providerId: "anthropic").allowed)
+        XCTAssertNil(TokenAllowance.fromFields(origin: "https://a.example", total: "", perProvider: ["openai": ""]))
+    }
+
     func testAllowanceCheck() {
         let allowance = TokenAllowance(origin: "https://a.example", totalLimit: 100, providerLimits: ["openai": 50])
         XCTAssertTrue(AllowanceCheck.compute(allowance: nil, totalUsed: 1_000, providerUsed: 1_000, providerId: "openai").allowed)

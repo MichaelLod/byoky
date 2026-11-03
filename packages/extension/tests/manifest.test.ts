@@ -77,4 +77,12 @@ describe('manifest', () => {
     expect(target('ByokySafariExtension (macOS)')).toBeGreaterThanOrEqual(13);
     expect(target('Byoky (macOS)')).toBeGreaterThanOrEqual(13);
   });
+
+  // F070: an untitled page is named by its URL in the window Safari (and
+  // Chrome, as a last resort) opens for a connection request. WXT also makes
+  // the title the toolbar button's and the Firefox sidebar's default_title.
+  it.each(['popup', 'sidepanel'])('titles the %s page Byoky', (page) => {
+    const html = readFileSync(new URL(`../entrypoints/${page}/index.html`, import.meta.url), 'utf8');
+    expect(html).toMatch(/<head>[\s\S]*<title>Byoky<\/title>[\s\S]*<\/head>/);
+  });
 });

@@ -71,7 +71,8 @@ html {
 
 body {
   width: 100%;
-  min-width: 320px;
+  /* Firefox opens its sidebar 216px wide; see the narrow layout below. */
+  min-width: 0;
   max-width: var(--column-max);
   margin: 0 auto;
   min-height: 100vh;
@@ -109,6 +110,19 @@ code {
 
 .mono {
   font-family: var(--font-mono);
+}
+
+/* Read by screen readers, not shown. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .app {
@@ -763,6 +777,14 @@ html.popup .app {
 
 /* ── Page titles ── */
 
+/* A page title with a link beside it ([ Lock ], [ Disconnect all ]): the
+   link drops below the title where both don't fit (a narrow sidebar). */
+.page-title-row {
+  flex-wrap: wrap;
+  column-gap: 12px;
+  row-gap: 4px;
+}
+
 .page-title {
   text-wrap: balance;
   font-family: var(--font-display);
@@ -1317,7 +1339,7 @@ html.popup .app {
   margin-bottom: 4px;
 }
 
-.allowance-field input[type="number"] {
+.allowance-field input {
   width: 100%;
   padding: 6px 8px;
   background: var(--bg-input);
@@ -1329,12 +1351,22 @@ html.popup .app {
   outline: none;
 }
 
-.allowance-field input[type="number"]:focus {
+.allowance-field input:focus {
   border-color: var(--violet);
   box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
-.allowance-field input[type="number"]::placeholder {
+.allowance-field input::placeholder {
+  color: var(--text-muted);
+}
+
+.allowance-field input[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+.allowance-hint {
+  margin: 0 0 8px;
+  font-size: 11px;
   color: var(--text-muted);
 }
 
@@ -1361,12 +1393,20 @@ html.popup .app {
   min-width: 70px;
 }
 
-.allowance-field-inline input[type="number"] {
+.allowance-field-inline input {
   flex: 1;
 }
 
+/* A fieldset, for its legend; without the browser's frame. */
 .allowance-provider-limits {
-  margin-bottom: 8px;
+  min-width: 0;
+  margin: 0 0 8px;
+  padding: 0;
+  border: 0;
+}
+
+.allowance-provider-limits legend {
+  padding: 0;
 }
 
 .allowance-actions {
@@ -1503,6 +1543,14 @@ html.popup .app {
 .approval-trust span {
   font-size: 13px;
   color: var(--text-secondary);
+}
+
+/* In place of the trust checkbox, for a plain-http site. */
+.approval-trust-note {
+  margin: 4px 0 20px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
 }
 
 .approval-actions {
@@ -1774,6 +1822,22 @@ html.popup .app {
 
 .warning-box strong {
   color: var(--amber);
+}
+
+/* Asks before a destructive action (ConnectedApps InlineConfirm). */
+.inline-confirm {
+  margin: 0 0 12px;
+}
+
+.card .inline-confirm {
+  margin: 8px 0 0;
+}
+
+.inline-confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
 }
 
 .warning-box code {
@@ -2165,7 +2229,7 @@ html.popup .app {
   color: var(--text-muted);
 }
 
-/* ── Floating action menu ── */
+/* ── Floating add button ── */
 
 .fab-root {
   position: fixed;
@@ -2200,66 +2264,6 @@ html.popup .app {
 
 .fab-button:active {
   transform: translateY(1px);
-}
-
-.fab-root.open .fab-button svg {
-  transform: rotate(45deg);
-  transition: transform 0.2s ease;
-}
-
-.fab-button svg {
-  transition: transform 0.2s ease;
-}
-
-.fab-menu {
-  background: var(--bg-hover);
-  border: 1px solid var(--seam-strong);
-  padding: 4px;
-  min-width: 180px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  animation: fab-menu-in 0.16s ease;
-  transform-origin: bottom right;
-}
-
-@keyframes fab-menu-in {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.fab-menu-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 9px 12px;
-  background: transparent;
-  border: none;
-  color: var(--text);
-  font-family: inherit;
-  font-size: 13px;
-  font-weight: 500;
-  text-align: left;
-  cursor: pointer;
-  transition: background 0.12s;
-}
-
-.fab-menu-item:hover {
-  background: var(--violet-soft);
-}
-
-.fab-menu-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  color: var(--phosphor);
 }
 
 /* Reserve room at the bottom of scrollable content so the FAB doesn't overlap
@@ -2349,5 +2353,96 @@ html.popup .app {
 
   .status-line::after {
     animation: none;
+  }
+}
+
+/* ── Narrow sidebar ──
+   Firefox's sidebar (sidepanel.html) opens 216px wide, the legacy sidebar's
+   18em, and the user may drag it narrower than 300px later. The column
+   tightens so every control stays on screen. Last in the file, so it
+   overrides the rules above. The toolbar popup keeps its 360px
+   (html.popup body) and the iPhone sheet its 320px. */
+@media (max-width: 299px) {
+  .header {
+    flex-wrap: wrap;
+    gap: 4px;
+    min-height: 0;
+    padding: 10px 8px 8px 12px;
+  }
+
+  .logo {
+    gap: 6px;
+    font-size: 14px;
+  }
+
+  .nav {
+    gap: 0;
+  }
+
+  .nav button {
+    width: 32px;
+    height: 32px;
+  }
+
+  .status-strip {
+    gap: 8px;
+    padding: 6px 8px 6px 12px;
+    font-size: 10px;
+    letter-spacing: 0.04em;
+  }
+
+  .status-strip-state {
+    min-width: 0;
+  }
+
+  .content {
+    padding: 12px 12px 16px;
+  }
+
+  .brand-mark svg {
+    max-width: 100%;
+    height: auto;
+  }
+
+  .lock-title {
+    font-size: 22px;
+  }
+
+  .approval-hero {
+    flex-wrap: wrap;
+  }
+
+  .approval-hero .page-title {
+    font-size: 19px;
+  }
+
+  .approval-actions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .card-header,
+  .card-actions,
+  .dialog-actions {
+    flex-wrap: wrap;
+  }
+
+  /* A key's name keeps a readable width; Rename and Remove go below it. */
+  .credential-card-heading {
+    flex-basis: 120px;
+  }
+
+  .connected-providers .badge {
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  /* A provider's limit goes below its name when both don't fit. */
+  .allowance-field-inline {
+    flex-wrap: wrap;
+  }
+
+  .allowance-field-inline input {
+    flex-basis: 100px;
   }
 }

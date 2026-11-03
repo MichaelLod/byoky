@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest';
 import { bg, mount, run, typeInto, buttonByText, type Mounted } from './helpers/popup-harness';
 
 type Store = typeof import('../entrypoints/popup/store');
@@ -156,16 +156,15 @@ describe('group errors are shown, not swallowed (F122)', () => {
   });
 
   it('shows delete and move errors at the top', async () => {
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
     bg.handlers.deleteGroup = () => ({ error: 'Wallet is locked' });
     const container = await openConnectedApps();
     await run(() => buttonByText(container, 'Delete')!.click());
+    await run(() => buttonByText(container.querySelector('.inline-confirm')!, 'Delete')!.click());
     expect(container.querySelector('.error')?.textContent).toBe('Wallet is locked');
 
     bg.handlers.setAppGroup = () => ({ error: 'Group not found' });
     typeInto(groupSelect(container)!, 'g1');
     await run(() => {});
     expect(container.querySelector('.error')?.textContent).toBe('Group not found');
-    confirm.mockRestore();
   });
 });

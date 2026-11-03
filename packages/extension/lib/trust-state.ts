@@ -1,4 +1,5 @@
 import { signMac, verifyMac, type TrustedSite } from '@byoky/core';
+import { isInsecureOrigin } from './origin';
 
 /**
  * Integrity of the wallet's trust state, which decides who may connect
@@ -109,6 +110,10 @@ export function parseRevokedOrigins(raw: unknown): string[] | null {
 export function silentTrustFor(state: TrustState, origin: string): TrustedSite | undefined {
   // 'unknown' stands for an opaque origin (a sandboxed frame anywhere), never a site.
   if (origin === 'unknown' || state.revoked.includes(origin)) return undefined;
+  // Anyone on the network path can be a plain-http page, so it always asks.
+  // An entry stored before this rule stays in the signed list (and its MAC)
+  // but no longer counts.
+  if (isInsecureOrigin(origin)) return undefined;
   const site = state.sites.find((s) => s.origin === origin);
   return site?.allowedProviders?.length ? site : undefined;
 }

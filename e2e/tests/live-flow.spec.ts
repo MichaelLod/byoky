@@ -34,7 +34,6 @@ async function addCredential(w: Wallet, providerId: string, label: string, apiKe
   await w.popup.bringToFront();
   await w.popup.click('button[title="Wallet"]');
   await w.popup.click('button.fab-button');
-  await w.popup.click('.fab-menu button:has-text("Add credential")');
   await w.popup.waitForSelector('#provider');
   await w.popup.selectOption('#provider', providerId);
   // Anthropic's oauth path uses "setup tokens" (sk-ant-oat01-...) issued by
@@ -363,7 +362,7 @@ test.describe('Byoky end-to-end flow', () => {
     await expect(walletA.popup.locator('.connected-app-card')).toBeVisible({ timeout: 5_000 });
     await walletA.popup.click('.allowance-edit-btn');
     const form = walletA.popup.locator('.allowance-form');
-    await form.locator('input[type="number"]').first().fill('1');
+    await form.getByLabel('Total token limit').fill('1');
     await form.locator('button:has-text("Save")').click();
     await expect(walletA.popup.locator('.allowance-limit')).toBeVisible({ timeout: 5_000 });
 

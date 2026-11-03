@@ -47,7 +47,6 @@ async function addCredential(w: Wallet, providerId: string, label: string, apiKe
   await w.popup.bringToFront();
   await w.popup.click('button[title="Wallet"]');
   await w.popup.click('button.fab-button');
-  await w.popup.click('.fab-menu button:has-text("Add credential")');
   await w.popup.waitForSelector('#provider');
   await w.popup.selectOption('#provider', providerId);
   const isSetupToken = providerId === 'anthropic' && apiKey.startsWith('sk-ant-oat01-');

@@ -59,6 +59,20 @@ describe('trust state integrity', () => {
     expect(silentTrustFor({ sites: [{ origin: 'unknown', trustedAt: 1, allowedProviders: ['openai'] }], revoked: [] }, 'unknown')).toBeUndefined();
   });
 
+  // F035: anyone on the network path can be a plain-http page.
+  it('never trusts a plain-http site silently, even one already in the list', () => {
+    const state: TrustState = {
+      sites: ['http://example.com', 'http://192.168.1.20:3000', 'https://example.com', 'http://127.0.0.1:5173']
+        .map((origin) => ({ origin, trustedAt: 1, allowedProviders: ['openai'] })),
+      revoked: [],
+    };
+    expect(silentTrustFor(state, 'http://example.com')).toBeUndefined();
+    expect(silentTrustFor(state, 'http://192.168.1.20:3000')).toBeUndefined();
+    expect(silentTrustFor(state, 'https://example.com')).toBe(state.sites[2]);
+    expect(silentTrustFor(state, 'http://127.0.0.1:5173')).toBe(state.sites[3]);
+    expect(silentTrustFor(STATE, 'http://localhost:3000')).toBe(SITES[1]);
+  });
+
   it('accepts a state it signed', async () => {
     const stored = await signTrustState(STATE, key, 3);
     expect(Object.keys(stored).sort()).toEqual([REVOKED_ORIGINS_KEY, TRUST_EPOCH_KEY, TRUST_MAC_KEY, TRUSTED_SITES_KEY]);

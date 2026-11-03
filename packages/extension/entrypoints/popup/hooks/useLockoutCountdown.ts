@@ -35,6 +35,17 @@ export function lockoutMessage(seconds: number): string {
   return `Too many attempts. Try again in ${wait}`;
 }
 
+/**
+ * The lockout for a screen reader, which reads it once: "Too many attempts.
+ * Try again in about 45 seconds." (or "in about 4 minutes").
+ */
+export function lockoutAnnouncement(seconds: number): string {
+  const wait = seconds <= 60
+    ? `${seconds} ${seconds === 1 ? 'second' : 'seconds'}`
+    : `${Math.ceil(seconds / 60)} minutes`;
+  return `Too many attempts. Try again in about ${wait}.`;
+}
+
 /** The end of the lockout a background reply reports, if it is still running. */
 export function lockedUntilFrom(result: Record<string, unknown>): number | null {
   const until = result.lockedUntil;

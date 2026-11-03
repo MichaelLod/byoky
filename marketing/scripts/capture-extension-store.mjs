@@ -116,10 +116,7 @@ const scenarios = {
   'unlock-left': { state: { ...base, unlocked: false }, mouse: [20, 330] },
   'dashboard': { state: base },
   'stats-sheet': { state: base, async run(p) { await p.locator('.credential-card').first().click(); } },
-  'add-credential': { state: base, async run(p) {
-    await p.click('.fab-button');
-    await p.click('.fab-menu-item:has-text("Add credential")');
-  } },
+  'add-credential': { state: base, async run(p) { await p.click('.fab-button'); } },
   'approval': { state: { ...base, approvals: [approval] } },
   'connected-apps': { state: base, run: connect },
   'connected-apps-groups': { state: base, async run(p) {
