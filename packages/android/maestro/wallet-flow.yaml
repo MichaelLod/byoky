@@ -70,12 +70,16 @@ tags:
     visible: "2 credentials"
     timeout: 30000
 - tapOn: "http://localhost:11434"
-- assertVisible: "This key is only ever sent to this server."
+- assertVisible: "This key is only ever sent to this server, so changing it takes your wallet password."
 - longPressOn:
     text: "http://localhost:11434"
     index: 0
 - tapOn: "Select all"
 - inputText: "http://127.0.0.1:11434"
+- hideKeyboard
+# Changing where a key goes takes the wallet password.
+- tapOn: "Wallet password"
+- inputText: "TestPassword123!long"
 - hideKeyboard
 - tapOn: "Save"
 - assertVisible: "http://127.0.0.1:11434"
