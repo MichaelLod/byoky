@@ -32,7 +32,7 @@ const PROVIDER_CONFIG: Record<
   gemini: {
     displayName: 'Google Gemini',
     testUrl:
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent',
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent',
     buildBody: () =>
       JSON.stringify({
         contents: [{ parts: [{ text: 'Say hello in one sentence.' }] }],

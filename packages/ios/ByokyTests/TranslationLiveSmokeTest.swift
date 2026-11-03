@@ -84,7 +84,7 @@ final class TranslationLiveSmokeTest: XCTestCase {
         let ctxJson = """
         {"srcFamily":"anthropic","dstFamily":"gemini",\
         "srcProviderId":"anthropic","dstProviderId":"gemini",\
-        "srcModel":"claude-haiku-4-5-20251001","dstModel":"gemini-3.8-flash"}
+        "srcModel":"claude-haiku-4-5-20251001","dstModel":"gemini-3.6-flash"}
         """
 
         let translatedReq = try TranslationEngine.shared.translateRequest(
@@ -92,7 +92,7 @@ final class TranslationLiveSmokeTest: XCTestCase {
             body: anthropicReqBody
         )
         let raw = try await postJson(
-            url: URL(string: "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent")!,
+            url: URL(string: "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent")!,
             body: translatedReq,
             headers: ["x-goog-api-key": key]
         )

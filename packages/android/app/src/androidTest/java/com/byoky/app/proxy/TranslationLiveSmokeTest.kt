@@ -128,12 +128,12 @@ class TranslationLiveSmokeTest {
         val ctxJson = """
             {"srcFamily":"anthropic","dstFamily":"gemini",
              "srcProviderId":"anthropic","dstProviderId":"gemini",
-             "srcModel":"claude-haiku-4-5-20251001","dstModel":"gemini-3.8-flash"}
+             "srcModel":"claude-haiku-4-5-20251001","dstModel":"gemini-3.6-flash"}
         """.trimIndent().replace("\n", "")
 
         val translatedReq = engine.translateRequest(ctxJson, anthropicReqBody)
         val rawResponse = postJson(
-            url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent",
+            url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent",
             body = translatedReq,
             headers = mapOf("x-goog-api-key" to key),
         )

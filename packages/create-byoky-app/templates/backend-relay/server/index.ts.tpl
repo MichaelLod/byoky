@@ -108,7 +108,7 @@ app.post('/api/generate', async (req, res) => {
         messages: [{ role: 'user', content: prompt }],
       });
     } else {
-      url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent';
+      url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent';
       headers = { 'Content-Type': 'application/json' };
       body = JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
