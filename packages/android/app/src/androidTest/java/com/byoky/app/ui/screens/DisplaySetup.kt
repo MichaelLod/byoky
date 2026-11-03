@@ -7,6 +7,7 @@ import android.provider.Settings
 import android.view.Display
 import android.view.Surface
 import androidx.test.platform.app.InstrumentationRegistry
+import org.junit.AssumptionViolatedException
 import org.junit.rules.ExternalResource
 
 /**
@@ -27,9 +28,17 @@ internal class DisplaySetup(private val fontScale: Float, private val landscape:
         val context = instrumentation.targetContext
         val display = context.getSystemService(DisplayManager::class.java).getDisplay(Display.DEFAULT_DISPLAY)
         val rotation = if (landscape) Surface.ROTATION_90 else Surface.ROTATION_0
-        waitUntil("font scale $fontScale, ${if (landscape) "landscape" else "portrait"}") {
+        val what = "font scale $fontScale, ${if (landscape) "landscape" else "portrait"}"
+        val reached = waitUntil {
             Settings.System.getFloat(context.contentResolver, Settings.System.FONT_SCALE, 1f) == fontScale &&
                 display.rotation == rotation
+        }
+        if (!reached) {
+            // Some emulators (e.g. CI's headless one) ignore the rotation or
+            // font-scale change; the layout can't be checked there, which is
+            // a skip, not a layout failure.
+            after()
+            throw AssumptionViolatedException("this device never reached $what")
         }
     }
 
@@ -43,11 +52,11 @@ internal class DisplaySetup(private val fontScale: Float, private val landscape:
         return ParcelFileDescriptor.AutoCloseInputStream(pfd).use { it.readBytes().decodeToString() }
     }
 
-    private fun waitUntil(what: String, condition: () -> Boolean) {
-        repeat(100) {
-            if (condition()) return
+    private fun waitUntil(condition: () -> Boolean): Boolean {
+        repeat(300) {
+            if (condition()) return true
             Thread.sleep(100)
         }
-        throw AssertionError("Display never reached $what")
+        return false
     }
 }

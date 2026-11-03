@@ -224,8 +224,16 @@ final class ByokyWalletUITests: XCTestCase {
         app.buttons["fab.button"].tap()
         app.buttons["fab.menu.addCredential"].tap()
         let ollama = app.buttons["addCredential.provider.ollama"]
-        XCTAssertTrue(ollama.waitForExistence(timeout: 5) || { app.swipeUp(); return ollama.waitForExistence(timeout: 2) }())
-        if !ollama.isHittable { app.swipeUp() }
+        // Ollama sits near the end of the provider list: on a small phone
+        // (iPhone SE) it is several screens down, and a lazy list only
+        // creates it once it is scrolled into view.
+        var swipes = 0
+        while !(ollama.exists && ollama.isHittable) && swipes < 8 {
+            if ollama.waitForExistence(timeout: swipes == 0 ? 5 : 1) && ollama.isHittable { break }
+            app.swipeUp()
+            swipes += 1
+        }
+        XCTAssertTrue(ollama.exists && ollama.isHittable, "Ollama not reachable after \(swipes) swipes")
         ollama.tap()
         let server = app.textFields["credentialEntry.baseUrl"]
         XCTAssertTrue(server.waitForExistence(timeout: 5))
