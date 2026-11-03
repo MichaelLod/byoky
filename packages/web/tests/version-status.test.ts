@@ -1,27 +1,13 @@
 // @vitest-environment jsdom
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import * as React from 'react';
-import * as jsxRuntime from 'react/jsx-runtime';
 import { createRoot, type Root } from 'react-dom/client';
-import ts from 'typescript';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+// vitest compiles the site's JSX itself (vitest.config.ts), so the
+// component is imported as is.
+import { VersionStatus } from '../app/components/VersionStatus';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-// The site's tsconfig keeps JSX for Next (`jsx: preserve`), which Vite can't
-// load, so compile the component here.
-function loadVersionStatus(): () => React.ReactElement | null {
-  const source = readFileSync(resolve(__dirname, '../app/components/VersionStatus.tsx'), 'utf8');
-  const { outputText } = ts.transpileModule(source, {
-    compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
-  });
-  const modules: Record<string, unknown> = { react: React, 'react/jsx-runtime': jsxRuntime };
-  const exports: { VersionStatus?: () => React.ReactElement | null } = {};
-  new Function('require', 'exports', outputText)((id: string) => modules[id], exports);
-  return exports.VersionStatus!;
-}
-const VersionStatus = loadVersionStatus();
 const roots: Root[] = [];
 
 /** Renders VersionStatus with this versions.json and returns its container. */
