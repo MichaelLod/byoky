@@ -11,7 +11,7 @@ import path from 'node:path';
 // OpenClaw CLI + real @byoky/openclaw-plugin + real api.anthropic.com. Drops an
 // sk-ant-oat setup token into the wallet, runs `openclaw models auth login`,
 // approves the connection in the popup, then asks OpenClaw's agent to reply —
-// the request traverses OpenClaw → HTTP :19280 → byoky-bridge → native messaging
+// the request traverses OpenClaw → HTTP :19283 → byoky-bridge → native messaging
 // → extension background → api.anthropic.com, then back.
 //
 // Live only (pnpm test:e2e:live). Prereqs:
@@ -257,7 +257,7 @@ test.describe('OpenClaw + byoky extension + bridge full flow', () => {
 
     // After approval the auth page fires a second postMessage
     // (startBridgeProxy) which triggers chrome.runtime.connectNative →
-    // byoky-bridge spawns on :19280. The plugin's callback server then
+    // byoky-bridge spawns on :19283. The plugin's callback server then
     // receives the final POST and openclaw persists the config to
     // ~/.openclaw/openclaw.json. We watch the config for the provider
     // entry and then kill openclaw — it gets stuck on the final
@@ -271,7 +271,7 @@ test.describe('OpenClaw + byoky extension + bridge full flow', () => {
       while (Date.now() < deadline) {
         if (fs.existsSync(configPath)) {
           const text = fs.readFileSync(configPath, 'utf-8');
-          if (text.includes('byoky-anthropic') && text.includes('19280')) break;
+          if (text.includes('byoky-anthropic') && text.includes('19283')) break;
         }
         await new Promise((r) => setTimeout(r, 250));
       }
@@ -287,14 +287,14 @@ test.describe('OpenClaw + byoky extension + bridge full flow', () => {
     authProc = null;
   });
 
-  test('byoky bridge is listening on :19280', async () => {
+  test('byoky bridge is listening on :19283', async () => {
     // The extension should have spawned byoky-bridge host → proxy server via
     // native messaging during the approval step. Give it a moment to bind.
     for (let i = 0; i < 20; i++) {
       try {
         // /health lists providers only to a caller with the bridge token.
         const token = fs.readFileSync(path.join(os.homedir(), '.byoky-bridge', 'token'), 'utf-8').trim();
-        const res = await fetch('http://127.0.0.1:19280/health', { headers: { 'x-api-key': token } });
+        const res = await fetch('http://127.0.0.1:19283/health', { headers: { 'x-api-key': token } });
         if (res.ok) {
           const body = await res.json() as { status?: string; providers?: string[] };
           expect(body.status).toBe('ok');
@@ -304,7 +304,7 @@ test.describe('OpenClaw + byoky extension + bridge full flow', () => {
       } catch { /* keep trying */ }
       await new Promise((r) => setTimeout(r, 250));
     }
-    throw new Error('byoky-bridge /health did not respond on :19280 within 5s');
+    throw new Error('byoky-bridge /health did not respond on :19283 within 5s');
   });
 
   test('create an openclaw agent bound to byoky-anthropic', async () => {
