@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { launchWallet, loadApiKeys, startServer, type Wallet } from '../fixtures';
+import { cleanupWallet, launchWallet, loadApiKeys, startServer, type Wallet } from '../fixtures';
 
 // F022: Firefox opens its sidebar 216 px wide (the legacy sidebar's 18em),
 // and the wallet's body had min-width 320px, so the nav, Lock, Remove and
@@ -51,7 +51,8 @@ test.beforeAll(async () => {
 });
 
 test.afterAll(async () => {
-  await wallet?.ctx.close();
+  // Closes the browser and deletes its profile (CI fails on a leftover one).
+  await cleanupWallet(wallet);
 });
 
 test('first run and setup fit the sidebar', async () => {
