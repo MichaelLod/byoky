@@ -71,7 +71,7 @@ To rotate it, run `rm ~/.byoky-bridge/token && byoky-bridge connect`, then updat
 
 The bridge is a native messaging host — Chrome spawns it as a subprocess when the extension needs it. When `byoky-bridge connect` runs, the extension sends a `start-proxy` message telling the bridge to listen on `127.0.0.1:<port>`. Requests hit the proxy, get relayed to the extension over native messaging, and the extension injects the real API key before calling the provider API.
 
-The bridge never sees your API keys. The exception is a Claude Pro/Max setup token: Anthropic accepts it only from a non-browser TLS client, so for those requests the extension hands the token to the bridge process, which makes the call from Node. The bridge runs as your user, keeps the token in memory for that request only, and never writes it to disk or logs it.
+The bridge never sees your API keys. The exception is a Claude Pro/Max setup token: Anthropic accepts it only from a non-browser TLS client, so for those requests the extension hands the token to the bridge process, which makes the call from Node. The bridge runs as your user, keeps the token in memory for that request only, and never writes it to disk or logs it. Such a request goes to the bridge as one native message of at most 20 MB; a web app's bigger request (large files) is refused with a 413, and needs an Anthropic API key instead.
 
 Everything stays on your machine: the proxy only listens on `127.0.0.1` and talks to no Byoky-hosted service. It refuses requests that carry an `Origin` header, so web pages and other browser extensions can't call it; the Byoky extension itself talks to the bridge over native messaging only.
 
@@ -79,10 +79,14 @@ Everything stays on your machine: the proxy only listens on `127.0.0.1` and talk
 
 The bridge is also started by pages that use the Byoky SDK (OpenClaw plugin, etc.) — no CLI action needed in that flow. See `@byoky/sdk`.
 
+The wallet runs one bridge per port, each serving one app's session. The OpenClaw plugin starts its own on port 19283, so it runs alongside `byoky-bridge connect` on 19280, and each keeps its own providers, spending cap and routing group. Starting a bridge replaces the one on the same port, and the same app's bridge on another port.
+
 Once running, the HTTP surface is:
 
 - **Health check:** `GET http://127.0.0.1:19280/health` → `{"status":"ok"}`; with the token, `{"status":"ok","providers":[...]}`
 - **API proxy:** `POST http://127.0.0.1:19280/<provider>/...` (token required)
+
+A request the wallet refuses comes back with the wallet's status and code, e.g. 429 `QUOTA_EXCEEDED` when the app's spending cap is used up, or 403 `PROVIDER_UNAVAILABLE` for a provider the session doesn't have, and with `x-should-retry: false`, so the Anthropic and OpenAI SDKs don't send it again.
 
 Example:
 

@@ -6,7 +6,7 @@ const AI_PROMPT = `You are helping me set up OpenClaw to run on Byoky (https://b
 
 Context:
 - Byoky is a local BYOK wallet ("the MetaMask for API keys"). The browser extension holds my API keys (or a Claude Pro/Max setup token) and proxies every LLM request so keys never leave the wallet. Byoky runs no servers.
-- The Byoky bridge is a tiny local HTTP proxy on 127.0.0.1:19280. OpenClaw talks to the bridge, which forwards through native messaging to the extension, which calls the provider.
+- The Byoky bridge is a tiny local HTTP proxy; OpenClaw's runs on 127.0.0.1:19283. OpenClaw talks to the bridge, which forwards through native messaging to the extension, which calls the provider.
 - I already have the Byoky browser extension installed (Chrome or Firefox) with a credential loaded. Do not worry about that side.
 
 Your job — run these commands on my machine and report each step:
@@ -24,7 +24,7 @@ Your job — run these commands on my machine and report each step:
    (or byoky-openai/gpt-5.5, byoky-gemini/gemini-3.6-flash — \`openclaw models list --all\` shows every option.)
 
 4. Verify the bridge is up and lists the connected providers (the token is passed via substitution, not pasted):
-     curl -H "x-api-key: $(byoky-bridge token)" http://127.0.0.1:19280/health
+     curl -H "x-api-key: $(cat ~/.byoky-bridge/token)" http://127.0.0.1:19283/health
    Expected: {"status":"ok","providers":[...]}
 
 5. Inside OpenClaw I can run /byoky anytime to see bridge status and connected providers.

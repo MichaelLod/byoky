@@ -57,22 +57,10 @@ if (command === 'install' || command === 'uninstall' || command === 'status') {
     process.exit(1);
   }
 
-  const { runConnect } = await import('../dist/connect-mode.js');
+  const { runConnect, formatConnectSummary } = await import('../dist/connect-mode.js');
   try {
     const result = await runConnect({ port, providers, handshakePort });
-    console.log(`\n✓ Bridge listening on http://127.0.0.1:${result.port}`);
-    console.log(`  Providers: ${result.providers.join(', ')}`);
-    if (providers.includes('anthropic')) {
-      console.log('\nRun Claude Code:');
-      console.log('  export ANTHROPIC_BASE_URL=http://127.0.0.1:' + result.port + '/anthropic');
-      console.log('  export ANTHROPIC_API_KEY=$(byoky-bridge token)');
-      console.log('  claude');
-      console.log('\nNote: use ANTHROPIC_API_KEY (not AUTH_TOKEN) — Claude Code\'s first-run');
-      console.log('wizard checks API_KEY to skip the OAuth login prompt. The bridge checks');
-      console.log('the token, strips it and the extension injects the real credential.');
-    } else {
-      console.log('\nClients send the bridge token as their API key: `byoky-bridge token` prints it.');
-    }
+    console.log(formatConnectSummary(providers, result));
     process.exit(0);
   } catch (e) {
     console.error(`\n✗ ${(e && e.message) ? e.message : String(e)}`);

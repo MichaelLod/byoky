@@ -28,7 +28,7 @@ This opens your browser. Unlock your Byoky wallet and approve the connection. Th
 
 ```bash
 # Verify the bridge is running
-curl -H "x-api-key: $(byoky-bridge token)" http://127.0.0.1:19280/health
+curl -H "x-api-key: $(cat ~/.byoky-bridge/token)" http://127.0.0.1:19283/health
 # → {"status":"ok","providers":["anthropic"]}
 ```
 
@@ -71,11 +71,13 @@ The plugin adds an OpenClaw command:
 
 ## How it works
 
-1. The plugin registers Byoky providers in OpenClaw, each pointing to `http://127.0.0.1:19280/<provider>`
+1. The plugin registers Byoky providers in OpenClaw, each pointing to `http://127.0.0.1:19283/<provider>`
 2. When OpenClaw makes an API call, the request hits the local Byoky Bridge with the bridge token as its API key
 3. The bridge checks the token and relays the request to the Byoky extension via native messaging
 4. The extension injects the real API key and calls the provider API
 5. The response streams back through the same path
+
+OpenClaw has a bridge of its own on port 19283, apart from the one `byoky-bridge connect` starts on 19280 for Claude Code or Hermes. Both run at once, and each keeps its own wallet session, with its own providers, spending cap and routing group.
 
 Your API keys exist only inside the extension's encrypted local storage. Nothing passes through a Byoky-hosted service.
 

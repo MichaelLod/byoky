@@ -54,6 +54,37 @@ export interface ConnectResult {
  */
 export const DEFAULT_HANDSHAKE_PORT = 19281;
 
+/**
+ * What `byoky-bridge connect` prints once the bridge listens: set up by the
+ * providers the wallet granted, which can be fewer than those requested.
+ */
+export function formatConnectSummary(requested: string[], result: ConnectResult): string {
+  const granted = result.providers;
+  const missing = requested.filter((p) => !granted.includes(p));
+  const lines = [
+    `\n✓ Bridge listening on http://127.0.0.1:${result.port}`,
+    `  Providers: ${granted.join(', ')}`,
+  ];
+  if (missing.length > 0) {
+    lines.push(`  Not available in your wallet: ${missing.join(', ')} (add a key, or route it with a group, then run connect again)`);
+  }
+  if (granted.includes('anthropic')) {
+    lines.push(
+      '\nRun Claude Code:',
+      `  export ANTHROPIC_BASE_URL=http://127.0.0.1:${result.port}/anthropic`,
+      '  export ANTHROPIC_API_KEY=$(byoky-bridge token)',
+      '  claude',
+      '\nNote: use ANTHROPIC_API_KEY (not AUTH_TOKEN) — Claude Code\'s first-run',
+      'wizard checks API_KEY to skip the OAuth login prompt. The bridge checks',
+      'the token, strips it and the extension injects the real credential.',
+    );
+  } else {
+    if (missing.includes('anthropic')) lines.push('\nClaude Code needs anthropic, which this bridge doesn\'t have.');
+    lines.push('\nClients send the bridge token as their API key: `byoky-bridge token` prints it.');
+  }
+  return lines.join('\n');
+}
+
 const HANDSHAKE_TIMEOUT_MS = 180_000;
 const HEALTH_POLL_TIMEOUT_MS = 15_000;
 const HEALTH_POLL_INTERVAL_MS = 250;

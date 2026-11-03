@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BRIDGE_PORT="${BRIDGE_PORT:-19280}"
+BRIDGE_PORT="${BRIDGE_PORT:-19283}"
 BRIDGE_PID=""
 WORKSPACE="/test/workspace"
 AGENT_NAME="byoky-test"

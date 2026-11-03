@@ -199,7 +199,7 @@ describe('security invariants', () => {
       const lockSection = bg.slice(bg.indexOf("case 'lock'"), bg.indexOf("case 'isUnlocked'"));
       // A statement of its own, not behind a condition.
       expect(lockSection).toMatch(/^\s*sessions\.clear\(\);$/m);
-      expect(lockSection).toContain('authorizedBridgeSessionKey = null');
+      expect(lockSection).toMatch(/^\s*forgetBridgeSessions\(\);$/m);
     });
 
     it('has rate limiting on connect requests with cleanup', () => {
@@ -287,21 +287,23 @@ describe('security invariants', () => {
       expect(revoke.indexOf('await recordRevocation(s.appOrigin)')).toBeLessThan(revoke.indexOf('broadcastRevocation(s)'));
     });
 
-    it('clears authorizedBridgeSessionKey on session revocation', () => {
+    it('forgets the session\'s bridges on session revocation', () => {
       const revokeSection = bg.slice(bg.indexOf("case 'revokeSession'"), bg.indexOf("case 'checkBridge'"));
-      expect(revokeSection).toContain('authorizedBridgeSessionKey');
+      expect(revokeSection).toContain('forgetBridgeSessions(key)');
     });
 
-    it('clears authorizedBridgeSessionKey on disconnect', () => {
+    it('forgets the session\'s bridges on disconnect', () => {
       const disconnectSection = bg.slice(
         bg.indexOf('BYOKY_DISCONNECT'),
         bg.indexOf('BYOKY_SESSION_STATUS'),
       );
-      expect(disconnectSection).toContain('authorizedBridgeSessionKey');
+      expect(disconnectSection).toContain('forgetBridgeSessions(sessionKey)');
     });
 
-    it('pins bridge proxy session key', () => {
-      expect(bg).toContain('authorizedBridgeSessionKey');
+    it('pins each bridge to the session key it was started for', () => {
+      const start = bg.indexOf('async function handleBridgeProxyRequest');
+      const bridgeHandler = bg.slice(start, bg.indexOf('\n  }\n', start));
+      expect(bridgeHandler).toContain('sessionKey !== authorizedBridges.get(conn.port)');
     });
 
     it('checks session expiry in handleBridgeProxyRequest', () => {

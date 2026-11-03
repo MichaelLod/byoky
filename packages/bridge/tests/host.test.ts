@@ -288,6 +288,43 @@ describe('direct fetch (proxy_direct_fetch)', () => {
   });
 });
 
+// F038: the host dropped a message over its limit without a word.
+describe('a message too large to read', () => {
+  it('answers a setup-token page request with an error', () => {
+    host.handleOversized({ bytes: 22_020_442, type: 'proxy', requestId: 'p1' });
+    expect(messages).toEqual([{ type: 'proxy_error', requestId: 'p1', error: 'Request too large for Byoky Bridge (21 MB)' }]);
+    expect(upstreamHits).toEqual([]);
+  });
+
+  it('answers a direct fetch\'s client with a 413 and reports it done', async () => {
+    const port = await freePort();
+    await host.handleMessage({ type: 'start-proxy', port, sessionKey: 's', providers: ['anthropic'] });
+    const reply = new Promise<{ status: number; retry: unknown; body: string }>((resolve, reject) => {
+      const client = request({
+        host: '127.0.0.1', port, path: '/anthropic/v1/messages', method: 'POST', headers: { 'x-api-key': TOKEN },
+      }, (res) => {
+        let text = '';
+        res.on('data', (c: Buffer) => { text += c.toString(); });
+        res.on('end', () => resolve({ status: res.statusCode ?? 0, retry: res.headers['x-should-retry'], body: text }));
+      });
+      client.on('error', reject);
+      client.end('{}');
+    });
+    await expect.poll(() => ofType('proxy_http').length).toBe(1);
+    const requestId = ofType('proxy_http')[0].requestId as string;
+
+    host.handleOversized({ bytes: 22_020_442, type: 'proxy_direct_fetch', requestId });
+    expect(await reply).toEqual({ status: 413, retry: 'false', body: JSON.stringify({ error: 'Request too large for Byoky Bridge (21 MB)' }) });
+    expect(ofType('proxy_direct_done')).toEqual([{ type: 'proxy_direct_done', requestId, status: 413, complete: false, responseChars: 0 }]);
+    expect(upstreamHits).toEqual([]);
+  });
+
+  it('ignores one it can\'t tell the request of', () => {
+    host.handleOversized({ bytes: 22_020_442 });
+    expect(messages).toEqual([]);
+  });
+});
+
 describe('setup tokens', () => {
   it('never writes the token to stderr or back to the extension', async () => {
     const setupToken = 'sk-ant-oat01-SECRET-setup-token-value';

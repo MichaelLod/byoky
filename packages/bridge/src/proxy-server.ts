@@ -262,7 +262,16 @@ export function handleProxyResponse(msg: ProxyResponseMessage): void {
         const status = typeof msg.status === 'number' && msg.status >= 400 && msg.status < 600
           ? msg.status
           : 502;
-        pending.res.writeHead(status, { 'Content-Type': 'application/json' });
+        // The wallet refused the request (a spending limit, a provider not
+        // in the session...): the same request would be refused again. The
+        // Anthropic and OpenAI SDKs retry 408, 409, 429 and any 5xx unless
+        // told not to. Only a reply without a status, a failure along the
+        // way, stays retryable.
+        const refused = status < 500 || typeof msg.code === 'string';
+        pending.res.writeHead(status, {
+          'Content-Type': 'application/json',
+          ...(refused ? { 'x-should-retry': 'false' } : {}),
+        });
         pending.res.end(JSON.stringify(
           typeof msg.code === 'string' ? { error: msg.error, code: msg.code } : { error: msg.error },
         ));

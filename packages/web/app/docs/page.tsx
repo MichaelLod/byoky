@@ -1272,7 +1272,7 @@ function Errors() {
             ['TRANSLATION_FAILED', 'The wallet couldn\'t translate a routed request or response between provider formats (HTTP 502).', 'Surface the message; the request may use a feature the destination provider lacks.'],
             ['SWAP_FAILED', 'The wallet couldn\'t point a routed request at the provider the user chose (HTTP 502).', 'Surface the message and ask the user to check the routing group in their wallet.'],
             ['BRIDGE_UNAVAILABLE', 'The credential is a Claude setup token, which needs the Byoky Bridge, and the bridge isn\'t installed (or the browser is Safari) (HTTP 503).', 'Tell the user: they can install the bridge or add an Anthropic API key instead.'],
-            ['BRIDGE_ERROR', 'The Byoky Bridge failed while carrying a setup-token request (HTTP 502).', 'Safe to retry once.'],
+            ['BRIDGE_ERROR', 'The Byoky Bridge failed while carrying a setup-token request (HTTP 502), or the request is over the 20 MB the bridge takes (HTTP 413).', 'A 502 is safe to retry once. A 413 is not: send less (smaller files), or ask the user for an Anthropic API key, which has no such limit.'],
             ['ORIGIN_MISMATCH', 'A request came from a different origin than the page that connected (HTTP 403). Sessions belong to one origin.', 'Connect from the page that makes the requests.'],
             ['ORIGIN_UNSUPPORTED', <><code>connect()</code> ran in a sandboxed frame or a page with an opaque origin (a <code>data:</code> URL, for example), which can&apos;t hold a session.</>, 'Connect from a normal https page (or localhost).'],
             ['INVALID_REQUEST', <>The wallet rejected malformed <code>connect()</code> options, e.g. a provider entry without a string <code>id</code>, or more than 32 providers.</>, <>Fix the options: <code>providers</code> is a list of <code>{`{ id, required? }`}</code>.</>],
@@ -1530,7 +1530,9 @@ byoky-bridge connect --providers anthropic,openai`}</Code>
         extension starts the proxy on <code>127.0.0.1:19280</code>. CLI tools then make HTTP
         requests to <code>http://127.0.0.1:19280/&#123;provider&#125;/</code>, which the bridge
         forwards to the extension. The OpenClaw plugin runs this connect step itself when you log
-        in.
+        in, for a bridge of its own on <code>127.0.0.1:19283</code>: each port is a separate
+        bridge with its own session, so OpenClaw and a tool on 19280 run side by side, each with
+        its own spending cap and routing group.
       </p>
       <p>
         The proxy comes back on its own when the browser recycles the extension&apos;s service

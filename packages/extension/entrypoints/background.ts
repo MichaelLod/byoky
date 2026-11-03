@@ -378,7 +378,7 @@ export default defineBackground(() => {
         // was idle long enough, else keep counting from the last activity.
         const last = typeof data._lastActivity === 'number' ? data._lastActivity : 0;
         if (Date.now() - last >= IDLE_TIMEOUT_MS) {
-          await browser.storage.session.remove(['_mp', '_lastActivity', '_sessions', '_bridgeKey', '_bridgePort', '_silentTrust']);
+          await browser.storage.session.remove(['_mp', '_lastActivity', '_sessions', '_bridges', '_silentTrust']);
           // An open side panel still shows the unlocked wallet; tell it.
           browser.runtime.sendMessage({ type: 'BYOKY_INTERNAL', action: 'sessionChanged' }).catch(() => {});
           return;
@@ -435,59 +435,70 @@ export default defineBackground(() => {
     } catch {}
   }
 
-  // The bridge's authorized sessionKey + port survive MV3 service worker
+  // The bridges' authorized sessionKeys + ports survive MV3 service worker
   // evictions. Without persisting these, every CLI request after a worker
   // recycle hits ECONNREFUSED (the bridge process exits when its native-
   // messaging port closes) and the user has to re-run `byoky-bridge connect`.
   // Storage is browser-close-bounded (storage.session) — same security
   // profile as the sessions Map.
-  async function persistAuthorizedBridgeSessionKey() {
+  async function persistAuthorizedBridges() {
     if (!hasSessionStorage) return;
     try {
-      if (authorizedBridgeSessionKey && authorizedBridgePort) {
+      if (authorizedBridges.size > 0) {
         await browser.storage.session.set({
-          _bridgeKey: authorizedBridgeSessionKey,
-          _bridgePort: authorizedBridgePort,
+          _bridges: [...authorizedBridges].map(([port, key]) => ({ port, key })),
         });
       } else {
-        await browser.storage.session.remove(['_bridgeKey', '_bridgePort']);
+        await browser.storage.session.remove('_bridges');
       }
     } catch {}
   }
 
-  async function restoreAuthorizedBridgeSessionKey() {
+  async function restoreAuthorizedBridges() {
     if (!hasSessionStorage) return;
     try {
-      const data = await browser.storage.session.get(['_bridgeKey', '_bridgePort']);
-      if (typeof data._bridgeKey === 'string' && data._bridgeKey) {
-        // Only honor it if the session itself is still in the Map. If autoLock
+      const data = await browser.storage.session.get('_bridges');
+      const saved = Array.isArray(data._bridges) ? data._bridges as Array<{ port?: unknown; key?: unknown }> : [];
+      for (const { port, key } of saved) {
+        // Only honor one whose session is still in the Map. If autoLock
         // cleared sessions, the cached bridge key is also dead.
-        if (sessions.has(data._bridgeKey)) {
-          authorizedBridgeSessionKey = data._bridgeKey;
-          if (typeof data._bridgePort === 'number') {
-            authorizedBridgePort = data._bridgePort;
-          }
-        } else {
-          await browser.storage.session.remove(['_bridgeKey', '_bridgePort']);
+        if (typeof port === 'number' && typeof key === 'string' && sessions.has(key)) {
+          authorizedBridges.set(port, key);
         }
       }
+      if (authorizedBridges.size !== saved.length) await persistAuthorizedBridges();
     } catch {}
   }
 
-  // Re-open the native-messaging port after a service-worker recycle so the
-  // bridge process respawns and re-binds :19280 without the user having to
-  // re-run `byoky-bridge connect`. Idempotent — no-op if the bridge is
-  // already connected, the wallet is locked, or the bridge isn't installed.
+  /** Forgets the bridges serving `sessionKey`, or every bridge's session. */
+  function forgetBridgeSessions(sessionKey?: string) {
+    for (const [port, key] of [...authorizedBridges]) {
+      if (sessionKey === undefined || key === sessionKey) authorizedBridges.delete(port);
+    }
+    persistAuthorizedBridges();
+  }
+
+  // Re-open the native-messaging ports after a service-worker recycle so
+  // each bridge process respawns and re-binds its port (:19280 for
+  // `byoky-bridge connect`) without the user having to re-run `byoky-bridge
+  // connect`. Idempotent — no-op for a bridge that is already connected or
+  // starting, when the wallet is locked, or the bridge isn't installed.
   // Called from two places: the SW boot chain (cold start) and the periodic
   // keepalive alarm (warm-state health check).
+  const autoStartingBridges = new Set<number>();
   async function maybeAutoStartBridgeProxy() {
-    if (bridgeProxyPort) return;
-    if (!authorizedBridgeSessionKey || !authorizedBridgePort) return;
     if (!masterPassword) return;
-    if (!sessions.has(authorizedBridgeSessionKey)) return;
-    try {
-      await startBridgeProxy(authorizedBridgeSessionKey, authorizedBridgePort);
-    } catch {}
+    await Promise.all([...authorizedBridges].map(async ([port, key]) => {
+      if (bridges.has(port) || autoStartingBridges.has(port) || !sessions.has(key)) return;
+      autoStartingBridges.add(port);
+      try {
+        await startBridgeProxy(key, port);
+      } catch {
+        // The keepalive tries again.
+      } finally {
+        autoStartingBridges.delete(port);
+      }
+    }));
   }
 
   // Auto-lock after 20 minutes of inactivity. Chrome stops an idle MV3
@@ -527,9 +538,7 @@ export default defineBackground(() => {
     forgetWalletKeys();
     sessions.clear();
     clearPersistedSessions();
-    authorizedBridgeSessionKey = null;
-    authorizedBridgePort = null;
-    persistAuthorizedBridgeSessionKey();
+    forgetBridgeSessions();
     clearSessionStorage();
     browser.runtime.sendMessage({
       type: 'BYOKY_INTERNAL',
@@ -586,7 +595,7 @@ export default defineBackground(() => {
     // restoreSession drops the password when the wallet idled out while the
     // worker was stopped; the app sessions loaded alongside go with it.
     .then(() => { if (!masterPassword) sessions.clear(); sessionsRestoredDone = true; })
-    .then(() => restoreAuthorizedBridgeSessionKey())
+    .then(() => restoreAuthorizedBridges())
     .then(() => maybeAutoStartBridgeProxy());
 
   // --- Retired features: one-time storage cleanup ---
@@ -744,11 +753,7 @@ export default defineBackground(() => {
             if (disconnectOrigin !== 'unknown' && disconnectOrigin === session.appOrigin) {
               sessions.delete(sessionKey);
               persistSessions();
-              if (authorizedBridgeSessionKey === sessionKey) {
-                authorizedBridgeSessionKey = null;
-                authorizedBridgePort = null;
-                persistAuthorizedBridgeSessionKey();
-              }
+              forgetBridgeSessions(sessionKey);
               browser.runtime.sendMessage({
                 type: 'BYOKY_INTERNAL',
                 action: 'sessionChanged',
@@ -1795,9 +1800,7 @@ export default defineBackground(() => {
         forgetWalletKeys();
         sessions.clear();
         clearPersistedSessions();
-        authorizedBridgeSessionKey = null;
-        authorizedBridgePort = null;
-        persistAuthorizedBridgeSessionKey();
+        forgetBridgeSessions();
         clearSessionStorage();
         if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
         // An open side panel or another popup switches to the unlock screen.
@@ -1921,9 +1924,7 @@ export default defineBackground(() => {
         forgetWalletKeys();
         sessions.clear();
         clearPersistedSessions();
-        authorizedBridgeSessionKey = null;
-        authorizedBridgePort = null;
-        persistAuthorizedBridgeSessionKey();
+        forgetBridgeSessions();
         clearSessionStorage();
         if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
         clearPasswordFailures();
@@ -1953,11 +1954,7 @@ export default defineBackground(() => {
           if (s.id === sessionId) {
             sessions.delete(key);
             persistSessions();
-            if (authorizedBridgeSessionKey === key) {
-              authorizedBridgeSessionKey = null;
-              authorizedBridgePort = null;
-              persistAuthorizedBridgeSessionKey();
-            }
+            forgetBridgeSessions(key);
             // Recorded before the app hears of it, so its reconnect is already
             // held for approval.
             await recordRevocation(s.appOrigin);
@@ -2209,6 +2206,19 @@ export default defineBackground(() => {
   const BRIDGE_HOST = 'com.byoky.bridge';
   let bridgeAvailable: boolean | null = null;
 
+  // The bridge host drops a message bigger than this (its
+  // MAX_INCOMING_MESSAGE_BYTES), and bridges before 1.1.2 without a word.
+  const BRIDGE_MAX_MESSAGE_BYTES = 20 * 1024 * 1024;
+
+  /** The size of a native message too big for the bridge, or 0 when it fits. */
+  function oversizedForBridge(message: Record<string, unknown>): number {
+    const json = JSON.stringify(message);
+    // UTF-8 takes 1 to 3 bytes per UTF-16 unit.
+    if (json.length * 3 <= BRIDGE_MAX_MESSAGE_BYTES) return 0;
+    const bytes = new TextEncoder().encode(json).length;
+    return bytes > BRIDGE_MAX_MESSAGE_BYTES ? bytes : 0;
+  }
+
   async function checkBridgeAvailable(): Promise<boolean> {
     try {
       const port = browser.runtime.connectNative(BRIDGE_HOST);
@@ -2277,6 +2287,32 @@ export default defineBackground(() => {
       if (!appConnected) return;
       try { responsePort.postMessage(message); } catch { appConnected = false; }
     };
+
+    const request = {
+      type: 'proxy',
+      requestId: msg.requestId,
+      url: msg.url,
+      method: msg.method,
+      headers,
+      body: msg.body,
+      toolNameMap,
+    };
+    // Too big for the bridge: it would drop the request, and the app would
+    // wait for an answer that never comes. Nothing went out, so nothing is
+    // charged.
+    const oversized = oversizedForBridge(request);
+    if (oversized) {
+      send({
+        type: 'BYOKY_PROXY_RESPONSE_ERROR',
+        requestId: msg.requestId,
+        status: 413,
+        error: {
+          code: 'BRIDGE_ERROR',
+          message: `This request is ${Math.round(oversized / (1024 * 1024))} MB. Claude setup tokens go through Byoky Bridge, which takes requests up to 20 MB. Use an Anthropic API key for larger files.`,
+        },
+      });
+      return;
+    }
 
     // The probe starts a native host and waits up to 2 s for it.
     const available = await checkBridgeAvailable();
@@ -2463,15 +2499,7 @@ export default defineBackground(() => {
         return;
       }
       signal.addEventListener('abort', onAbort, { once: true });
-      nativePort.postMessage({
-        type: 'proxy',
-        requestId: msg.requestId,
-        url: msg.url,
-        method: msg.method,
-        headers,
-        body: msg.body,
-        toolNameMap,
-      });
+      nativePort.postMessage(request);
     });
 
     // The log entry is written when the response headers arrive; waiting for
@@ -2490,9 +2518,121 @@ export default defineBackground(() => {
 
   // --- Bridge HTTP proxy (generic local gateway for CLI/desktop apps) ---
 
-  let bridgeProxyPort: Runtime.Port | null = null;
-  let authorizedBridgeSessionKey: string | null = null;
-  let authorizedBridgePort: number | null = null;
+  /**
+   * One native connection to a bridge host, as its requests see it. Replies
+   * go back on the connection the request came in on, and only while it is
+   * open, so a host that replaced it never gets messages for requests it
+   * didn't send.
+   */
+  interface BridgeConnection {
+    /** The port the host listens on for its clients. */
+    readonly port: number;
+    readonly open: boolean;
+    reply(msg: Record<string, unknown>): void;
+    /**
+     * Calls `onEnd` once: with the host's proxy_direct_done report for
+     * `requestId`, or with none when the connection ends first.
+     */
+    awaitDirectDone(requestId: string, onEnd: (report?: Record<string, unknown>) => void): void;
+  }
+
+  /**
+   * The running bridge connections, one host process per port. Each serves
+   * one app's session, so `byoky-bridge connect` (Claude Code, Hermes) and
+   * OpenClaw run side by side, each with its own providers, spending cap
+   * and routing group. close() ends what still runs on one.
+   */
+  const bridges = new Map<number, { close: () => void }>();
+  /**
+   * The session each bridge port was started for. Kept while its host is
+   * gone (see the onDisconnect note below), so the keepalive starts it again.
+   */
+  const authorizedBridges = new Map<number, string>();
+
+  function closeBridge(port: number) {
+    const current = bridges.get(port);
+    bridges.delete(port);
+    current?.close();
+  }
+
+  /**
+   * Serves the bridge's HTTP proxy requests on one native connection.
+   * Returns settle(), which ends every request still running on it: the
+   * upstream calls are aborted (and charged for what they used), and the
+   * direct fetches the host made are logged as failed and their holds
+   * released. Called when the connection ends, whether the host went away
+   * or a new start replaced it.
+   */
+  function serveBridgeConnection(nativePort: Runtime.Port, port: number): () => void {
+    // A body too big for one native message (1 MiB) arrives first in
+    // slices, then the request with `bodyChunked`. `proxy_http_cancel`
+    // means the client hung up: abort that request's upstream fetch.
+    const pendingBodies = new Map<string, string[]>();
+    const inFlight = new Map<string, AbortController>();
+    const directDone = new Map<string, (report?: Record<string, unknown>) => void>();
+    let open = true;
+
+    const endDirect = (requestId: string, report?: Record<string, unknown>) => {
+      const onEnd = directDone.get(requestId);
+      if (!onEnd) return;
+      directDone.delete(requestId);
+      onEnd(report);
+    };
+
+    const conn: BridgeConnection = {
+      port,
+      get open() { return open; },
+      reply(msg) {
+        if (!open) return;
+        // Posting to a port that has gone throws; settle() follows.
+        try { nativePort.postMessage(msg); } catch { /* gone */ }
+      },
+      awaitDirectDone(requestId, onEnd) {
+        if (!open) {
+          onEnd();
+          return;
+        }
+        directDone.set(requestId, onEnd);
+      },
+    };
+
+    nativePort.onMessage.addListener(async (raw: unknown) => {
+      const msg = raw as Record<string, unknown>;
+      if (msg.type === 'proxy_http_body_chunk') {
+        if (typeof msg.requestId !== 'string' || typeof msg.chunk !== 'string') return;
+        const parts = pendingBodies.get(msg.requestId) ?? [];
+        parts.push(msg.chunk);
+        pendingBodies.set(msg.requestId, parts);
+      } else if (msg.type === 'proxy_http_cancel') {
+        if (typeof msg.requestId === 'string') inFlight.get(msg.requestId)?.abort();
+      } else if (msg.type === 'proxy_direct_done') {
+        if (typeof msg.requestId === 'string') endDirect(msg.requestId, msg);
+      } else if (msg.type === 'proxy_http') {
+        if (typeof msg.requestId !== 'string' || !open) return;
+        const requestId = msg.requestId;
+        if (msg.bodyChunked === true) {
+          msg.body = (pendingBodies.get(requestId) ?? []).join('');
+          pendingBodies.delete(requestId);
+        }
+        const controller = new AbortController();
+        inFlight.set(requestId, controller);
+        try {
+          await handleBridgeProxyRequest(msg, controller.signal, conn);
+        } finally {
+          if (inFlight.get(requestId) === controller) inFlight.delete(requestId);
+        }
+      }
+    });
+
+    return () => {
+      if (!open) return;
+      open = false;
+      for (const controller of inFlight.values()) controller.abort();
+      inFlight.clear();
+      pendingBodies.clear();
+      for (const requestId of [...directDone.keys()]) endDirect(requestId);
+    };
+  }
 
   async function startBridgeProxy(
     sessionKey: string,
@@ -2512,18 +2652,29 @@ export default defineBackground(() => {
     if (providerIds.length === 0) return { success: false, error: 'No providers available' };
 
     try {
-      // Close existing proxy connection if any
-      if (bridgeProxyPort) {
-        bridgeProxyPort.disconnect();
-        bridgeProxyPort = null;
+      // One connection per port, and one per app: this replaces the
+      // connection on the port, and the app's own one on another port,
+      // ending what still runs on them. Other apps' bridges keep running.
+      for (const [otherPort, key] of [...authorizedBridges]) {
+        if (otherPort !== port && sessions.get(key)?.appOrigin === session.appOrigin) {
+          authorizedBridges.delete(otherPort);
+          closeBridge(otherPort);
+        }
       }
+      closeBridge(port);
 
       const nativePort = browser.runtime.connectNative(BRIDGE_HOST);
-      bridgeProxyPort = nativePort;
+      const settle = serveBridgeConnection(nativePort, port);
+      const entry = {
+        close: () => {
+          settle();
+          try { nativePort.disconnect(); } catch { /* already gone */ }
+        },
+      };
+      bridges.set(port, entry);
 
-      authorizedBridgeSessionKey = sessionKey;
-      authorizedBridgePort = port;
-      persistAuthorizedBridgeSessionKey();
+      authorizedBridges.set(port, sessionKey);
+      persistAuthorizedBridges();
 
       // The bridge answers start-proxy with proxy-started once it listens,
       // or proxy_error when it can't (port taken). Wait for that, so callers
@@ -2557,41 +2708,10 @@ export default defineBackground(() => {
         providers: providerIds,
       });
 
-      // Listen for HTTP proxy requests from the bridge. A body too big for
-      // one native message (1 MiB) arrives first in slices, then the
-      // request with `bodyChunked`. `proxy_http_cancel` means the client
-      // hung up: abort that request's upstream fetch.
-      const pendingBodies = new Map<string, string[]>();
-      const inFlight = new Map<string, AbortController>();
-      nativePort.onMessage.addListener(async (raw: unknown) => {
-        const msg = raw as Record<string, unknown>;
-        if (msg.type === 'proxy_http_body_chunk') {
-          if (typeof msg.requestId !== 'string' || typeof msg.chunk !== 'string') return;
-          const parts = pendingBodies.get(msg.requestId) ?? [];
-          parts.push(msg.chunk);
-          pendingBodies.set(msg.requestId, parts);
-        } else if (msg.type === 'proxy_http_cancel') {
-          if (typeof msg.requestId === 'string') inFlight.get(msg.requestId)?.abort();
-        } else if (msg.type === 'proxy_http') {
-          if (typeof msg.requestId !== 'string') return;
-          const requestId = msg.requestId;
-          if (msg.bodyChunked === true) {
-            msg.body = (pendingBodies.get(requestId) ?? []).join('');
-            pendingBodies.delete(requestId);
-          }
-          const controller = new AbortController();
-          inFlight.set(requestId, controller);
-          try {
-            await handleBridgeProxyRequest(msg, controller.signal);
-          } finally {
-            inFlight.delete(requestId);
-          }
-        }
-      });
-
       nativePort.onDisconnect.addListener(() => {
-        if (bridgeProxyPort === nativePort) bridgeProxyPort = null;
-        // Note: do NOT clear authorizedBridgeSessionKey here. The native-host
+        if (bridges.get(port) === entry) bridges.delete(port);
+        settle();
+        // Note: do NOT clear the bridge's authorized session here. The native-host
         // port disconnects on every MV3 service-worker recycle (which is
         // frequent and unrelated to user intent). Keeping the key authorized
         // means the next bridge respawn lands in a working state instead of
@@ -2603,10 +2723,7 @@ export default defineBackground(() => {
       const error = await startError;
       if (error) {
         // Drop the port so the keepalive's auto-start can try again later.
-        if (bridgeProxyPort === nativePort) {
-          nativePort.disconnect();
-          bridgeProxyPort = null;
-        }
+        if (bridges.get(port) === entry) closeBridge(port);
         return { success: false, error };
       }
       return { success: true, port };
@@ -2615,8 +2732,29 @@ export default defineBackground(() => {
     }
   }
 
-  /** `signal` aborts when the bridge reports that the client hung up. */
-  async function handleBridgeProxyRequest(msg: Record<string, unknown>, signal: AbortSignal): Promise<void> {
+  /**
+   * A request checkAndReserveAllowance refused (spending limit, the limits
+   * hold, or no wallet key), with the status the page path gives it. A
+   * refusal without a status reaches the client as a 502, which CLI tools
+   * retry.
+   */
+  function allowanceRefusal(requestId: string, reason: string): Record<string, unknown> {
+    return masterPassword
+      ? { type: 'proxy_http_error', requestId, status: 429, code: 'QUOTA_EXCEEDED', error: reason }
+      : { type: 'proxy_http_error', requestId, status: 423, code: 'WALLET_LOCKED', error: reason };
+  }
+
+  /**
+   * `signal` aborts when the bridge reports that the client hung up, or the
+   * connection ends. Every reply goes back on `conn`. A refusal carries a
+   * status and code; only a failure along the way is left to the bridge's
+   * 502.
+   */
+  async function handleBridgeProxyRequest(
+    msg: Record<string, unknown>,
+    signal: AbortSignal,
+    conn: BridgeConnection,
+  ): Promise<void> {
     if (typeof msg.requestId !== 'string' || typeof msg.sessionKey !== 'string' ||
         typeof msg.providerId !== 'string' || typeof msg.url !== 'string' ||
         typeof msg.method !== 'string' || typeof msg.headers !== 'object' || !msg.headers ||
@@ -2642,8 +2780,9 @@ export default defineBackground(() => {
     resetIdleTimer();
 
     // Validate the session key matches the one authorized at proxy start
-    if (sessionKey !== authorizedBridgeSessionKey) {
-      bridgeProxyPort?.postMessage({
+    // for this bridge's port.
+    if (sessionKey !== authorizedBridges.get(conn.port)) {
+      conn.reply({
         type: 'proxy_http_error',
         requestId,
         error: 'Unauthorized session key',
@@ -2660,10 +2799,8 @@ export default defineBackground(() => {
         sessions.delete(sessionKey);
         persistSessions();
       }
-      authorizedBridgeSessionKey = null;
-      authorizedBridgePort = null;
-      persistAuthorizedBridgeSessionKey();
-      bridgeProxyPort?.postMessage({
+      forgetBridgeSessions(sessionKey);
+      conn.reply({
         type: 'proxy_http_error',
         requestId,
         status: 401,
@@ -2680,7 +2817,7 @@ export default defineBackground(() => {
 
     if (!masterPassword) {
       await logRefused(423, 'WALLET_LOCKED', 'Wallet is locked');
-      bridgeProxyPort?.postMessage({
+      conn.reply({
         type: 'proxy_http_error',
         requestId,
         status: 423,
@@ -2693,9 +2830,11 @@ export default defineBackground(() => {
     // Validate providerId is one the session actually granted access to
     if (!session.providers.some((p) => p.providerId === providerId && p.available)) {
       await logRefused(403, 'PROVIDER_UNAVAILABLE', 'Provider not available in this session');
-      bridgeProxyPort?.postMessage({
+      conn.reply({
         type: 'proxy_http_error',
         requestId,
+        status: 403,
+        code: 'PROVIDER_UNAVAILABLE',
         error: 'Provider not available in this session',
       });
       return;
@@ -2712,9 +2851,11 @@ export default defineBackground(() => {
     // Anthropic paths beyond inference.
     const providerCfg = PROVIDERS[providerId];
     if (!providerCfg?.requiresCustomBaseUrl && !validateProxyUrl(providerId, url)) {
-      bridgeProxyPort?.postMessage({
+      conn.reply({
         type: 'proxy_http_error',
         requestId,
+        status: 403,
+        code: 'INVALID_URL',
         error: 'Request URL does not match the provider\'s registered base URL',
       });
       return;
@@ -2730,9 +2871,11 @@ export default defineBackground(() => {
         group,
       );
       await logRefused(403, 'PROVIDER_UNAVAILABLE', message);
-      bridgeProxyPort?.postMessage({
+      conn.reply({
         type: 'proxy_http_error',
         requestId,
+        status: 403,
+        code: 'PROVIDER_UNAVAILABLE',
         error: message,
       });
       return;
@@ -2746,9 +2889,11 @@ export default defineBackground(() => {
     // The key goes out with effectiveProviderId's headers (as on the page path).
     if (credential.providerId !== effectiveProviderId) {
       await logRefused(403, 'PROVIDER_UNAVAILABLE', `The key this app is routed to is not a ${effectiveProviderId} key`);
-      bridgeProxyPort?.postMessage({
+      conn.reply({
         type: 'proxy_http_error',
         requestId,
+        status: 403,
+        code: 'PROVIDER_UNAVAILABLE',
         error: `The key this app is routed to is not a ${effectiveProviderId} key`,
       });
       return;
@@ -2762,9 +2907,11 @@ export default defineBackground(() => {
       const routed = !!(translation || swap);
       if (!routed) url = rebaseOntoCredential(providerId, url, credential.baseUrl) ?? url;
       if (!sourceUrlAllowed(providerId, url, routed, credential.baseUrl)) {
-        bridgeProxyPort?.postMessage({
+        conn.reply({
           type: 'proxy_http_error',
           requestId,
+          status: 403,
+          code: 'INVALID_URL',
           error: 'Request URL does not match the credential\'s registered base URL',
         });
         return;
@@ -2775,7 +2922,7 @@ export default defineBackground(() => {
     // only chat requests can be swapped or translated (same rule as the page
     // path). Model lists or token counting would be mangled into chat calls.
     if ((translation || swap) && !isRoutableChatRequest(providerId, url)) {
-      bridgeProxyPort?.postMessage({
+      conn.reply({
         type: 'proxy_http_error',
         requestId,
         status: 400,
@@ -2787,7 +2934,7 @@ export default defineBackground(() => {
 
     // Routing rewrites a JSON body; a binary one can't be.
     if (bodyEncoding && (translation || swap)) {
-      bridgeProxyPort?.postMessage({
+      conn.reply({
         type: 'proxy_http_error',
         requestId,
         status: 400,
@@ -2811,9 +2958,12 @@ export default defineBackground(() => {
         try {
           translatedBody = applyRequestTranslation(translation, body, requestId, url);
         } catch (err) {
-          bridgeProxyPort?.postMessage({
+          // The request can't be put in the destination's dialect.
+          conn.reply({
             type: 'proxy_http_error',
             requestId,
+            status: 400,
+            code: err instanceof TranslationError ? err.code : 'TRANSLATION_FAILED',
             error: err instanceof Error ? err.message : 'Translation failed',
           });
           return;
@@ -2821,9 +2971,11 @@ export default defineBackground(() => {
         const isStreaming = detectStreamingRequest(body, url);
         const rewritten = rewriteProxyUrl(translation.dstProviderId, translation.dstModel, isStreaming, credential.baseUrl);
         if (!rewritten) {
-          bridgeProxyPort?.postMessage({
+          conn.reply({
             type: 'proxy_http_error',
             requestId,
+            status: 400,
+            code: 'ROUTING_UNSUPPORTED',
             error: `Cannot rewrite URL for destination provider ${translation.dstProviderId}`,
           });
           return;
@@ -2834,9 +2986,11 @@ export default defineBackground(() => {
         const isStreaming = detectStreamingRequest(body, url);
         const rewritten = rewriteProxyUrl(swap.dstProviderId, swap.dstModel ?? '', isStreaming, credential.baseUrl);
         if (!rewritten) {
-          bridgeProxyPort?.postMessage({
+          conn.reply({
             type: 'proxy_http_error',
             requestId,
+            status: 400,
+            code: 'ROUTING_UNSUPPORTED',
             error: `Cannot rewrite URL for destination provider ${swap.dstProviderId}`,
           });
           return;
@@ -2851,7 +3005,7 @@ export default defineBackground(() => {
         try {
           translatedBody = rewriteRequestModel({ dstProviderId: effectiveProviderId, dstModel: pinnedModel, url }, body);
         } catch (err) {
-          bridgeProxyPort?.postMessage({
+          conn.reply({
             type: 'proxy_http_error',
             requestId,
             status: 400,
@@ -2878,7 +3032,7 @@ export default defineBackground(() => {
       // to bypass TLS fingerprint detection on api.anthropic.com.
       // Bridge does the fetch directly and streams response to proxy-server (no double hop).
       if (credential.authMethod === 'oauth' && effectiveProviderId === 'anthropic') {
-        if (!bridgeProxyPort) return;
+        if (!conn.open) return;
 
         // Translation + OAuth direct-fetch is unsupported in the bridge HTTP
         // path: the bridge streams the response back to its own HTTP server
@@ -2886,16 +3040,18 @@ export default defineBackground(() => {
         // to insert the SSE rewriter that would translate chunks back to the
         // source dialect.
         if (translation) {
-          bridgeProxyPort.postMessage({
+          conn.reply({
             type: 'proxy_http_error',
             requestId,
+            status: 400,
+            code: 'TRANSLATION_NOT_SUPPORTED',
             error: 'Cross-family translation is not supported on the bridge OAuth path. Bind this app to an Anthropic credential or remove the OAuth requirement.',
           });
           return;
         }
         // The setup-token request is rewritten as JSON (tool names, system prompt).
         if (bodyEncoding) {
-          bridgeProxyPort.postMessage({
+          conn.reply({
             type: 'proxy_http_error',
             requestId,
             status: 400,
@@ -2916,16 +3072,17 @@ export default defineBackground(() => {
           relocateExisting: isThirdParty,
         });
 
-        const nativePort = bridgeProxyPort;
         const reservation = await checkAndReserveAllowance(session.appOrigin, providerId, appRequest);
         if (!reservation.allowed) {
-          await logRefused(429, 'QUOTA_EXCEEDED', reservation.reason);
-          nativePort.postMessage({ type: 'proxy_http_error', requestId, error: reservation.reason });
+          const refusal = allowanceRefusal(requestId, reservation.reason);
+          await logRefused(refusal.status as number, refusal.code as string, reservation.reason);
+          conn.reply(refusal);
           return;
         }
-        // The client already hung up: don't start a call nobody will read.
-        // (Once it runs, the bridge aborts it on hang-up by itself.)
-        if (signal.aborted) {
+        // The client already hung up, or the connection is gone: don't start
+        // a call nobody will read. (Once it runs, the bridge aborts it on
+        // hang-up by itself.)
+        if (signal.aborted || !conn.open) {
           reservation.release();
           return;
         }
@@ -2935,8 +3092,6 @@ export default defineBackground(() => {
           // charge it then, the same way recordProxyUsage does for responses
           // the extension reads itself.
           const finish = async (status: number, report?: Record<string, unknown>) => {
-            nativePort.onMessage.removeListener(onDone);
-            nativePort.onDisconnect.removeListener(onGone);
             try {
               await chargeDirectFetch(status, report);
             } finally {
@@ -2964,15 +3119,11 @@ export default defineBackground(() => {
             browser.runtime.sendMessage({ type: 'BYOKY_INTERNAL', action: 'usageUpdated' }).catch(() => {});
             await addUsage(session.appOrigin, providerId, (inputTokens ?? 0) + (outputTokens ?? 0));
           };
-          const onDone = (raw: unknown) => {
-            const report = raw as Record<string, unknown>;
-            if (report.type !== 'proxy_direct_done' || report.requestId !== requestId) return;
-            void finish(typeof report.status === 'number' ? report.status : 502, report).catch(() => {});
-          };
-          // The bridge died mid-request: the client got an error, log one.
-          const onGone = () => { void finish(502).catch(() => {}); };
-          nativePort.onMessage.addListener(onDone);
-          nativePort.onDisconnect.addListener(onGone);
+          // Without a report the connection ended first (the host died, or a
+          // new start replaced it): the client got an error, log one.
+          conn.awaitDirectDone(requestId, (report) => {
+            void finish(typeof report?.status === 'number' ? report.status : 502, report).catch(() => {});
+          });
         } else {
           // Older bridges don't report back; log what is known now.
           reservation.release();
@@ -2982,7 +3133,7 @@ export default defineBackground(() => {
           });
         }
 
-        nativePort.postMessage({
+        conn.reply({
           type: 'proxy_direct_fetch',
           requestId,
           url: translatedUrl,
@@ -3002,8 +3153,9 @@ export default defineBackground(() => {
       // as on the page path.
       const reservation = await checkAndReserveAllowance(session.appOrigin, providerId, appRequest);
       if (!reservation.allowed) {
-        await logRefused(429, 'QUOTA_EXCEEDED', reservation.reason);
-        bridgeProxyPort?.postMessage({ type: 'proxy_http_error', requestId, error: reservation.reason });
+        const refusal = allowanceRefusal(requestId, reservation.reason);
+        await logRefused(refusal.status as number, refusal.code as string, reservation.reason);
+        conn.reply(refusal);
         return;
       }
       let logEntryId: string | undefined;
@@ -3032,7 +3184,7 @@ export default defineBackground(() => {
         const responseHeaders = filterResponseHeaders(upstreamHeaders);
         responseContentType = responseHeaders['content-type'] ?? '';
 
-        bridgeProxyPort?.postMessage({
+        conn.reply({
           type: 'proxy_http_response_meta',
           requestId,
           status: response.status,
@@ -3059,7 +3211,7 @@ export default defineBackground(() => {
             if (done) break;
             if (binaryResponse) {
               for (let i = 0; i < value.length; i += MAX_BINARY_CHUNK_BYTES) {
-                bridgeProxyPort?.postMessage({
+                conn.reply({
                   type: 'proxy_http_response_chunk',
                   requestId,
                   chunk: bytesToBase64(value.subarray(i, i + MAX_BINARY_CHUNK_BYTES)),
@@ -3073,14 +3225,14 @@ export default defineBackground(() => {
             if (sseRewriter) {
               const rewritten = sseRewriter.process(text);
               if (rewritten) {
-                bridgeProxyPort?.postMessage({
+                conn.reply({
                   type: 'proxy_http_response_chunk',
                   requestId,
                   chunk: rewritten,
                 });
               }
             } else if (!translation) {
-              bridgeProxyPort?.postMessage({
+              conn.reply({
                 type: 'proxy_http_response_chunk',
                 requestId,
                 chunk: text,
@@ -3093,7 +3245,7 @@ export default defineBackground(() => {
         if (sseRewriter) {
           const tail = sseRewriter.flush();
           if (tail) {
-            bridgeProxyPort?.postMessage({
+            conn.reply({
               type: 'proxy_http_response_chunk',
               requestId,
               chunk: tail,
@@ -3104,13 +3256,13 @@ export default defineBackground(() => {
             const translatedResponse = responseStatus >= 200 && responseStatus < 300
               ? applyResponseTranslation(translation, body, requestId, chunks.join(''), url)
               : translateErrorBody(translation, body, requestId, chunks.join(''), url, responseStatus);
-            bridgeProxyPort?.postMessage({
+            conn.reply({
               type: 'proxy_http_response_chunk',
               requestId,
               chunk: translatedResponse,
             });
           } catch (err) {
-            bridgeProxyPort?.postMessage({
+            conn.reply({
               type: 'proxy_http_error',
               requestId,
               error: err instanceof Error ? err.message : 'Response translation failed',
@@ -3119,7 +3271,7 @@ export default defineBackground(() => {
           }
         }
 
-        bridgeProxyPort?.postMessage({
+        conn.reply({
           type: 'proxy_http_response_done',
           requestId,
         });
@@ -3135,7 +3287,7 @@ export default defineBackground(() => {
         reservation.release();
       }
     } catch {
-      bridgeProxyPort?.postMessage({
+      conn.reply({
         type: 'proxy_http_error',
         requestId,
         error: 'Proxy request failed',
@@ -4436,7 +4588,7 @@ export default defineBackground(() => {
   }
 
   // Wake the SW every minute to re-spawn the byoky-bridge native host if it
-  // died with the SW (Hermes/OpenClaw need :19280 stable).
+  // died with the SW (Claude Code, Hermes and OpenClaw need their ports stable).
   const BRIDGE_KEEPALIVE_ALARM = 'byoky:bridge-keepalive';
   browser.alarms.create(BRIDGE_KEEPALIVE_ALARM, {
     periodInMinutes: 1,

@@ -10,9 +10,8 @@
  * non-bash wrapper, so `install` reports it as unsupported for now.
  */
 
-import { dirname, resolve } from 'node:path';
 import { homedir, platform } from 'node:os';
-import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import {
   getRegistrationStatusAt,
   registerHostAt,
@@ -24,12 +23,13 @@ import {
 
 export type { RegisterResult, RegistrationStatus } from './native-manifest.js';
 
+/**
+ * This package's own bin script. Not whatever `byoky-bridge` is first on
+ * PATH: pnpm and Volta put a shim there that node can't run, and it may be
+ * another copy of the bridge. (dist/ and src/ both sit next to bin/.)
+ */
 function getHostPath(): string {
-  try {
-    return execFileSync('/usr/bin/which', ['byoky-bridge'], { encoding: 'utf-8', timeout: 5000 }).trim();
-  } catch {
-    return resolve(dirname(new URL(import.meta.url).pathname), '../bin/byoky-bridge.js');
-  }
+  return fileURLToPath(new URL('../bin/byoky-bridge.js', import.meta.url));
 }
 
 /** Programmatic install — returns registered browser names, no stdout. */
@@ -74,14 +74,17 @@ export function uninstall(): void {
 }
 
 export function status(): void {
-  const { registered, missing } = getRegistrationStatus();
+  const { registered, missing, broken } = getRegistrationStatus();
   for (const browser of registered) {
     console.log(`  \u2713 ${browser}: registered`);
+  }
+  for (const browser of broken) {
+    console.log(`  \u2717 ${browser}: registered, but the host can't start. Run \`byoky-bridge install\` again.`);
   }
   for (const browser of missing) {
     console.log(`  \u2717 ${browser}: not registered`);
   }
-  if (registered.length === 0 && missing.length === 0) {
+  if (registered.length === 0 && missing.length === 0 && broken.length === 0) {
     console.log('  No supported browser found.');
   }
 }

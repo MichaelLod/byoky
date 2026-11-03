@@ -7,7 +7,7 @@
  * with network calls. Callers pass the home directory and platform in.
  */
 
-import { chmodSync, existsSync, mkdirSync, unlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
 export const HOST_NAME = 'com.byoky.bridge';
@@ -155,6 +155,8 @@ export interface RegisterResult {
 export interface RegistrationStatus {
   registered: string[];
   missing: string[];
+  /** Registered, but the host it points at can't start: register again. */
+  broken: string[];
 }
 
 /**
@@ -189,15 +191,99 @@ export function registerHostAt(
   return { browsers };
 }
 
-/** Which installed browsers have the host registered. */
+/** Which installed browsers have the host registered, and whether it can start. */
 export function getRegistrationStatusAt(home: string, os: string): RegistrationStatus {
   const registered: string[] = [];
   const missing: string[] = [];
+  const broken: string[] = [];
   for (const loc of getManifestLocations(home, os)) {
     if (!isInstalled(loc)) continue;
-    (existsSync(loc.path) ? registered : missing).push(loc.browser);
+    if (!existsSync(loc.path)) missing.push(loc.browser);
+    else (hostCanStart(loc.path) ? registered : broken).push(loc.browser);
   }
-  return { registered, missing };
+  return { registered, missing, broken };
+}
+
+/**
+ * Whether the wrapper a manifest names runs a node binary and a host script
+ * that are there. A host path taken from a package manager's shim (pnpm's
+ * `#!/bin/sh` script, Volta's native binary) or from a package that has
+ * since been removed leaves the browser unable to start the host.
+ */
+function hostCanStart(manifestPath: string): boolean {
+  let wrapper: unknown;
+  try {
+    wrapper = (JSON.parse(readFileSync(manifestPath, 'utf8')) as { path?: unknown }).path;
+  } catch {
+    return false;
+  }
+  if (typeof wrapper !== 'string' || !existsSync(wrapper)) return false;
+  let target: { node: string; host: string } | null;
+  try {
+    target = wrapperTarget(readFileSync(wrapper, 'utf8'));
+  } catch {
+    return false;
+  }
+  // A wrapper this version didn't write: nothing to check it against.
+  if (!target) return true;
+  return existsSync(target.node) && isNodeScript(target.host);
+}
+
+/** The node binary and host script of a wrapper createNativeWrapper wrote (or an older one). */
+export function wrapperTarget(script: string): { node: string; host: string } | null {
+  const line = script.split('\n').find((l) => l.startsWith('exec '));
+  const words = line ? shellWords(line) : [];
+  if (words.length < 4 || words[0] !== 'exec' || words[3] !== 'host') return null;
+  return { node: words[1], host: words[2] };
+}
+
+/** Splits a line of shell into words: single quotes, double quotes, backslashes. */
+function shellWords(line: string): string[] {
+  const words: string[] = [];
+  let word = '';
+  let inWord = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (c === "'" || c === '"') {
+      const end = line.indexOf(c, i + 1);
+      if (end < 0) return [];
+      word += line.slice(i + 1, end);
+      i = end;
+      inWord = true;
+    } else if (c === '\\' && i + 1 < line.length) {
+      word += line[++i];
+      inWord = true;
+    } else if (c === ' ' || c === '\t') {
+      if (inWord) words.push(word);
+      word = '';
+      inWord = false;
+    } else {
+      word += c;
+      inWord = true;
+    }
+  }
+  if (inWord) words.push(word);
+  return words;
+}
+
+/** A script node can run: not a native binary, and not a script for another interpreter. */
+function isNodeScript(path: string): boolean {
+  const head = Buffer.alloc(512);
+  let length: number;
+  try {
+    const fd = openSync(path, 'r');
+    try {
+      length = readSync(fd, head, 0, head.length, 0);
+    } finally {
+      closeSync(fd);
+    }
+  } catch {
+    return false;
+  }
+  const start = head.subarray(0, length);
+  if (start.includes(0)) return false;
+  const text = start.toString('utf8');
+  return !text.startsWith('#!') || /\bnode\b/.test(text.split('\n')[0]);
 }
 
 /** Removes the manifests and their wrapper scripts; returns the browsers cleaned. */

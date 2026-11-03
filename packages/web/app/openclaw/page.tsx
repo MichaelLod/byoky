@@ -117,7 +117,7 @@ export default function OpenClawTutorial() {
           </p>
           <p>Verify the bridge:</p>
           <Code>
-            {`curl -H "x-api-key: $(byoky-bridge token)" http://127.0.0.1:19280/health
+            {`curl -H "x-api-key: $(cat ~/.byoky-bridge/token)" http://127.0.0.1:19283/health
 # → {"status":"ok","providers":["anthropic","openai",...]}`}
           </Code>
           <p className="oc-note oc-note-muted">
@@ -409,12 +409,12 @@ function HowItWorks() {
     <section className="oc-section">
       <h2>How it works</h2>
       <Code>
-        {`OpenClaw → HTTP → Bridge (localhost:19280) → Native Messaging → Extension → LLM API
+        {`OpenClaw → HTTP → Bridge (localhost:19283) → Native Messaging → Extension → LLM API
                                                                 ↑
                                                        Keys live here. Always.`}
       </Code>
       <ol className="oc-list">
-        <li>The plugin registers each Byoky provider in OpenClaw, pointing at <code>http://127.0.0.1:19280/&lt;provider&gt;</code>.</li>
+        <li>The plugin registers each Byoky provider in OpenClaw, pointing at <code>http://127.0.0.1:19283/&lt;provider&gt;</code>. That bridge is OpenClaw&apos;s own: Claude Code&apos;s, from <code>byoky-bridge connect</code>, runs beside it on 19280 with its own session.</li>
         <li>OpenClaw sends an LLM request to the local bridge, with the bridge token as its API key.</li>
         <li>The bridge checks the token and relays the request to your Byoky extension via native messaging.</li>
         <li>The extension injects the real API key and calls the provider directly.</li>

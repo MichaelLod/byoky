@@ -227,7 +227,7 @@ describe('background: bridge HTTP proxy sessions', () => {
     });
     expect(h.fetch).not.toHaveBeenCalled();
     // The bridge's authorization went with the session.
-    expect(h.session!.data._bridgeKey).toBeUndefined();
+    await h.until(() => h.session!.data._bridges === undefined, 5_000, 'the bridge session forgotten');
   });
 });
 

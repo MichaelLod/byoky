@@ -58,7 +58,11 @@ interface ByokyProvider {
   models: ModelDef[];
 }
 
-const DEFAULT_BRIDGE_PORT = 19280;
+// OpenClaw's bridge port. Not the 19280 of `byoky-bridge connect`: the
+// wallet runs one bridge per port, each serving one app's session, so
+// OpenClaw and Claude Code (or Hermes) don't replace each other's session,
+// and each keeps its own providers, spending cap and routing group.
+export const BRIDGE_PORT = 19283;
 // The login page's port. Fixed: the wallet knows OpenClaw by the page's
 // origin, with its spending cap and routing group, so it must not change
 // between logins. (`byoky-bridge connect` uses 19281.)
@@ -434,11 +438,13 @@ function resolveBridgeBin(): string {
     const pkgPath = req.resolve('@byoky/bridge/package.json');
     return resolve(dirname(pkgPath), 'bin/byoky-bridge.js');
   } catch {
-    return resolve(dirname(new URL(import.meta.url).pathname), '../bin/byoky-bridge.js');
+    // fileURLToPath, not .pathname, which keeps spaces and non-ASCII letters
+    // percent-encoded.
+    return fileURLToPath(new URL('../bin/byoky-bridge.js', import.meta.url));
   }
 }
 
-function getRegistrationStatus(): { registered: string[]; missing: string[] } {
+function getRegistrationStatus(): { registered: string[]; missing: string[]; broken: string[] } {
   return getRegistrationStatusAt(homedir(), platform());
 }
 
@@ -454,7 +460,7 @@ async function checkBridgeHealth(): Promise<{ providers: string[] } | null> {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 3000);
-    const res = await fetch(`http://127.0.0.1:${DEFAULT_BRIDGE_PORT}/health`, {
+    const res = await fetch(`http://127.0.0.1:${BRIDGE_PORT}/health`, {
       headers: { authorization: `Bearer ${loadOrCreateToken()}` },
       signal: controller.signal,
     });
@@ -510,12 +516,16 @@ async function renderByokyStatus(): Promise<string> {
   const reg = getRegistrationStatus();
 
   const lines: string[] = [];
-  lines.push(`**Byoky Bridge**  ·  port ${DEFAULT_BRIDGE_PORT}`);
+  lines.push(`**Byoky Bridge**  ·  port ${BRIDGE_PORT}`);
   lines.push('');
 
   if (!health) {
     lines.push(`Status: **offline**`);
-    if (reg.registered.length === 0) {
+    if (reg.broken.length > 0) {
+      lines.push('');
+      lines.push(`Registered with ${reg.broken.join(', ')}, but the host can't start there.`);
+      lines.push('Run: `openclaw models auth login --provider byoky` to register it again.');
+    } else if (reg.registered.length === 0) {
       lines.push('');
       lines.push('Native messaging host is not registered with any browser.');
       lines.push('Run: `openclaw models auth login --provider byoky`');
@@ -544,6 +554,9 @@ async function renderByokyStatus(): Promise<string> {
     lines.push('');
     lines.push(`Registered with: ${reg.registered.join(', ')}`);
   }
+  if (reg.missing.length > 0) {
+    lines.push(`Not registered with: ${reg.missing.join(', ')} (log in again to add it)`);
+  }
   return lines.join('\n');
 }
 
@@ -553,16 +566,35 @@ async function ensureNativeHostRegistered(
   ctx: ProviderAuthContext,
 ): Promise<boolean> {
   const reg = getRegistrationStatus();
-  if (reg.registered.length > 0) return true;
+  // A registration whose host can't start (a shim, a package since
+  // removed) is no registration.
+  if (reg.registered.length > 0 && reg.broken.length === 0) {
+    // A browser installed since the host was registered gets it too, without
+    // asking again. Plugin users have no `byoky-bridge install` to run.
+    if (reg.missing.length > 0) {
+      try {
+        const added = registerHost().browsers.filter((b) => reg.missing.includes(b));
+        if (added.length > 0) {
+          await ctx.prompter.note(
+            `Registered Byoky Bridge with ${added.join(', ')} too. Restart ${added.length > 1 ? 'those browsers' : added[0]} if Byoky was already open there.`,
+          );
+        }
+      } catch {
+        // The browsers registered before still work.
+      }
+    }
+    return true;
+  }
 
   const ok = await ctx.prompter.confirm({
-    message:
-      'Byoky Bridge native messaging host is not registered. Register it now so the wallet can reach the bridge?',
+    message: reg.broken.length > 0
+      ? `Byoky Bridge is registered with ${reg.broken.join(', ')}, but the host it points at can't start. Register it again so the wallet can reach the bridge?`
+      : 'Byoky Bridge native messaging host is not registered. Register it now so the wallet can reach the bridge?',
     initialValue: true,
   });
   if (!ok) {
     await ctx.prompter.note(
-      'Skipped. You can register later with `byoky-bridge install`.',
+      'Skipped. Run `openclaw models auth login --provider byoky` again to register it.',
     );
     return false;
   }
@@ -600,7 +632,7 @@ async function runProviderAuth(
   const ok = await ensureNativeHostRegistered(ctx);
   if (!ok) {
     throw new Error(
-      'Byoky Bridge native messaging host is not registered. Run `byoky-bridge install` and try again.',
+      'Byoky Bridge native messaging host is not registered. Run `openclaw models auth login --provider byoky` again and accept the registration.',
     );
   }
 
@@ -620,12 +652,12 @@ async function runProviderAuth(
       );
     } else {
       const probeProviderId = selected[0];
-      const state = await probeBridgeSession(DEFAULT_BRIDGE_PORT, probeProviderId);
+      const state = await probeBridgeSession(BRIDGE_PORT, probeProviderId);
       if (state === 'ok') {
         await ctx.prompter.note(
-          `Reusing live Byoky Bridge on port ${DEFAULT_BRIDGE_PORT} — no browser round-trip needed.`,
+          `Reusing live Byoky Bridge on port ${BRIDGE_PORT} — no browser round-trip needed.`,
         );
-        return buildAuthResult(selected, DEFAULT_BRIDGE_PORT, provider, overrides);
+        return buildAuthResult(selected, BRIDGE_PORT, provider, overrides);
       }
       await ctx.prompter.note(
         state === 'bad-token'
@@ -902,7 +934,7 @@ export function startCallbackServer(opts: CallbackServerOptions): Promise<Callba
               providers: Array.isArray(data.providers)
                 ? data.providers.filter((id): id is string => typeof id === 'string' && VALID_PROVIDER_IDS.has(id))
                 : [],
-              port: isValidBridgePort(data.bridgePort) ? data.bridgePort : DEFAULT_BRIDGE_PORT,
+              port: isValidBridgePort(data.bridgePort) ? data.bridgePort : BRIDGE_PORT,
             });
           }
         });
@@ -1239,7 +1271,7 @@ function buildAuthPage(requestProviderId: string | null, nonce: string): string 
             type: 'BYOKY_INTERNAL_FROM_PAGE',
             requestId: bridgeRequestId,
             action: 'startBridgeProxy',
-            payload: { sessionKey, port: ${DEFAULT_BRIDGE_PORT} },
+            payload: { sessionKey, port: ${BRIDGE_PORT} },
           }, window.location.origin);
           setTimeout(() => {
             document.removeEventListener('byoky-message', handler);
@@ -1289,7 +1321,7 @@ function buildAuthPage(requestProviderId: string | null, nonce: string): string 
           if (!bridgeResult || !bridgeResult.success) {
             throw new Error((bridgeResult && bridgeResult.error) || 'Bridge proxy failed to start');
           }
-          const bridgePort = bridgeResult.port || ${DEFAULT_BRIDGE_PORT};
+          const bridgePort = bridgeResult.port || ${BRIDGE_PORT};
           const callbackBody = { providers: available, bridgePort };
 
           setStatus(

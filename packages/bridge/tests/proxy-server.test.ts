@@ -69,6 +69,14 @@ const STALE_REPLIES: Record<string, { error: string; status?: number; code?: str
   coded: { error: 'Bridge session expired', status: 401, code: 'bridge_session_expired' },
 };
 
+// Requests the wallet refused, and one that failed along the way.
+const REFUSALS: Record<string, { error: string; status?: number; code?: string }> = {
+  quota: { error: 'Token allowance exceeded for http://127.0.0.1:19281', status: 429, code: 'QUOTA_EXCEEDED' },
+  unavailable: { error: 'Provider not available in this session', status: 403, code: 'PROVIDER_UNAVAILABLE' },
+  untranslatable: { error: 'Gemini has no equivalent of this request', status: 400, code: 'UNSUPPORTED_FEATURE' },
+  failed: { error: 'Proxy request failed' },
+};
+
 // Stands in for the extension: records what the bridge sends over native
 // messaging and answers each request with a small JSON body.
 let sent: ProxyMessageOut[] = [];
@@ -107,7 +115,8 @@ function fakeExtension(msg: ProxyMessageOut): void {
     handleProxyResponse({ type: 'proxy_http_response_chunk', requestId: msg.requestId, chunk: 'data: 1\n\n' });
     return;
   }
-  const stale = STALE_REPLIES[msg.url.slice(msg.url.lastIndexOf('/') + 1)];
+  const stale = STALE_REPLIES[msg.url.slice(msg.url.lastIndexOf('/') + 1)]
+    ?? REFUSALS[msg.url.slice(msg.url.lastIndexOf('/') + 1)];
   if (stale) {
     handleProxyResponse({ type: 'proxy_http_error', requestId: msg.requestId, ...stale });
     return;
@@ -231,6 +240,23 @@ describe('extension replies', () => {
       error: 'only chat requests can be routed to another provider',
       code: 'ROUTING_UNSUPPORTED',
     });
+  });
+
+  // F017: a spending limit or a missing provider reached the client as a
+  // 502, which CLI tools retry; the SDKs also retry a 429 unless told not to.
+  it.each(['quota', 'unavailable', 'untranslatable'])('tells the client not to retry a request the wallet refused (%s)', async (kind) => {
+    const { error, status, code } = REFUSALS[kind];
+    const res = await send(port, `/anthropic/v1/${kind}`, { headers: { 'x-api-key': TOKEN }, body: '{}' });
+    expect(res.status).toBe(status);
+    expect(res.headers['x-should-retry']).toBe('false');
+    expect(JSON.parse(res.body)).toEqual({ error, code });
+  });
+
+  it('leaves a failure without a status a retryable 502', async () => {
+    const res = await send(port, '/anthropic/v1/failed', { headers: { 'x-api-key': TOKEN }, body: '{}' });
+    expect(res.status).toBe(502);
+    expect(res.headers['x-should-retry']).toBeUndefined();
+    expect(JSON.parse(res.body)).toEqual({ error: 'Proxy request failed' });
   });
 });
 

@@ -9,7 +9,7 @@ vi.mock('@byoky/bridge/token', () => ({ loadOrCreateToken: () => 'test-token' })
 vi.mock('@byoky/bridge/native-manifest', async () => await import('../../bridge/src/native-manifest.js'));
 vi.mock('@byoky/bridge/loopback-page', async () => await import('../../bridge/src/loopback-page.js'));
 
-const { startCallbackServer, probeBridgeSession, CALLBACK_PORT } = await import('../src/index.js');
+const { startCallbackServer, probeBridgeSession, CALLBACK_PORT, BRIDGE_PORT } = await import('../src/index.js');
 type CallbackResult = Awaited<ReturnType<typeof startCallbackServer>>;
 
 function freePort(): Promise<number> {
@@ -78,6 +78,12 @@ describe('login page server', () => {
     expect(CALLBACK_PORT).toBe(19282);
   });
 
+  // F018: on `byoky-bridge connect`'s 19280, an OpenClaw login replaced
+  // Claude Code's bridge session, and the reverse.
+  it('asks for a bridge port of its own, not the one `byoky-bridge connect` uses', () => {
+    expect(BRIDGE_PORT).toBe(19283);
+  });
+
   it('opens the page and resolves with the providers it reports', async () => {
     const h = await start();
     expect(h.opened).toEqual([`http://127.0.0.1:${h.port}`]);
@@ -91,7 +97,7 @@ describe('login page server', () => {
   it('drops unknown providers and an invalid bridge port', async () => {
     const h = await start();
     await h.post('/callback', { nonce: h.nonce, providers: ['anthropic', 'evil', 7, '__proto__'], bridgePort: 22 });
-    expect(await h.done).toEqual({ ok: true, providers: ['anthropic'], port: 19280 });
+    expect(await h.done).toEqual({ ok: true, providers: ['anthropic'], port: BRIDGE_PORT });
   });
 
   describe.each([
@@ -195,6 +201,9 @@ describe('probeBridgeSession', () => {
     [502, '{"error":"Session not found or wallet locked"}', 'stale'],
     [502, '{"error":"Unauthorized session key"}', 'stale'],
     [502, '{"error":"upstream exploded"}', 'ok'],
+    // The wallet refused the request, but the session is live (F017).
+    [429, '{"error":"Token allowance exceeded","code":"QUOTA_EXCEEDED"}', 'ok'],
+    [403, '{"error":"Provider not available in this session","code":"PROVIDER_UNAVAILABLE"}', 'ok'],
     [200, '{"data":[]}', 'ok'],
   ])('maps %s %s to %s', async (status, body, expected) => {
     const { server, port } = await bridge(status, body);

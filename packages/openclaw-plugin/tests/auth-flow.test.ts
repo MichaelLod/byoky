@@ -1,11 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { request } from 'node:http';
 import { createServer as createNetServer } from 'node:net';
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { platform, tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { ProviderAuthContext, ProviderAuthResult } from 'openclaw/plugin-sdk/core';
-import { getManifestLocations, registerHostAt } from '../../bridge/src/native-manifest.js';
+import { getManifestLocations, registerHostAt, wrapperTarget } from '../../bridge/src/native-manifest.js';
 import { DEFAULT_MODELS, getModel, modelsForProvider } from '../../core/src/models.js';
 import { FakeWallet, type WalletKind } from '../../bridge/tests/helpers/fake-wallet.js';
 import { openLoginPage } from '../../bridge/tests/helpers/login-page.js';
@@ -91,11 +92,14 @@ function context(config: object = {}): ProviderAuthContext {
   } as unknown as ProviderAuthContext;
 }
 
+/** The bridge's bin script, as the plugin finds it in node_modules. */
+const BRIDGE_BIN = fileURLToPath(new URL('../../bridge/bin/byoky-bridge.js', import.meta.url));
+
 /** A home where Chrome is installed and already has the host registered. */
-function registeredHome(): void {
+function registeredHome(hostPath = BRIDGE_BIN): void {
   const chrome = getManifestLocations(home, platform()).find((l) => l.browser === 'Chrome')!;
   mkdirSync(chrome.profileDirs[0], { recursive: true });
-  registerHostAt(home, platform(), '/opt/byoky-bridge.js');
+  registerHostAt(home, platform(), hostPath);
 }
 
 beforeEach(async () => {
@@ -124,13 +128,13 @@ describe('login', () => {
     const run = authRuns().byoky(context({ plugins: { entries: { byoky: { config: { anthropicMaxTokens: 2048 } } } } }));
     await expect.poll(() => opened.length).toBe(1);
     expect(opened[0]).toBe(`http://127.0.0.1:${callbackPort}`);
-    expect(await post('/callback', { nonce: await pageNonce(), providers: ['anthropic', 'azure_openai'], bridgePort: 19280 }))
+    expect(await post('/callback', { nonce: await pageNonce(), providers: ['anthropic', 'azure_openai'], bridgePort: 19283 }))
       .toBe(200);
 
     const result = await run;
     const providers = (result.configPatch as { models: { providers: Record<string, { baseUrl: string; apiKey: string; models: Array<{ maxTokens: number }> }> } }).models.providers;
-    expect(providers['byoky-azure_openai'].baseUrl).toBe('http://127.0.0.1:19280/azure_openai/openai/v1');
-    expect(providers['byoky-anthropic'].baseUrl).toBe('http://127.0.0.1:19280/anthropic');
+    expect(providers['byoky-azure_openai'].baseUrl).toBe('http://127.0.0.1:19283/azure_openai/openai/v1');
+    expect(providers['byoky-anthropic'].baseUrl).toBe('http://127.0.0.1:19283/anthropic');
     expect(providers['byoky-anthropic'].apiKey).toBe('test-token');
     expect(providers['byoky-anthropic'].models.every((m) => m.maxTokens === 2048)).toBe(true);
     expect(stops).toContain('Wallet connected');
@@ -140,7 +144,7 @@ describe('login', () => {
     registeredHome();
     const run = authRuns().byoky(context());
     await expect.poll(() => opened.length).toBe(1);
-    await post('/callback', { nonce: await pageNonce(), providers: ['anthropic', 'openai', 'gemini'], bridgePort: 19280 });
+    await post('/callback', { nonce: await pageNonce(), providers: ['anthropic', 'openai', 'gemini'], bridgePort: 19283 });
     const result = await run;
     type Model = { id: string; input: string[]; contextWindow: number; maxTokens: number; reasoning: boolean };
     const providers = (result.configPatch as { models: { providers: Record<string, { models: Model[] }> } }).models.providers;
@@ -209,6 +213,52 @@ describe('login', () => {
     await expect(run!(ctx)).rejects.toThrow(`(http://127.0.0.1:${CALLBACK_PORT})`);
   });
 
+  // F019: a registration pointing at a shim (written by `byoky-bridge
+  // install` under pnpm) counted as registered, so the plugin never wrote
+  // its own working one.
+  it('registers again when the registered host can\'t start', async () => {
+    const shim = join(home, 'byoky-bridge');
+    writeFileSync(shim, '#!/bin/sh\nexec node "$(dirname "$0")/x.js" "$@"\n');
+    registeredHome(shim);
+    const chrome = getManifestLocations(home, platform()).find((l) => l.browser === 'Chrome')!;
+    const run = authRuns().byoky(context());
+    await expect.poll(() => opened.length).toBe(1);
+    expect(stops).toContain('Registered with Chrome');
+    const wrapper = JSON.parse(readFileSync(chrome.path, 'utf8')).path;
+    expect(wrapperTarget(readFileSync(wrapper, 'utf8'))?.host).toBe(BRIDGE_BIN);
+    await post('/callback', { nonce: await pageNonce(), providers: ['openai'] });
+    await run;
+  });
+
+  // F076: once any browser was registered, one installed later never was,
+  // and a plugin-only user has no `byoky-bridge install` to run.
+  it('registers the native host with a browser installed since, without asking again', async () => {
+    registeredHome();
+    const firefox = getManifestLocations(home, platform()).find((l) => l.browser === 'Firefox')!;
+    mkdirSync(firefox.profileDirs[0], { recursive: true });
+    const notes: string[] = [];
+    const ctx = context();
+    ctx.prompter.note = async (m: string) => { notes.push(m); };
+    ctx.prompter.confirm = async () => { throw new Error('asked again'); };
+    const run = authRuns().byoky(ctx);
+    await expect.poll(() => opened.length).toBe(1);
+    expect(existsSync(firefox.path)).toBe(true);
+    expect(notes).toContain('Registered Byoky Bridge with Firefox too. Restart Firefox if Byoky was already open there.');
+    await post('/callback', { nonce: await pageNonce(), providers: ['openai'] });
+    await run;
+  });
+
+  it('points a user who declines registration at the login, not a command they don\'t have', async () => {
+    const chrome = getManifestLocations(home, platform()).find((l) => l.browser === 'Chrome')!;
+    mkdirSync(chrome.profileDirs[0], { recursive: true });
+    const notes: string[] = [];
+    const ctx = context();
+    ctx.prompter.note = async (m: string) => { notes.push(m); };
+    ctx.prompter.confirm = async () => false;
+    await expect(authRuns().byoky(ctx)).rejects.toThrow('openclaw models auth login --provider byoky');
+    expect(notes.join('\n')).not.toContain('byoky-bridge install');
+  });
+
   it('registers the native host with the browsers that are installed', async () => {
     const brave = getManifestLocations(home, platform()).find((l) => l.browser === 'Brave')!;
     mkdirSync(brave.profileDirs[0], { recursive: true });
@@ -218,6 +268,43 @@ describe('login', () => {
     expect(existsSync(brave.path)).toBe(true);
     await post('/callback', { nonce: await pageNonce(), providers: ['openai'] });
     await run;
+  });
+});
+
+describe('a bridge that is already running', () => {
+  /** Bridges answering on these ports, with the providers of their session; any other port is closed. */
+  function runningBridges(bridges: Record<number, string[]>) {
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL) => {
+      const url = new URL(String(input));
+      const providers = bridges[Number(url.port)];
+      if (!providers) throw new Error('ECONNREFUSED');
+      return new Response(JSON.stringify(url.pathname === '/health' ? { status: 'ok', providers } : { data: [] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }));
+  }
+
+  it('is reused when it is OpenClaw\'s own', async () => {
+    registeredHome();
+    runningBridges({ 19283: ['anthropic', 'openai'] });
+    const result = await authRuns()['byoky-anthropic'](context());
+    expect(opened).toEqual([]);
+    const providers = (result.configPatch as { models: { providers: Record<string, { baseUrl: string }> } }).models.providers;
+    expect(providers['byoky-anthropic'].baseUrl).toBe('http://127.0.0.1:19283/anthropic');
+  });
+
+  // F018: OpenClaw reused the bridge `byoky-bridge connect` started for
+  // Claude Code, whose session is another app's, with its spending cap and
+  // routing group, and for `byoky` configured only that session's providers.
+  it.each(['byoky', 'byoky-anthropic'])('is not reused for %s when it is Claude Code\'s', async (id) => {
+    registeredHome();
+    runningBridges({ 19280: ['anthropic'] });
+    const run = authRuns()[id](context());
+    await expect.poll(() => opened.length).toBe(1);
+    await post('/callback', { nonce: await pageNonce(), providers: ['anthropic', 'openai'], bridgePort: 19283 });
+    const providers = (await run).configPatch as { models: { providers: Record<string, { baseUrl: string }> } };
+    expect(providers.models.providers['byoky-anthropic'].baseUrl).toBe('http://127.0.0.1:19283/anthropic');
   });
 });
 
