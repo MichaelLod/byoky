@@ -383,8 +383,9 @@ struct ProviderIcon: View {
                 // The provider's name is always next to its mark.
                 .accessibilityHidden(true)
         } else if let provider = Provider.find(providerId) {
+            // A fixed size, like the image marks: it has to fit its tile.
             Text(String(provider.name.prefix(2)).uppercased())
-                .font(.mono(size * 0.72, weight: .medium))
+                .font(.custom(Theme.FontName.monoMedium, fixedSize: size * 0.72))
                 .lineLimit(1)
                 .fixedSize()
                 .frame(width: size, height: size)

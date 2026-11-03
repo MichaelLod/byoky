@@ -3,9 +3,10 @@ import SwiftUI
 /// The Connected Apps screen — connected apps bucketed by group, with per-app routing
 /// (assign an app to a group → its requests use that group's credential and,
 /// when the group's destination is in a different family, get translated on
-/// the fly). Mirrors the extension's `ConnectedApps.tsx` page; the mobile
-/// gesture is long-press → "Move to group" sheet rather than drag-and-drop
-/// since touch drag is awkward for small targets.
+/// the fly). Mirrors the extension's `ConnectedApps.tsx` page; tapping an app
+/// opens a "Move to group" sheet rather than drag-and-drop since touch drag
+/// is awkward for small targets. Each app also shows Set limit and
+/// Disconnect buttons, as on Android and in the extension.
 struct AppsView: View {
     @EnvironmentObject var wallet: WalletStore
 
@@ -14,6 +15,7 @@ struct AppsView: View {
     @State private var editingGroup: Group?
     @State private var showCreateGroup = false
     @State private var deletingGroup: Group?
+    @State private var disconnectingApp: Session?
     @State private var confirmDisconnectAll = false
 
     private var orderedGroups: [Group] {
@@ -119,6 +121,24 @@ struct AppsView: View {
             } message: { _ in
                 Text("Apps in this group move back to Default.")
             }
+            .alert(
+                disconnectingApp.map { "Disconnect \($0.displayHost)?" } ?? "",
+                isPresented: Binding(
+                    get: { disconnectingApp != nil },
+                    set: { if !$0 { disconnectingApp = nil } }
+                ),
+                presenting: disconnectingApp
+            ) { session in
+                Button("Disconnect", role: .destructive) {
+                    try? wallet.revokeSession(session)
+                    disconnectingApp = nil
+                }
+                Button("Cancel", role: .cancel) {
+                    disconnectingApp = nil
+                }
+            } message: { _ in
+                Text("It loses access to your keys until you open it again and reconnect.")
+            }
             .alert("Disconnect all apps?", isPresented: $confirmDisconnectAll) {
                 Button("Disconnect all", role: .destructive) {
                     for session in wallet.sessions {
@@ -145,14 +165,19 @@ struct AppsView: View {
             if groupSessions.isEmpty {
                 Text(isDefault
                      ? "Apps without an assigned group land here."
-                     : "Long-press an app and pick this group to move it here.")
+                     : "Tap an app and pick this group to move it here.")
                     .font(.caption)
                     .foregroundStyle(Theme.dim)
                     .italic()
                     .padding(.vertical, 4)
             } else {
                 ForEach(groupSessions) { session in
-                    AppSessionRow(session: session)
+                    AppSessionRow(
+                        session: session,
+                        onMove: { movingApp = session },
+                        onSetLimit: { editingAllowanceFor = session },
+                        onDisconnect: { disconnectingApp = session }
+                    )
                         .environmentObject(wallet)
                         .contentShape(Rectangle())
                         .contextMenu {
@@ -194,30 +219,25 @@ struct AppsView: View {
             }
         } header: {
             HStack(spacing: 6) {
-                Text(group.name)
-                    .uppercaseDisplay()
-                    .font(.mono(12, weight: .medium, relativeTo: .callout))
-                    .tracking(1.4)
-                    .foregroundStyle(Theme.bone)
-                if !group.providerId.isEmpty {
-                    Text(provider?.name ?? group.providerId)
-                        .uppercaseDisplay()
-                        .font(.mono(10, relativeTo: .caption2))
-                        .tracking(0.8)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
-                        .background(Theme.violetSoft)
-                        .foregroundStyle(Theme.lilac)
+                // Name and pills on one line when they fit; otherwise the
+                // pills go under the name, and under each other, rather than
+                // breaking a word or a model id mid-way.
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 6) {
+                        groupName(group)
+                        groupPills(group, provider: provider)
+                    }
+                    VStack(alignment: .leading, spacing: 4) {
+                        groupName(group)
+                        ViewThatFits(in: .horizontal) {
+                            HStack(spacing: 6) { groupPills(group, provider: provider) }
+                            VStack(alignment: .leading, spacing: 4) { groupPills(group, provider: provider) }
+                        }
+                    }
                 }
-                if let model = group.model, !model.isEmpty {
-                    Text(model)
-                        .font(.mono(10, relativeTo: .caption2))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .foregroundStyle(Theme.fog)
-                        .overlay(Rectangle().strokeBorder(Theme.seamStrong, lineWidth: 1))
-                }
-                Spacer()
+                .padding(.vertical, 4)
+                .layoutPriority(1)
+                Spacer(minLength: 0)
                 // The default group stays routing-neutral (ensureDefaultGroup
                 // resets it on unlock), so it has nothing to edit or delete.
                 if !isDefault {
@@ -262,6 +282,44 @@ struct AppsView: View {
         .retroRow()
     }
 
+    private func groupName(_ group: Group) -> some View {
+        Text(group.name)
+            .uppercaseDisplay()
+            .font(.mono(12, weight: .medium, relativeTo: .callout))
+            .tracking(1.4)
+            .foregroundStyle(Theme.bone)
+            .lineLimit(3)
+    }
+
+    /// The group's provider and pinned model.
+    @ViewBuilder
+    private func groupPills(_ group: Group, provider: Provider?) -> some View {
+        if !group.providerId.isEmpty {
+            Text(provider?.name ?? group.providerId)
+                .uppercaseDisplay()
+                .font(.mono(10, relativeTo: .caption2))
+                .tracking(0.8)
+                .lineLimit(1)
+                .fixedSize()
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(Theme.violetSoft)
+                .foregroundStyle(Theme.lilac)
+                .dynamicTypeSize(...DynamicTypeSize.accessibility2)
+        }
+        if let model = group.model, !model.isEmpty {
+            // VoiceOver reads the whole id even when the middle is cut.
+            Text(model)
+                .font(.mono(10, relativeTo: .caption2))
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .foregroundStyle(Theme.fog)
+                .overlay(Rectangle().strokeBorder(Theme.seamStrong, lineWidth: 1))
+        }
+    }
+
     private var emptyState: some View {
         Section {
             VStack(spacing: 14) {
@@ -281,9 +339,25 @@ struct AppsView: View {
 
 // MARK: - Session row
 
+private extension Session {
+    var displayHost: String {
+        if let url = URL(string: appOrigin), let host = url.host { return host }
+        return appOrigin
+    }
+}
+
+/// A connected app. Tapping it moves it to another group (as on Android);
+/// the trailing buttons set its token limit and disconnect it.
 private struct AppSessionRow: View {
     @EnvironmentObject var wallet: WalletStore
     let session: Session
+    let onMove: () -> Void
+    let onSetLimit: () -> Void
+    let onDisconnect: () -> Void
+
+    /// At accessibility text sizes the buttons go under the app's details
+    /// instead of squeezing them.
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     private var allowance: TokenAllowance? {
         wallet.tokenAllowances.first { $0.origin == session.appOrigin }
@@ -293,52 +367,111 @@ private struct AppSessionRow: View {
         wallet.tokenUsage(for: session.appOrigin)
     }
 
-    private var displayHost: String {
-        if let url = URL(string: session.appOrigin), let host = url.host { return host }
-        return session.appOrigin
-    }
+    private var displayHost: String { session.displayHost }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            faviconBadge
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(displayHost)
-                    .font(.mono(15, relativeTo: .body))
-                    .foregroundStyle(Theme.bone)
-                    .lineLimit(1)
-
-                Text("Connected \(session.createdAt, format: .relative(presentation: .named))")
-                    .font(.caption2)
-                    .foregroundStyle(Theme.fog)
-
-                if let allowance, let limit = allowance.totalLimit {
-                    // A limit of 0 blocks the app: full, not 0/0.
-                    let used = limit > 0 ? min(Double(tokensUsed) / Double(limit), 1.0) : 1.0
-                    HStack(spacing: 8) {
-                        ProgressView(value: used)
-                            .tint(used >= 0.8 ? Theme.amber : Theme.violet)
-                        Text("\(formatTokenCount(tokensUsed)) / \(formatTokenCount(limit))")
-                            .font(.mono(11, relativeTo: .caption2))
-                            .foregroundStyle(Theme.fog)
-                    }
-                } else {
-                    Text("\(formatTokenCount(tokensUsed)) tokens used")
-                        .font(.mono(11, relativeTo: .caption2))
-                        .foregroundStyle(Theme.dim)
+        if typeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 0) {
+                moveButton
+                HStack(spacing: 8) {
+                    limitButton
+                    disconnectButton
                 }
+                .padding(.leading, -10)
+            }
+        } else {
+            HStack(spacing: 0) {
+                moveButton
+                limitButton
+                disconnectButton
+                    // The glyph keeps its place at the card's edge.
+                    .padding(.trailing, -10)
             }
         }
-        .padding(.vertical, 4)
+    }
+
+    // List rows fire every default-style button on any tap; plain and
+    // borderless buttons only fire on their own.
+    private var moveButton: some View {
+        Button(action: onMove) {
+            HStack(alignment: .top, spacing: 10) {
+                faviconBadge
+                details
+                Spacer(minLength: 0)
+            }
+            .padding(.vertical, 4)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("Moves it to another group")
+        .accessibilityIdentifier("session.move")
+    }
+
+    private var limitButton: some View {
+        Button(action: onSetLimit) {
+            Image(systemName: "gauge.with.dots.needle.33percent")
+                .font(.callout)
+                .foregroundStyle(Theme.phosphor)
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.borderless)
+        .accessibilityLabel("Set token limit for \(displayHost)")
+        .accessibilityIdentifier("session.setLimit")
+    }
+
+    private var disconnectButton: some View {
+        Button(action: onDisconnect) {
+            Image(systemName: "xmark.circle")
+                .font(.callout)
+                .foregroundStyle(Theme.alarm)
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.borderless)
+        .accessibilityLabel("Disconnect \(displayHost)")
+        .accessibilityIdentifier("session.disconnect")
+    }
+
+    private var details: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(displayHost)
+                .font(.mono(15, relativeTo: .body))
+                .foregroundStyle(Theme.bone)
+                .lineLimit(1)
+
+            Text("Connected \(session.createdAt, format: .relative(presentation: .named))")
+                .font(.caption2)
+                .foregroundStyle(Theme.fog)
+
+            if let allowance, let limit = allowance.totalLimit {
+                // A limit of 0 blocks the app: full, not 0/0.
+                let used = limit > 0 ? min(Double(tokensUsed) / Double(limit), 1.0) : 1.0
+                HStack(spacing: 8) {
+                    ProgressView(value: used)
+                        .tint(used >= 0.8 ? Theme.amber : Theme.violet)
+                    Text("\(formatTokenCount(tokensUsed)) / \(formatTokenCount(limit))")
+                        .font(.mono(11, relativeTo: .caption2))
+                        .foregroundStyle(Theme.fog)
+                }
+            } else {
+                Text("\(formatTokenCount(tokensUsed)) tokens used")
+                    .font(.mono(11, relativeTo: .caption2))
+                    .foregroundStyle(Theme.dim)
+            }
+        }
     }
 
     private var faviconBadge: some View {
         Text(displayHost.first.map { String($0).uppercased() } ?? "?")
-            .font(.display(17, relativeTo: .headline))
+            // A fixed size: it has to fit its tile.
+            .font(.custom(Theme.FontName.displayBold, fixedSize: 17))
             .foregroundStyle(Theme.lilac)
             .frame(width: 34, height: 34)
             .background(Theme.violetSoft)
             .overlay(Rectangle().strokeBorder(Theme.seamStrong, lineWidth: 1))
+            // The host is read right after it.
+            .accessibilityHidden(true)
     }
 }
 

@@ -20,7 +20,9 @@ struct ByokyApp: App {
         // /tmp/byoky-ios-test-config.json with a `geminiKey` (or other
         // provider keys), auto-create the wallet + import the keys so the
         // XCUITest can skip the onboarding + add-credential form
-        // interactions and go straight to the screens under test.
+        // interactions and go straight to the screens under test. A UI test
+        // can pass the same JSON in the BYOKY_UITEST_CONFIG environment
+        // variable instead.
         if isUITest {
             Self.autoSetupIfNeeded()
         }
@@ -33,7 +35,8 @@ struct ByokyApp: App {
     #if DEBUG
     private static func autoSetupIfNeeded() {
         let configPath = "/tmp/byoky-ios-test-config.json"
-        guard let data = FileManager.default.contents(atPath: configPath),
+        guard let data = ProcessInfo.processInfo.environment["BYOKY_UITEST_CONFIG"].map({ Data($0.utf8) })
+                ?? FileManager.default.contents(atPath: configPath),
               let config = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return
         }
@@ -51,6 +54,11 @@ struct ByokyApp: App {
             }
             if let openaiKey = config["openaiKey"] as? String, !openaiKey.isEmpty {
                 try? w.addCredential(providerId: "openai", label: "OpenAI", apiKey: openaiKey)
+            }
+            // Apps already connected, as if each had connected in the
+            // in-wallet browser: `connectedApps: ["https://…"]`.
+            for origin in config["connectedApps"] as? [String] ?? [] {
+                try? w.upsertSession(appOrigin: origin, providers: w.credentials.map(\.providerId))
             }
         }
     }

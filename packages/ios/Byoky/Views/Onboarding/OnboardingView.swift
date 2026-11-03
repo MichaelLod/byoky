@@ -24,10 +24,19 @@ struct OnboardingView: View {
             GeometryReader { geometry in
                 ScrollView {
                     VStack(spacing: 0) {
-                        HStack {
-                            Wordmark()
-                            Spacer()
-                            StatusLabel("Local only", color: Theme.dim)
+                        // The status goes under the wordmark when both
+                        // don't fit on one line.
+                        ViewThatFits(in: .horizontal) {
+                            HStack {
+                                Wordmark()
+                                Spacer()
+                                StatusLabel("Local only", color: Theme.dim)
+                            }
+                            VStack(alignment: .leading, spacing: 6) {
+                                Wordmark()
+                                StatusLabel("Local only", color: Theme.dim)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         }
 
                         Spacer(minLength: 24)

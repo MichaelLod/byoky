@@ -271,3 +271,115 @@ final class ByokyWalletUITests: XCTestCase {
         app.buttons["appRuntime.close"].tap()
     }
 }
+
+/// The Connected tab: tapping an app moves it, and its token limit and
+/// Disconnect are buttons on the row, not only behind a long-press or a
+/// swipe. Each test starts from a fresh wallet with one key and one
+/// connected app, set up at launch.
+final class ConnectedAppsUITests: XCTestCase {
+    private var app: XCUIApplication!
+
+    override func setUpWithError() throws {
+        continueAfterFailure = false
+        app = XCUIApplication()
+        app.launchArguments = ["-byokyResetOnLaunch", "-byokyUITest"]
+        app.launchEnvironment["BYOKY_UITEST_CONFIG"] = """
+            {"password": "CorrectHorse12!", "openaiKey": "sk-test-not-a-real-key",
+             "connectedApps": ["https://chat.example.com"]}
+            """
+        app.launch()
+        let connected = app.tabBars.buttons["Connected"]
+        XCTAssertTrue(connected.waitForExistence(timeout: 10), "the wallet was not set up at launch")
+        connected.tap()
+    }
+
+    private func assertTapTarget(_ element: XCUIElement, file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertGreaterThanOrEqual(element.frame.width, 44, file: file, line: line)
+        XCTAssertGreaterThanOrEqual(element.frame.height, 44, file: file, line: line)
+    }
+
+    func testTappingAnAppMovesItAndItsButtonsSetALimitAndDisconnect() {
+        let row = app.buttons["session.move"]
+        XCTAssertTrue(row.waitForExistence(timeout: 10), "the app's row is not a button")
+        XCTAssertTrue(row.label.contains("chat.example.com"), row.label)
+        row.tap()
+        let defaultGroup = app.staticTexts["moveApp.group.default"]
+        XCTAssertTrue(defaultGroup.waitForExistence(timeout: 5), "tapping the app did not open Move to group")
+        app.navigationBars.buttons["Cancel"].tap()
+        XCTAssertFalse(defaultGroup.waitForExistence(timeout: 2))
+
+        let setLimit = app.buttons["session.setLimit"]
+        XCTAssertTrue(setLimit.waitForExistence(timeout: 5))
+        XCTAssertEqual(setLimit.label, "Set token limit for chat.example.com")
+        assertTapTarget(setLimit)
+        setLimit.tap()
+        let limitForm = app.staticTexts["Total token limit"]
+        XCTAssertTrue(limitForm.waitForExistence(timeout: 5), "Set limit did not open the token limit form")
+        app.navigationBars.buttons["Cancel"].tap()
+        XCTAssertFalse(limitForm.waitForExistence(timeout: 2))
+
+        let disconnect = app.buttons["session.disconnect"]
+        XCTAssertEqual(disconnect.label, "Disconnect chat.example.com")
+        assertTapTarget(disconnect)
+        disconnect.tap()
+        let alert = app.alerts["Disconnect chat.example.com?"]
+        XCTAssertTrue(alert.waitForExistence(timeout: 5), "disconnected without asking")
+        alert.buttons["Cancel"].tap()
+        XCTAssertTrue(row.waitForExistence(timeout: 5), "Cancel disconnected the app")
+
+        disconnect.tap()
+        XCTAssertTrue(alert.waitForExistence(timeout: 5))
+        alert.buttons["Disconnect"].tap()
+        XCTAssertFalse(row.waitForExistence(timeout: 2), "the app is still connected")
+    }
+
+    /// A pinned dated model id stays on one line instead of breaking
+    /// mid-token ("claude-" / "haiku-4-5-2025100" / "1").
+    func testAGroupHeaderKeepsItsModelIdOnOneLine() {
+        app.buttons["groups.create"].tap()
+        let name = app.textFields["groupEditor.name"]
+        XCTAssertTrue(name.waitForExistence(timeout: 5))
+        name.tap()
+        name.typeText("Coding assistants for work")
+        let model = app.textFields["groupEditor.model"]
+        model.tap()
+        model.typeText("claude-haiku-4-5-20251001")
+        app.buttons["groupEditor.save"].tap()
+
+        let modelPill = app.staticTexts["claude-haiku-4-5-20251001"]
+        let providerPill = app.staticTexts["Anthropic"]
+        XCTAssertTrue(modelPill.waitForExistence(timeout: 5))
+        XCTAssertTrue(providerPill.exists)
+        // One line each: the pills are the same text style.
+        XCTAssertLessThan(modelPill.frame.height, providerPill.frame.height * 1.5,
+                          "model id wrapped: \(modelPill.frame) vs \(providerPill.frame)")
+        let groupName = app.staticTexts["Coding assistants for work"]
+        XCTAssertTrue(groupName.exists)
+        XCTAssertLessThan(groupName.frame.height, providerPill.frame.height * 2,
+                          "group name wrapped: \(groupName.frame)")
+    }
+}
+
+/// At the largest accessibility text size the welcome header stacks: the
+/// wordmark stays on one line ("BYOKY", not "BYOK" / "Y") and the status
+/// goes under it.
+final class OnboardingDynamicTypeUITests: XCTestCase {
+    func testTheWelcomeHeaderStacksAtTheLargestTextSize() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "-byokyResetOnLaunch",
+            "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL",
+        ]
+        app.launch()
+
+        let wordmark = app.staticTexts["Byoky"].firstMatch
+        let status = app.staticTexts["Local only"]
+        XCTAssertTrue(wordmark.waitForExistence(timeout: 10))
+        XCTAssertTrue(status.exists)
+        XCTAssertGreaterThan(wordmark.frame.width, wordmark.frame.height * 2,
+                             "wordmark broke over lines: \(wordmark.frame)")
+        XCTAssertGreaterThanOrEqual(status.frame.minY, wordmark.frame.maxY,
+                                    "status squeezed beside the wordmark: \(status.frame) vs \(wordmark.frame)")
+    }
+}
