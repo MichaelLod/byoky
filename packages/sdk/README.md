@@ -121,7 +121,7 @@ const session = await byoky.tryReconnect();
 | `createFetch(providerId)` | Create a proxied `fetch` function for the provider's inference and model-list endpoints (Files, Batches, Assistants and admin APIs get 403 `ENDPOINT_NOT_ALLOWED`) |
 | `listModels(providerId)` | Discover models available to the user's credential (live, per provider) |
 | `createRelay(wsUrl)` | Open a WebSocket relay to your backend |
-| `disconnect()` | End the session |
+| `disconnect()` | End the session and close its relays. Its fetches then reject with `NO_SESSION`; call `connect()` for a new one |
 | `isConnected()` | Check if session is still valid |
 | `getUsage()` | Get token usage stats (input/output tokens) |
 | `onDisconnect(cb)` | Subscribe to disconnection events |
@@ -135,9 +135,12 @@ wallet can't serve reads `{ available: false }`.
 The `fetch` from `createFetch` takes an `AbortSignal` like the real one:
 aborting before the response headers rejects with the signal's reason (an
 `AbortError` by default), aborting later errors the body, and either way the
-wallet stops the upstream call. With or without a signal, a request that
-gets no response headers within `requestTimeout` is stopped the same way and
-rejects with a `PROXY_ERROR`.
+wallet stops the upstream call. An abort also ends the wait while an expired
+session is renewed (the wallet asking the user to unlock or approve).
+Cancelling the response body (`res.body.cancel()`, `reader.cancel()`, or
+leaving a `for await` loop over it early) stops the upstream call as well.
+With or without a signal, a request that gets no response headers within
+`requestTimeout` is stopped the same way and rejects with a `PROXY_ERROR`.
 
 If Byoky is updated while your page is open, calls fail at once with
 `WALLET_RELOADED` (a proxied call answers status 503 with that code) and
@@ -222,7 +225,7 @@ const session = await byoky.connect({
 | `USER_REJECTED` | The user denied the request in the wallet, or it timed out. With `modal: true`, closing the modal rejects with `WALLET_NOT_INSTALLED` (no wallet found) or a plain `Error('User cancelled')`. |
 | `QUOTA_EXCEEDED` | HTTP 429: the spending cap the user set for your app ran out. |
 | `ENDPOINT_NOT_ALLOWED` | HTTP 403: the endpoint isn't an inference or model-list endpoint (Files, Batches, Assistants, admin APIs). |
-| `SESSION_EXPIRED` | HTTP 401: the session was revoked, the wallet locked, or it expired. Connect again. |
+| `SESSION_EXPIRED` | HTTP 401: the session was revoked, the wallet locked, or it expired. A `createFetch` request first renews the session and retries (the wallet asks the user to unlock or approve, or approves a trusted site silently), for a session from `tryReconnect()` too; you get the 401 only when that fails, and `onDisconnect` fires. Connect again. |
 
 The full list is at [byoky.com/docs#errors](https://byoky.com/docs#errors).
 

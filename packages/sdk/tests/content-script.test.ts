@@ -155,6 +155,26 @@ describe('SDK ↔ content script', () => {
       expect(proxyPort.disconnected).toBe(true);
     });
 
+    it('cancelling the response body closes its proxy port, so the wallet stops the call', async () => {
+      const session = await connect('byk_body_cancel');
+      const pending = session.createFetch('anthropic')('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        body: '{"stream":true}',
+      });
+      await tick();
+
+      const proxyPort = portsNamed('byoky-proxy')[0];
+      const requestId = proxyPort.posted[0].requestId;
+      proxyPort.emit({ type: 'BYOKY_PROXY_RESPONSE_META', requestId, status: 200, statusText: 'OK', headers: { 'content-type': 'text/event-stream' } });
+      proxyPort.emit({ type: 'BYOKY_PROXY_RESPONSE_CHUNK', requestId, chunk: 'data: 1\n\n' });
+      const reader = (await pending).body!.getReader();
+      await reader.read();
+
+      await reader.cancel();
+      await tick();
+      expect(proxyPort.disconnected).toBe(true);
+    });
+
     it('session.disconnect() closes the notify connection, so the worker can sleep', async () => {
       const session = await connect('byk_notify');
       await tick();

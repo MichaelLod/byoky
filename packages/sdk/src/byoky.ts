@@ -3,7 +3,7 @@ import { ByokyError, ByokyErrorCode } from '@byoky/core';
 import { replayableArgs } from './body.js';
 import { fetchModelsList } from './list-models-fetch.js';
 import { isExtensionInstalled, getStoreUrl, resolveMessageTarget } from './detect.js';
-import { createProxyFetch } from './proxy-fetch.js';
+import { abortReason, createProxyFetch } from './proxy-fetch.js';
 import { createRelayClient, type RelayConnection } from './relay-client.js';
 import { ConnectModal, type ModalOptions } from './modal/connect-modal.js';
 import { createMockSession, type MockConnectOptions } from './mock.js';
@@ -13,14 +13,21 @@ import { walletError } from './wallet-error.js';
 // --- Session persistence helpers ---
 
 const EXT_SESSION_KEY = 'byoky:session';
+// What the app asked connect() for, saved with the session: a session
+// restored after a reload needs it to connect again once the wallet has
+// dropped the session (a lock), and to list the providers it didn't get.
+const EXT_REQUEST_KEY = 'byoky:request';
 
 function hasSessionStorage(): boolean {
   try { return typeof sessionStorage !== 'undefined'; } catch { return false; }
 }
 
-function saveExtSession(response: ConnectResponse): void {
+function saveExtSession(response: ConnectResponse, request: ConnectRequest | undefined): void {
   if (!hasSessionStorage()) return;
-  try { sessionStorage.setItem(EXT_SESSION_KEY, JSON.stringify(response)); } catch {}
+  try {
+    sessionStorage.setItem(EXT_SESSION_KEY, JSON.stringify(response));
+    if (request) sessionStorage.setItem(EXT_REQUEST_KEY, JSON.stringify(savedRequest(request)));
+  } catch {}
 }
 
 function loadExtSession(): ConnectResponse | null {
@@ -34,9 +41,38 @@ function loadExtSession(): ConnectResponse | null {
   } catch { return null; }
 }
 
+function loadExtRequest(): ConnectRequest | null {
+  if (!hasSessionStorage()) return null;
+  try {
+    const raw = sessionStorage.getItem(EXT_REQUEST_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw) as ConnectRequest;
+    if (!data || typeof data !== 'object' || (data.providers !== undefined && !Array.isArray(data.providers))) return null;
+    return savedRequest(data);
+  } catch { return null; }
+}
+
 function clearExtSession(): void {
   if (!hasSessionStorage()) return;
-  try { sessionStorage.removeItem(EXT_SESSION_KEY); } catch {}
+  try {
+    sessionStorage.removeItem(EXT_SESSION_KEY);
+    sessionStorage.removeItem(EXT_REQUEST_KEY);
+  } catch {}
+}
+
+/** The part of a connect request worth sending again: the providers, with their `required` hints. */
+function savedRequest(request: ConnectRequest): ConnectRequest {
+  if (!request.providers) return {};
+  return {
+    providers: request.providers
+      .filter((p) => typeof p?.id === 'string')
+      .map(({ id, required }) => (required === undefined ? { id } : { id, required })),
+  };
+}
+
+/** A request for the providers a session has, for one restored without the request that made it. */
+function requestFor(response: ConnectResponse): ConnectRequest {
+  return { providers: Object.keys(response.providers).map((id) => ({ id })) };
 }
 
 export interface ByokySession extends ConnectResponse {
@@ -50,7 +86,11 @@ export interface ByokySession extends ConnectResponse {
   listModels(providerId: string): Promise<ModelInfo[]>;
   /** Open a relay channel so a backend server can make LLM calls through this session. */
   createRelay(wsUrl: string): RelayConnection;
-  /** Disconnect this session from the wallet. */
+  /**
+   * Disconnect this session from the wallet and close its relays. The
+   * session is done after that: its fetches reject with NO_SESSION instead
+   * of renewing it. Call connect() for a new one.
+   */
   disconnect(): void;
   /** Check if this session is still connected and valid. */
   isConnected(): Promise<boolean>;
@@ -79,7 +119,8 @@ export class Byoky {
   private requestTimeout: number | undefined;
   // Snapshot of the last user-initiated connect request, so reconnects can
   // fall back from `reconnectOnly` to a full connect when the wallet has
-  // dropped the session (browser restart / extension reload).
+  // dropped the session (lock / browser restart / extension reload). A
+  // restored session takes it from sessionStorage (restoreRequest).
   private lastConnectRequest?: ConnectRequest;
   // Releases the notify port of the session this instance built last. A
   // new session replaces that one, so connecting again without disconnect()
@@ -153,7 +194,7 @@ export class Byoky {
     // 1. Try the wallet's live session (covers SW still running)
     try {
       const response = await this.sendConnectRequest({ reconnectOnly: true });
-      saveExtSession(response);
+      this.restoreRequest(response);
       return this.buildSession(response);
     } catch (err) {
       // Byoky was updated while this page was open: nothing is reachable
@@ -167,7 +208,10 @@ export class Byoky {
     if (saved) {
       try {
         const connected = await this.querySessionStatus(saved.sessionKey);
-        if (connected) return this.buildSession(saved);
+        if (connected) {
+          this.restoreRequest(saved);
+          return this.buildSession(saved);
+        }
       } catch {}
       clearExtSession();
     }
@@ -186,7 +230,19 @@ export class Byoky {
     const connected = await this.querySessionStatus(savedResponse.sessionKey);
     if (!connected) return null;
 
+    this.restoreRequest(savedResponse);
     return this.buildSession(savedResponse);
+  }
+
+  /**
+   * For a session restored rather than connected on this instance (a page
+   * reload): the request connect() made it with, saved in sessionStorage, or
+   * else one for the providers it has. A request then renews it once the
+   * wallet has dropped it (locked), as for a session from connect(), and
+   * the requested providers it lacks read unavailable.
+   */
+  private restoreRequest(response: ConnectResponse): void {
+    this.lastConnectRequest ??= loadExtRequest() ?? requestFor(response);
   }
 
   /**
@@ -220,6 +276,13 @@ export class Byoky {
     const providersUpdatedCallbacks = new Set<(providers: ConnectResponse['providers']) => void>();
 
     let reconnectPromise: Promise<boolean> | null = null;
+    // Set by disconnect(). The app ended this session: nothing may renew
+    // it, or a later call (a relay still open, say) would quietly open a new
+    // one, or have the wallet ask the user again.
+    let ended = false;
+    const relays = new Set<RelayConnection>();
+    const disconnected = () =>
+      new ByokyError(ByokyErrorCode.NO_SESSION, 'This session was disconnected; call connect() for a new one');
 
     const fireDisconnect = () => {
       for (const cb of disconnectCallbacks) cb();
@@ -248,18 +311,23 @@ export class Byoky {
       sessionKeyRef.current = newResponse.sessionKey;
       session.sessionKey = newResponse.sessionKey;
       session.providers = withRequested(newResponse.providers);
-      saveExtSession(newResponse);
+      saveExtSession(newResponse, this.lastConnectRequest);
       for (const cb of providersUpdatedCallbacks) cb(session.providers);
     };
 
+    // Every await below checks `ended` after it: what sessionStorage holds
+    // by then may be a newer session's.
     const attemptReconnect = (): Promise<boolean> => {
+      if (ended) return Promise.resolve(false);
       if (reconnectPromise) return reconnectPromise;
       reconnectPromise = (async () => {
         try {
           const newResponse = await this.sendConnectRequest({ reconnectOnly: true });
+          if (ended) return false;
           applyNewResponse(newResponse);
           return true;
         } catch (err) {
+          if (ended) return false;
           if (isWalletReloaded(err)) {
             onWalletReloaded();
             return false;
@@ -272,12 +340,14 @@ export class Byoky {
           if (this.lastConnectRequest && err instanceof ByokyError && err.code === ByokyErrorCode.NO_SESSION) {
             try {
               const newResponse = await this.sendConnectRequest(this.lastConnectRequest);
+              if (ended) return false;
               applyNewResponse(newResponse);
               return true;
             } catch {
               // Fall through to disconnect
             }
           }
+          if (ended) return false;
           clearExtSession();
           fireDisconnect();
           releaseNotify();
@@ -298,13 +368,21 @@ export class Byoky {
           // The retry below sends the request again, so a stream body or a
           // Request input's body is read into bytes once, up front.
           const [safeInput, safeInit] = await replayableArgs(input, init);
+          // replayableArgs moves a Request input's signal into init.
+          const signal = safeInit?.signal ?? undefined;
+          if (ended) throw disconnected();
 
           const resp = await proxyFetch(safeInput, safeInit);
 
           if (resp.status === 401 && await walletErrorCode(resp) === ByokyErrorCode.SESSION_EXPIRED) {
-            if (await attemptReconnect()) {
+            // The renewal may wait up to `timeout` for the user to unlock or
+            // approve; an abort ends this request's wait, like fetch, and
+            // leaves the renewal to finish for the session's other requests.
+            if (signal?.aborted) throw abortReason(signal);
+            if (await raceAbort(attemptReconnect(), signal)) {
               return proxyFetch(safeInput, safeInit);
             }
+            if (signal?.aborted) throw abortReason(signal);
           } else if (resp.status === 503 && await walletErrorCode(resp) === ByokyErrorCode.WALLET_RELOADED) {
             onWalletReloaded();
           }
@@ -317,17 +395,35 @@ export class Byoky {
       // The relay calls through session.createFetch, not a fetch bound to
       // today's key: that one would answer 401 forever once the wallet
       // locked or restarted, with nothing to trigger a reconnect.
-      createRelay: (wsUrl: string) =>
-        createRelayClient(
+      createRelay: (wsUrl: string) => {
+        if (ended) throw disconnected();
+        const relay = createRelayClient(
           wsUrl,
           (providerId) => session.createFetch(providerId),
           () => session.providers,
           (callback) => session.onProvidersUpdated(callback),
-        ),
+        );
+        relays.add(relay);
+        relay.onClose(() => { relays.delete(relay); });
+        return relay;
+      },
       disconnect: () => {
+        // A repeat call has nothing left to end; clearing sessionStorage
+        // again would drop what a session connected since then saved.
+        if (ended) return;
+        ended = true;
         clearExtSession();
         releaseNotify();
         this.sendDisconnect(sessionKeyRef.current);
+        // Its relays end with it: every request they relay would fail now.
+        // Closing one runs the app's onClose callbacks, so that comes after
+        // the session is gone, and a callback that throws (one that opens a
+        // new relay gets NO_SESSION) cannot stop the other relays closing.
+        const open = [...relays];
+        relays.clear();
+        for (const relay of open) {
+          try { relay.close(); } catch {}
+        }
       },
       isConnected: () => this.querySessionStatus(sessionKeyRef.current),
       getUsage: () => this.querySessionUsage(sessionKeyRef.current),
@@ -379,7 +475,7 @@ export class Byoky {
       });
     }
 
-    saveExtSession(response);
+    saveExtSession(response, this.lastConnectRequest);
     return session;
   }
 
@@ -528,6 +624,16 @@ export class Byoky {
       });
     });
   }
+}
+
+/** `promise`, or a rejection with the abort reason as soon as `signal` aborts. */
+function raceAbort<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (!signal) return promise;
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(abortReason(signal));
+    signal.addEventListener('abort', onAbort, { once: true });
+    promise.then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort));
+  });
 }
 
 function isWalletReloaded(err: unknown): boolean {
