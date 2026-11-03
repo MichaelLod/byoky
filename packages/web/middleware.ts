@@ -16,6 +16,14 @@ function contentSecurityPolicy(nonce: string): string {
     // blob: for the chat's attached-image preview (URL.createObjectURL).
     "img-src 'self' data: blob: https://avatars.githubusercontent.com https://unpkg.com https://api.producthunt.com",
     "connect-src 'self' https://api.github.com",
+    // A nonce doesn't bind a script to its URL: an injected <base> would
+    // move Next's nonced /_next/ scripts to another host. base-uri and
+    // form-action don't fall back to default-src; object-src 'none' is
+    // stricter than its 'self'. The site has no <base>, no form that posts
+    // and no plugin content.
+    "base-uri 'none'",
+    "form-action 'self'",
+    "object-src 'none'",
     "frame-ancestors 'none'",
   ].join('; ') + ';';
 }

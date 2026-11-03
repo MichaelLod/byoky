@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef, Fragment } from 'react';
 import type { ByokySession } from '@byoky/sdk';
-import { cohereErrorMessage, cohereResponseText, cohereStreamText } from '../../components/chat-providers';
+import { cohereErrorMessage, cohereResponseText, cohereStreamText, openAICompatErrorMessage, outputCapField } from '../../components/chat-providers';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -109,7 +109,7 @@ const response = await fetch('${p.url}', {
   body: JSON.stringify({
     model: '${model}',
     messages: [{ role: 'user', content: '${msg}' }],
-    max_completion_tokens: 1024,
+    ${outputCapField(providerId)}: 1024,
     stream: true,
   }),
 });`;
@@ -272,6 +272,11 @@ export function Chat({ session, initialProvider }: Props) {
   });
   const [attachedImage, setAttachedImage] = useState<{ file: File; preview: string } | null>(null);
   const [showCode, setShowCode] = useState(true);
+  // On a phone the open code panel takes most of the screen, so it starts
+  // collapsed there. Decided after mount, so the server render matches.
+  useEffect(() => {
+    if (window.matchMedia?.('(max-width: 640px)').matches) setShowCode(false);
+  }, []);
   const [lastPrompt, setLastPrompt] = useState('Hello!');
   // Model lists fetched live via session.listModels(). Falls back to the
   // hardcoded `providers[id].models` when a provider has no entry here yet
@@ -306,8 +311,10 @@ export function Chat({ session, initialProvider }: Props) {
   );
 
   useEffect(() => {
+    // Follow the conversation; the empty state (taller than the list on a
+    // phone) stays at its top.
     const el = chatMessagesRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (el && messages.length > 0) el.scrollTop = el.scrollHeight;
   }, [messages]);
 
   useEffect(() => {
@@ -521,11 +528,11 @@ export function Chat({ session, initialProvider }: Props) {
         const response = await proxyFetch(config.url, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ model: currentModel, messages: allMessages, max_completion_tokens: 1024, ...(useStream && { stream: true }) }),
+          body: JSON.stringify({ model: currentModel, messages: allMessages, [outputCapField(selectedProvider)]: 1024, ...(useStream && { stream: true }) }),
         });
         if (!response.ok) {
-          const err = (await response.json()).error;
-          throw new Error(err?.message || `API error: ${response.status}`);
+          const body = await response.json().catch(() => null);
+          throw new Error(openAICompatErrorMessage(body) || `API error: ${response.status}`);
         }
 
         if (useStream && response.body) {

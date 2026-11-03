@@ -3,7 +3,8 @@ import { ChatApp } from './ChatApp';
 import './chat.css';
 
 export const metadata: Metadata = {
-  title: 'Byoky Chat',
+  // Absolute: the root template would add a second "— Byoky".
+  title: { absolute: 'Byoky Chat' },
   description:
     'Multi-provider AI chat powered by your own API keys. Switch between Claude, GPT, and Gemini in one conversation.',
   alternates: {

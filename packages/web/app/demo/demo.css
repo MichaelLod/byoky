@@ -870,9 +870,27 @@
   min-height: 400px;
 }
 
+/* At least a screen tall, with the messages scrolling inside, but never
+   shorter than its parts plus a usable message list: on a short or narrow
+   screen the column grows and pushes the next section down, rather than
+   spilling the composer under it (where that section takes its taps). */
 .demo-app .playground-content .chat {
-  height: calc(100vh - 140px);
+  height: auto;
+  min-height: calc(100vh - 140px);
+  min-height: calc(100dvh - 140px);
   padding: 0 24px;
+}
+
+.demo-app .playground-content .chat > * {
+  flex-shrink: 0;
+}
+
+/* Size containment keeps the conversation from growing the column: the
+   list takes the room left (200px at least) and scrolls. */
+.demo-app .playground-content .chat > .chat-messages {
+  flex: 1 1 0;
+  min-height: 200px;
+  contain: size;
 }
 
 .demo-app .playground-content .chat .chat-input {
@@ -1382,6 +1400,36 @@
 
   .demo-app .chat-input {
     flex-direction: column;
+  }
+
+  /* The provider and model selects and the session line wrap instead of
+     widening the page (a select is as wide as its longest model id). */
+  .demo-app .chat-header,
+  .demo-app .demo-header {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .demo-app .provider-select {
+    flex-wrap: wrap;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .demo-app .provider-select select,
+  .demo-app .demo-provider-select {
+    flex: 1 1 140px;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .demo-app .playground-content .chat {
+    padding: 0 16px;
+  }
+
+  .demo-app .chat-code-snippet {
+    max-height: 200px;
+    overflow: auto;
   }
 
   .demo-app .code-links {

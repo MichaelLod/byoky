@@ -6,6 +6,10 @@ import {
   cohereErrorMessage,
   cohereResponseText,
   cohereStreamText,
+  offeredModelPicks,
+  openAICompatErrorMessage,
+  outputCapField,
+  pickModel,
 } from '../app/components/chat-providers';
 import { isAllowedProxyRequest, validateProxyUrl } from '../../core/src/proxy-utils';
 import { createStreamTranslator, translateResponse } from '../../core/src/translate/index';
@@ -90,5 +94,61 @@ describe('Cohere v2 helpers', () => {
     expect(cohereErrorMessage({ message: 'invalid api token' })).toBe('invalid api token');
     expect(cohereErrorMessage({ error: { code: 'QUOTA_EXCEEDED', message: 'Token allowance used up' } })).toBe('Token allowance used up');
     expect(cohereErrorMessage(null)).toBeUndefined();
+  });
+});
+
+describe('outputCapField', () => {
+  // The same rule as core's translator: max_completion_tokens is OpenAI's
+  // field; Mistral answers 422 to it, and the other hosts document max_tokens.
+  it('is max_completion_tokens on OpenAI and max_tokens on every other host of the dialect', () => {
+    expect(outputCapField('openai')).toBe('max_completion_tokens');
+    for (const id of ['groq', 'deepseek', 'xai', 'mistral', 'together', 'fireworks', 'perplexity', 'openrouter']) {
+      expect(outputCapField(id), id).toBe('max_tokens');
+    }
+  });
+});
+
+describe('openAICompatErrorMessage', () => {
+  it('reads the error shapes of the OpenAI-dialect hosts and the wallet', () => {
+    expect(openAICompatErrorMessage({ error: { message: 'Incorrect API key', type: 'invalid_request_error' } })).toBe('Incorrect API key');
+    expect(openAICompatErrorMessage({ error: { code: 'PROVIDER_UNAVAILABLE', message: 'No mistral API key found.' } })).toBe('No mistral API key found.');
+    expect(openAICompatErrorMessage({ error: 'model not found' })).toBe('model not found');
+    expect(openAICompatErrorMessage({ object: 'error', message: 'Unauthorized', type: 'unauthorized' })).toBe('Unauthorized');
+    // Mistral's 422 for a field it doesn't take.
+    expect(openAICompatErrorMessage({
+      object: 'error',
+      message: { detail: [{ type: 'extra_forbidden', loc: ['body', 'max_completion_tokens'], msg: 'Extra inputs are not permitted', input: 4096 }] },
+      type: 'invalid_request_error',
+      param: null,
+      code: null,
+    })).toBe('Extra inputs are not permitted');
+    expect(openAICompatErrorMessage({ detail: [{ msg: 'field required' }, { msg: 'value is not a valid integer' }] })).toBe('field required; value is not a valid integer');
+    expect(openAICompatErrorMessage({ detail: 'Not Found' })).toBe('Not Found');
+  });
+
+  it('gives nothing for a body without a message', () => {
+    expect(openAICompatErrorMessage(null)).toBeUndefined();
+    expect(openAICompatErrorMessage('Bad Gateway')).toBeUndefined();
+    expect(openAICompatErrorMessage({ error: {} })).toBeUndefined();
+    expect(openAICompatErrorMessage({ message: { detail: [] } })).toBeUndefined();
+  });
+});
+
+describe('saved model picks', () => {
+  const catalog = { openai: { models: ['gpt-a', 'gpt-b'] }, cohere: { models: ['command-a'] } };
+
+  it('pickModel keeps a pick the list offers and falls back to its first model otherwise', () => {
+    expect(pickModel(catalog.openai.models, 'gpt-b')).toBe('gpt-b');
+    expect(pickModel(catalog.openai.models, 'retired-model')).toBe('gpt-a');
+    expect(pickModel(catalog.openai.models, undefined)).toBe('gpt-a');
+    expect(pickModel([], 'gpt-b')).toBe('');
+  });
+
+  it('offeredModelPicks drops retired ids, unknown providers and junk', () => {
+    expect(offeredModelPicks({ openai: 'gpt-b', cohere: 'retired-model', gone: 'x', groq: 7 }, catalog)).toEqual({ openai: 'gpt-b' });
+    expect(offeredModelPicks({ constructor: 'x', __proto__: 'y', toString: 'gpt-a' }, catalog)).toEqual({});
+    expect(offeredModelPicks(null, catalog)).toEqual({});
+    expect(offeredModelPicks(['gpt-a'], catalog)).toEqual({});
+    expect(offeredModelPicks('gpt-a', catalog)).toEqual({});
   });
 });

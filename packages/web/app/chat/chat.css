@@ -157,6 +157,21 @@ body:has(.chat-app) > nav { display: none; }
   padding: 20px 0;
 }
 
+.chat-app .empty-wallet-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  background: rgba(251, 191, 36, 0.08);
+  border: 1px solid rgba(251, 191, 36, 0.25);
+  color: var(--amber);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.chat-app .empty-wallet-banner strong { color: var(--bone); }
+
 .chat-app .empty {
   display: flex;
   flex-direction: column;
@@ -382,6 +397,9 @@ body:has(.chat-app) > nav { display: none; }
 
 .chat-app .chat-input input {
   flex: 1;
+  /* A text input won't shrink below ~20 characters otherwise, which pushes
+     Send past the edge on a phone. */
+  min-width: 0;
   background: var(--void);
   border: 1px solid var(--seam-strong);
   padding: 12px 16px;

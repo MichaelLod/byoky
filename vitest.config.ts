@@ -6,6 +6,10 @@ import { defineConfig } from 'vitest/config';
 const DOM_TESTS = ['packages/sdk/tests/**/*.test.{ts,tsx}', 'packages/web/tests/**/*.test.{ts,tsx}'];
 
 export default defineConfig({
+  // packages/web's tsconfig keeps JSX as is ("preserve", for Next). Compile
+  // it the way the extension's already is, or the coverage remapper can't
+  // parse the site's .tsx files and leaves them out.
+  oxc: { jsx: { runtime: 'automatic' } },
   resolve: {
     // Tests run against core's source, so they don't need a fresh core build
     // and the extension's background harness can import what it imports.
