@@ -1,10 +1,13 @@
 package com.byoky.app.proxy
 
 import com.byoky.app.data.Credential
+import com.byoky.app.data.DEFAULT_GROUP_ID
 import com.byoky.app.data.Group
+import com.byoky.app.data.Provider
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -12,24 +15,28 @@ import org.junit.Test
 class RoutingResolverTest {
 
     /**
-     * Family table and routing models for the providers used here (core:
-     * translate/families.ts and autoRouteModelFor in routing.ts).
+     * Shared routing vectors (packages/core/tests/vectors/routing.json),
+     * written from core by scripts/gen-routing-vectors.mjs.
+     */
+    private val vectors = SharedVectors.load("routing.json")
+
+    /**
+     * Core's answers to the family questions (translate/families.ts and
+     * autoRouteModelFor in routing.ts), from the vectors' provider table: the
+     * JVM tests can't run the bundled core that answers them on a phone.
      */
     private val families = object : RoutingResolver.Families {
-        private val family = mapOf(
-            "anthropic" to "anthropic", "openai" to "openai", "groq" to "openai", "deepseek" to "openai",
-            "ollama" to "openai", "lm_studio" to "openai", "azure_openai" to "openai", "mistral" to "openai", "gemini" to "gemini",
-            "cohere" to "cohere",
-        )
-        private val autoModels = mapOf("anthropic" to "claude-sonnet-4-6", "openai" to "gpt-5.5", "gemini" to "gemini-2.5-pro")
+        private val table = vectors.getJSONObject("providers")
+        private fun field(providerId: String, name: String): String? =
+            table.optJSONObject(providerId)?.takeUnless { it.isNull(name) }?.getString(name)
         override fun shouldTranslate(srcProviderId: String, dstProviderId: String): Boolean {
-            val a = family[srcProviderId] ?: return false
-            val b = family[dstProviderId] ?: return false
+            val a = field(srcProviderId, "family") ?: return false
+            val b = field(dstProviderId, "family") ?: return false
             return a != b
         }
         override fun sameFamily(srcProviderId: String, dstProviderId: String): Boolean =
-            srcProviderId != dstProviderId && family[srcProviderId] != null && family[srcProviderId] == family[dstProviderId]
-        override fun autoRouteModel(providerId: String): String? = autoModels[providerId]
+            field(srcProviderId, "family")?.let { it == field(dstProviderId, "family") } ?: false
+        override fun autoRouteModel(providerId: String): String? = field(providerId, "autoRouteModel")
     }
 
     private val key1 = Credential(id = "k1", providerId = "anthropic", label = "key #1", createdAt = 2)
@@ -101,17 +108,121 @@ class RoutingResolverTest {
         val cross = Group(id = "g", name = "Tampered", providerId = "anthropic", credentialId = "o1", model = "claude-x")
         assertNull(RoutingResolver.resolve("gemini", "gemini-2.5-pro", cross, listOf(key1, openai), families))
 
-        // Same-family swap: group binds groq but pins the OpenAI key; the
-        // swap is refused and the app's own key is used for its own provider.
+        // Same-family swap: group binds groq but pins the OpenAI key. The
+        // swap is refused, and the app's own key doesn't stand in for the
+        // group either (F002).
         val swap = Group(id = "g", name = "Tampered", providerId = "groq", credentialId = "o1")
-        val decision = RoutingResolver.resolve("openai", "gpt-5.5", swap, listOf(openai), families)!!
-        assertNull(decision.swapToProviderId)
-        assertEquals("o1", decision.credential.id)
+        assertNull(RoutingResolver.resolve("openai", "gpt-5.5", swap, listOf(openai), families))
 
         // Direct: group binds openai but pins an Anthropic key.
         val direct = Group(id = "g", name = "Tampered", providerId = "openai", credentialId = "k1")
         assertNull(RoutingResolver.resolve("openai", "gpt-5.5", direct, listOf(key1, openai), families))
         assertNull(RoutingResolver.resolveDirect("openai", direct, listOf(key1, openai)))
+    }
+
+    // ── A group bound elsewhere never falls back to the app's key (F002) ─
+
+    @Test
+    fun aGroupBoundToAnotherProviderNeverFallsBackToTheAppsOwnKey() {
+        val deepseek = Credential(id = "d1", providerId = "deepseek", label = "ds", createdAt = 1)
+        val ollama = Credential(id = "l1", providerId = "ollama", label = "local", createdAt = 1, baseUrl = "http://localhost:11434")
+        val gemini = Credential(id = "gm", providerId = "gemini", label = "gemini", createdAt = 1)
+        // No model, and DeepSeek has no routing default.
+        val toDeepSeek = Group(id = "g", name = "DeepSeek", providerId = "deepseek")
+        assertNull(RoutingResolver.resolve("anthropic", "claude-sonnet-4-6", toDeepSeek, listOf(key1, deepseek), families))
+        // A local-server group without a model.
+        val localNoModel = Group(id = "g", name = "Local", providerId = "ollama")
+        assertNull(RoutingResolver.resolve("anthropic", "claude-sonnet-4-6", localNoModel, listOf(key1, ollama), families))
+        // A local-server group whose key was deleted, cross-family and same-family.
+        val local = Group(id = "g", name = "Local", providerId = "ollama", model = "llama3.3")
+        assertNull(RoutingResolver.resolve("anthropic", "claude-sonnet-4-6", local, listOf(key1), families))
+        assertNull(RoutingResolver.resolve("openai", "gpt-5.5", local, listOf(openai), families))
+        assertNull(RoutingResolver.canServe("openai", local, listOf(openai), families))
+        // A stale pin.
+        val stalePin = Group(id = "g", name = "Gemini", providerId = "gemini", credentialId = "removed")
+        assertNull(RoutingResolver.resolve("anthropic", "claude-sonnet-4-6", stalePin, listOf(key1, gemini), families))
+        // Without the translation engine, ProxyService uses resolveDirect alone.
+        assertNull(RoutingResolver.resolveDirect("openai", local, listOf(openai)))
+        assertNull(RoutingResolver.resolveDirect("anthropic", toDeepSeek, listOf(key1)))
+        // The default group binds nothing: the app's own key serves it.
+        assertEquals("k1", RoutingResolver.resolveDirect("anthropic", Group.makeDefault(), listOf(key1))?.credential?.id)
+    }
+
+    // ── Requests that name no model are routed too (F041) ────────────────
+
+    /**
+     * A GET or a multipart upload names no model. The group still routes it
+     * (ProxyService then refuses it as not a chat request), as core does; it
+     * doesn't go out on the key the group routes this app away from.
+     */
+    @Test
+    fun aRequestWithoutAModelIsRoutedByItsGroup() {
+        val toClaude = Group(id = "g", name = "Claude", providerId = "anthropic", model = "claude-sonnet-4-6")
+        val routed = RoutingResolver.resolve("openai", null, toClaude, listOf(key1, openai), families)!!
+        assertEquals("k1", routed.credential.id)
+        assertEquals("anthropic", routed.translation?.dstProviderId)
+        assertEquals("", routed.translation?.srcModel)
+        // Auto-routing doesn't depend on the model either.
+        val auto = RoutingResolver.resolve("anthropic", null, null, listOf(openai), families)!!
+        assertEquals("o1", auto.credential.id)
+        assertEquals("gpt-5.5", auto.translation?.dstModel)
+    }
+
+    // ── Phones that can't route (no JavaScriptSandbox) (F047) ────────────
+
+    /** What TranslationEngine answers on a phone without JavaScriptSandbox: every call fails. */
+    private val noSandbox = object : RoutingResolver.Families {
+        override fun shouldTranslate(srcProviderId: String, dstProviderId: String) = false
+        override fun sameFamily(srcProviderId: String, dstProviderId: String) = false
+        override fun autoRouteModel(providerId: String): String? = null
+    }
+
+    @Test
+    fun withoutTheSandboxAGroupBoundElsewhereServesNothing() {
+        val ollama = Credential(id = "l1", providerId = "ollama", label = "local", createdAt = 1, baseUrl = "http://localhost:11434")
+        val local = Group(id = "g", name = "Local", providerId = "ollama", model = "llama3.2")
+        assertNull(RoutingResolver.resolve("anthropic", "claude-sonnet-4-6", local, listOf(key1, ollama), noSandbox))
+        assertNull(RoutingResolver.resolve("openai", "gpt-5.5", local, listOf(openai, ollama), noSandbox))
+        assertNull(RoutingResolver.canServe("anthropic", local, listOf(key1, ollama), noSandbox))
+        // A group on the app's own provider still works.
+        val own = Group(id = "g", name = "Claude", providerId = "anthropic")
+        assertEquals("k1", RoutingResolver.resolve("anthropic", "m", own, listOf(key1), noSandbox)?.credential?.id)
+    }
+
+    @Test
+    fun withoutTheSandboxTheMessageSaysRoutingIsUnavailableNotThatAKeyIsMissing() {
+        val ollama = Credential(id = "l1", providerId = "ollama", label = "local", createdAt = 1, baseUrl = "http://localhost:11434")
+        val local = Group(id = "g", name = "Local", providerId = "ollama", model = "llama3.2")
+        val message = RoutingResolver.noCredentialMessage("anthropic", listOf(ollama), local, noSandbox, routingSupported = false)
+        assertEquals(
+            "This phone can't route requests to another provider: that needs Android System WebView 110 or newer. " +
+                "Update Android System WebView from the Play Store, or move this app out of the group \"Local\", " +
+                "which routes it to Ollama (local).",
+            message,
+        )
+        // No group, keys only for other providers: only this provider's key helps.
+        val noGroup = RoutingResolver.noCredentialMessage("anthropic", listOf(openai), null, noSandbox, routingSupported = false)
+        assertTrue(noGroup, noGroup.startsWith("No API key for Anthropic found. This phone can't route"))
+        // Where the phone can route, the group's missing key or model is named as before.
+        assertEquals(
+            "No API key for Ollama (local) found. Add one to your wallet, or assign this app to a provider you already have a key for.",
+            RoutingResolver.noCredentialMessage("anthropic", listOf(key1), local, families, routingSupported = true),
+        )
+        assertEquals(
+            "No API key for Anthropic found. You have keys for: Google Gemini, OpenAI. Add one, or assign this app to one of those providers.",
+            RoutingResolver.noCredentialMessage(
+                "anthropic", listOf(openai, Credential(id = "gm", providerId = "gemini", label = "g", createdAt = 1)), null, families, routingSupported = true,
+            ),
+        )
+        val deepseek = Credential(id = "d1", providerId = "deepseek", label = "ds", createdAt = 1)
+        assertEquals(
+            "This app's group routes it to DeepSeek, which needs a model to translate Anthropic requests. Set a model on the group.",
+            RoutingResolver.noCredentialMessage("anthropic", listOf(deepseek), Group(id = "g", name = "DS", providerId = "deepseek"), families, routingSupported = true),
+        )
+        // A pin to a key that's gone is named first.
+        val stale = Group(id = "g", name = "Work", providerId = "anthropic", credentialId = "gone")
+        assertTrue(RoutingResolver.noCredentialMessage("anthropic", listOf(key1), stale, families, routingSupported = true)
+            .startsWith("The key this app's group \"Work\" is pinned to"))
     }
 
     // ── Model-less cross-family groups (F099) ────────────────────────────
@@ -178,6 +289,66 @@ class RoutingResolverTest {
         val routed = RoutingResolver.resolve("ollama", "llama3.1", toClaude, listOf(key1), families)!!
         assertEquals("k1", routed.credential.id)
         assertEquals("anthropic", routed.translation?.dstProviderId)
+    }
+
+    // ── Shared routing vectors (F092) ────────────────────────────────────
+
+    /** Every provider of the wallet is in the vectors' table, and no other. */
+    @Test
+    fun theVectorsCoverEveryProvider() {
+        val table = vectors.getJSONObject("providers")
+        assertEquals(Provider.all.map { it.id }.sorted(), table.keys().asSequence().toList().sorted())
+    }
+
+    /** The routing decisions every wallet makes the same way. */
+    @Test
+    fun sharedRoutingVectors() {
+        val cases = vectors.getJSONArray("cases")
+        assertTrue(cases.length() > 40)
+        for (i in 0 until cases.length()) {
+            val c = cases.getJSONObject(i)
+            val name = c.getString("name")
+            val requested = c.getString("requested")
+            val model = if (c.isNull("model")) null else c.getString("model")
+            val group = c.optJSONObject("group")?.let { g ->
+                val providerId = g.getString("providerId")
+                Group(
+                    id = if (providerId.isEmpty()) DEFAULT_GROUP_ID else "g",
+                    name = "Group",
+                    providerId = providerId,
+                    credentialId = if (g.isNull("credentialId")) null else g.getString("credentialId"),
+                    model = if (g.isNull("model")) null else g.getString("model"),
+                )
+            }
+            val keys = c.getJSONArray("credentials")
+            val credentials = (0 until keys.length()).map { k ->
+                val key = keys.getJSONObject(k)
+                Credential(id = key.getString("id"), providerId = key.getString("providerId"), label = "key", createdAt = key.getLong("createdAt"))
+            }
+
+            val decision = RoutingResolver.resolve(requested, model, group, credentials, families)
+            // Connect availability is the same decision without a model.
+            assertEquals(name, decision?.credential?.id, RoutingResolver.canServe(requested, group, credentials, families)?.id)
+            val expect = c.optJSONObject("expect")
+            if (expect == null) {
+                assertNull(name, decision)
+                continue
+            }
+            assertNotNull(name, decision)
+            decision!!
+            assertEquals(name, expect.getString("credential"), decision.credential.id)
+            val translation = expect.optJSONObject("translation")
+            assertEquals(name, translation?.getString("dstProviderId"), decision.translation?.dstProviderId)
+            assertEquals(name, translation?.getString("dstModel"), decision.translation?.dstModel)
+            decision.translation?.let {
+                assertEquals(name, requested, it.srcProviderId)
+                assertEquals(name, model.orEmpty(), it.srcModel)
+            }
+            val swap = expect.optJSONObject("swap")
+            assertEquals(name, swap?.getString("dstProviderId"), decision.swapToProviderId)
+            assertEquals(name, swap?.takeUnless { it.isNull("dstModel") }?.getString("dstModel"), decision.swapDstModel)
+            assertEquals(name, if (expect.isNull("modelOverride")) null else expect.getString("modelOverride"), decision.modelOverride)
+        }
     }
 
     // ── Connect availability (F101) ──────────────────────────────────────

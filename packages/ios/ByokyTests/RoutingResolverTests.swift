@@ -143,19 +143,94 @@ final class RoutingResolverTests: XCTestCase {
             requestedProviderId: "gemini", requestedModel: "gemini-2.5-pro",
             group: group("anthropic", pin: openai.id, model: "claude-sonnet-4-6"), credentials: [claude, openai]
         ))
-        // Same-family swap: the group binds Groq but pins the OpenAI key; the
-        // app's own key serves its own provider instead.
-        let swap = try XCTUnwrap(RoutingResolver.resolve(
+        // Same-family swap: the group binds Groq but pins the OpenAI key.
+        // The swap is refused, and the app's own key doesn't stand in for
+        // the group either (F002).
+        XCTAssertNil(RoutingResolver.resolve(
             requestedProviderId: "openai", requestedModel: "gpt-5.5",
             group: group("groq", pin: openai.id), credentials: [openai]
         ))
-        XCTAssertNil(swap.swapToProviderId)
-        XCTAssertEqual(swap.credential.id, openai.id)
         // Direct: the group binds OpenAI but pins the Anthropic key.
         XCTAssertNil(RoutingResolver.resolve(
             requestedProviderId: "openai", requestedModel: "gpt-5.5",
             group: group("openai", pin: claude.id), credentials: [claude, openai]
         ))
+    }
+
+    // MARK: - A group bound elsewhere never falls back to the app's key (F002)
+
+    func testAGroupBoundToAnotherProviderNeverFallsBackToTheAppsOwnKey() throws {
+        let claude = credential("anthropic", "Claude")
+        let deepseek = credential("deepseek", "DeepSeek")
+        let ollama = Credential.create(providerId: "ollama", label: "Local", baseUrl: "http://localhost:11434")
+        // No model, and DeepSeek has no routing default.
+        XCTAssertNil(RoutingResolver.resolve(
+            requestedProviderId: "anthropic", requestedModel: "claude-sonnet-4-6",
+            group: group("deepseek"), credentials: [claude, deepseek]
+        ))
+        XCTAssertEqual(
+            RoutingResolver.noCredentialMessage(requestedProviderId: "anthropic", userCredentialProviderIds: ["anthropic", "deepseek"], group: group("deepseek")),
+            "This app's group routes it to DeepSeek, which needs a model to translate Anthropic requests. Set a model on the group."
+        )
+        // A local-server group without a model.
+        XCTAssertNil(RoutingResolver.resolve(
+            requestedProviderId: "anthropic", requestedModel: "claude-sonnet-4-6",
+            group: group("ollama"), credentials: [claude, ollama]
+        ))
+        // A local-server group whose key was deleted, cross-family and same-family.
+        let local = group("ollama", model: "llama3.3")
+        XCTAssertNil(RoutingResolver.resolve(
+            requestedProviderId: "anthropic", requestedModel: "claude-sonnet-4-6",
+            group: local, credentials: [claude]
+        ))
+        XCTAssertEqual(
+            RoutingResolver.noCredentialMessage(requestedProviderId: "anthropic", userCredentialProviderIds: ["anthropic"], group: local),
+            "No API key for Ollama (local) found. Add one to your wallet, or assign this app to a provider you already have a key for."
+        )
+        XCTAssertEqual(
+            RoutingResolver.noCredentialMessage(requestedProviderId: "anthropic", userCredentialProviderIds: ["openai", "gemini"], group: nil),
+            "No API key for Anthropic found. You have keys for: OpenAI, Google Gemini. Add one, or assign this app to one of those providers."
+        )
+        let openai = credential("openai", "OpenAI")
+        XCTAssertNil(RoutingResolver.resolve(
+            requestedProviderId: "openai", requestedModel: "gpt-5.5",
+            group: local, credentials: [openai]
+        ))
+        XCTAssertNil(RoutingResolver.canServe(providerId: "openai", group: local, credentials: [openai]))
+        // A stale pin.
+        let gemini = credential("gemini", "Gemini")
+        XCTAssertNil(RoutingResolver.resolve(
+            requestedProviderId: "anthropic", requestedModel: "claude-sonnet-4-6",
+            group: group("gemini", pin: "removed"), credentials: [claude, gemini]
+        ))
+        // The default group binds nothing: the app's own key serves it.
+        XCTAssertEqual(RoutingResolver.resolve(
+            requestedProviderId: "anthropic", requestedModel: "claude-sonnet-4-6",
+            group: Group.makeDefault(), credentials: [claude]
+        )?.credential.id, claude.id)
+    }
+
+    // MARK: - Requests that name no model are routed too (F041)
+
+    /// A GET or a multipart upload names no model. The group still routes
+    /// it (the proxy then refuses it as not a chat request), as core does;
+    /// it doesn't go out on the key the group routes this app away from.
+    func testARequestWithoutAModelIsRoutedByItsGroup() throws {
+        let claude = credential("anthropic", "Claude")
+        let openai = credential("openai", "OpenAI")
+        let routed = try XCTUnwrap(RoutingResolver.resolve(
+            requestedProviderId: "openai", requestedModel: nil,
+            group: group("anthropic", model: "claude-sonnet-4-6"), credentials: [claude, openai]
+        ))
+        XCTAssertEqual(routed.credential.id, claude.id)
+        XCTAssertEqual(routed.translation?.dstProviderId, "anthropic")
+        XCTAssertEqual(routed.translation?.srcModel, "")
+        // Auto-routing doesn't depend on the model either.
+        let auto = try XCTUnwrap(RoutingResolver.resolve(
+            requestedProviderId: "anthropic", requestedModel: nil, group: nil, credentials: [openai]
+        ))
+        XCTAssertEqual(auto.credential.id, openai.id)
+        XCTAssertEqual(auto.translation?.dstModel, "gpt-5.5")
     }
 
     // MARK: - Routing models from core (F015, F099, F100)
@@ -204,7 +279,7 @@ final class RoutingResolverTests: XCTestCase {
         ))
         XCTAssertEqual(
             RoutingResolver.noCredentialMessage(requestedProviderId: "anthropic", userCredentialProviderIds: ["deepseek"], group: group("deepseek")),
-            "This app's group routes it to deepseek, which needs a model to translate anthropic requests. Set a model on the group."
+            "This app's group routes it to DeepSeek, which needs a model to translate Anthropic requests. Set a model on the group."
         )
     }
 
@@ -247,6 +322,74 @@ final class RoutingResolverTests: XCTestCase {
         ))
         XCTAssertEqual(routed.credential.id, claude.id)
         XCTAssertEqual(routed.translation?.dstProviderId, "anthropic")
+    }
+
+    // MARK: - Shared routing vectors (F092)
+
+    /// packages/core/tests/vectors/routing.json, written from core by
+    /// scripts/gen-routing-vectors.mjs: the routing decisions every wallet
+    /// makes the same way, run against the bundled core's family answers.
+    func testSharedRoutingVectors() throws {
+        let vectors = try SharedVectors.load("routing")
+        let engine = TranslationEngine.shared
+
+        // The bundled core answers as the tables say (a stale mobile.js fails here).
+        let providers = try XCTUnwrap(vectors["providers"] as? [String: [String: Any]])
+        XCTAssertEqual(Set(providers.keys), Set(Provider.all.map(\.id)))
+        for (src, row) in providers {
+            XCTAssertEqual(engine.autoRouteModel(for: src), row["autoRouteModel"] as? String, src)
+            let srcFamily = row["family"] as? String
+            for (dst, other) in providers {
+                let dstFamily = other["family"] as? String
+                XCTAssertEqual(engine.shouldTranslate(srcProviderId: src, dstProviderId: dst),
+                               srcFamily != nil && dstFamily != nil && srcFamily != dstFamily, "\(src) to \(dst)")
+                XCTAssertEqual(engine.sameFamily(srcProviderId: src, dstProviderId: dst),
+                               srcFamily != nil && srcFamily == dstFamily, "\(src) and \(dst)")
+            }
+        }
+
+        let cases = try XCTUnwrap(vectors["cases"] as? [[String: Any]])
+        XCTAssertGreaterThan(cases.count, 40)
+        for c in cases {
+            let name = c["name"] as? String ?? "?"
+            let requested = try XCTUnwrap(c["requested"] as? String, name)
+            let model = c["model"] as? String
+            let group = (c["group"] as? [String: Any]).map { g -> Group in
+                let providerId = g["providerId"] as? String ?? ""
+                return Group(id: providerId.isEmpty ? defaultGroupId : "g", name: "Group", providerId: providerId,
+                             credentialId: g["credentialId"] as? String, model: g["model"] as? String,
+                             createdAt: Date(timeIntervalSince1970: 0))
+            }
+            let credentials = try XCTUnwrap(c["credentials"] as? [[String: Any]], name).map { k in
+                Credential(id: k["id"] as? String ?? "", providerId: k["providerId"] as? String ?? "", label: "key",
+                           authMethod: .apiKey,
+                           createdAt: Date(timeIntervalSince1970: ((k["createdAt"] as? NSNumber)?.doubleValue ?? 0) / 1000),
+                           baseUrl: nil)
+            }
+
+            let decision = RoutingResolver.resolve(requestedProviderId: requested, requestedModel: model,
+                                                   group: group, credentials: credentials)
+            // Connect availability is the same decision without a model.
+            XCTAssertEqual(RoutingResolver.canServe(providerId: requested, group: group, credentials: credentials)?.id,
+                           decision?.credential.id, name)
+            guard let expect = c["expect"] as? [String: Any] else {
+                XCTAssertNil(decision, name)
+                continue
+            }
+            let d = try XCTUnwrap(decision, name)
+            XCTAssertEqual(d.credential.id, expect["credential"] as? String, name)
+            let translation = expect["translation"] as? [String: Any]
+            XCTAssertEqual(d.translation?.dstProviderId, translation?["dstProviderId"] as? String, name)
+            XCTAssertEqual(d.translation?.dstModel, translation?["dstModel"] as? String, name)
+            if let t = d.translation {
+                XCTAssertEqual(t.srcProviderId, requested, name)
+                XCTAssertEqual(t.srcModel, model ?? "", name)
+            }
+            let swap = expect["swap"] as? [String: Any]
+            XCTAssertEqual(d.swapToProviderId, swap?["dstProviderId"] as? String, name)
+            XCTAssertEqual(d.swapDstModel, swap?["dstModel"] as? String, name)
+            XCTAssertEqual(d.modelOverride, expect["modelOverride"] as? String, name)
+        }
     }
 
     // MARK: - Connect availability (F101)

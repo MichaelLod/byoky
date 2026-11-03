@@ -177,6 +177,39 @@ class ProxyServiceLocalFlowTest {
     }
 
     /**
+     * A request that names no model (a model list, a multipart upload) from
+     * an app its group routes to another provider is refused, as by the
+     * extension and iOS, and never sent on the key the group routes it away
+     * from (F041). Here the app asks for the local server and its group
+     * routes it to Anthropic.
+     */
+    @Test
+    fun groupRoutedRequestsWithoutAModelAreRefused() {
+        runBlocking { wallet.addCredential("anthropic", "claude", "sk-ant-api03-local-flow-test") }
+        val group = wallet.createGroup("Claude", "anthropic", model = "claude-sonnet-4-6")
+        wallet.setAppGroup("https://app.example", group.id)
+        fun assertRefused(send: () -> Unit) {
+            try {
+                send()
+                fail("expected ROUTING_UNSUPPORTED")
+            } catch (e: ProxyService.ProxyError) {
+                assertEquals("ROUTING_UNSUPPORTED", e.code)
+                assertEquals(400, e.status)
+            }
+        }
+        assertRefused {
+            proxy.forward("https://app.example", "ollama", "${server.base}/v1/models", "GET", emptyMap(), null, CollectingSink())
+        }
+        assertRefused {
+            proxy.forward("https://app.example", "ollama", "${server.base}/v1/audio/transcriptions", "POST",
+                mapOf("content-type" to "multipart/form-data; boundary=x"),
+                "--x\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\nwhisper\r\n--x--\r\n".toByteArray(),
+                CollectingSink(), binaryBody = true)
+        }
+        assertTrue("sent upstream: ${server.requests.map { it.line }}", server.requests.isEmpty())
+    }
+
+    /**
      * A translated request's error body past the translation limit goes to
      * the app as it arrives, as sent, instead of first being read whole into
      * memory (R2-05).

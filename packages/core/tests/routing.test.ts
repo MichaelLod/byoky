@@ -8,7 +8,9 @@ import {
   autoRouteModelFor,
 } from '../src/routing.js';
 import { rewriteProxyUrl, familyOf } from '../src/translate/index.js';
+import { PROVIDERS } from '../src/providers.js';
 import type { Credential, Group } from '../src/types.js';
+import routingVectors from './vectors/routing.json';
 
 function cred(id: string, providerId: string): Credential {
   return {
@@ -85,7 +87,7 @@ describe('resolveRoute', () => {
       expect(resolveRoute('anthropic', group('deepseek'), credentials)).toBeNull();
       // The message names the real problem: the group needs a model.
       expect(buildNoCredentialMessage('anthropic', ['deepseek'], group('deepseek')))
-        .toBe("This app's group routes it to deepseek, which needs a model to translate anthropic requests. Set a model on the group.");
+        .toBe("This app's group routes it to DeepSeek, which needs a model to translate Anthropic requests. Set a model on the group.");
     });
 
     it('prefers pinned credential id over any-of-provider lookup', () => {
@@ -148,14 +150,13 @@ describe('resolveRoute', () => {
 
     it('ignores a pin to another provider\'s key', () => {
       // Group binds Azure but pins a planted record of another provider:
-      // the swap must not hand that credential to the Azure destination.
+      // the swap must not hand that credential to the Azure destination,
+      // and the app's own OpenAI key doesn't stand in for the group (F002).
       const credentials = [cred('c1', 'openai'), { ...cred('planted', 'groq'), encryptedKey: '' }];
       const g = group('azure_openai', { credentialId: 'planted' });
 
       expect(resolveSameFamilySwapRoute(g, 'openai', credentials)).toBeUndefined();
-      const decision = resolveRoute('openai', g, credentials);
-      expect(decision?.swap).toBeUndefined();
-      expect(decision?.credential.id).toBe('c1');
+      expect(resolveRoute('openai', g, credentials)).toBeNull();
     });
 
     it('does not swap when both providers are the same', () => {
@@ -269,6 +270,46 @@ describe('resolveRoute', () => {
   });
 });
 
+describe('a group bound to another provider never falls back to the app\'s own key (F002)', () => {
+  const ollama: Credential = { ...cred('ol', 'ollama'), baseUrl: 'http://localhost:11434' };
+
+  it('model-less group whose provider has no routing default', () => {
+    const credentials = [cred('a', 'anthropic'), cred('d', 'deepseek')];
+    const g = group('deepseek');
+
+    expect(resolveRoute('anthropic', g, credentials)).toBeNull();
+    expect(buildNoCredentialMessage('anthropic', ['anthropic', 'deepseek'], g))
+      .toBe("This app's group routes it to DeepSeek, which needs a model to translate Anthropic requests. Set a model on the group.");
+  });
+
+  it('model-less group bound to a local server', () => {
+    expect(resolveRoute('anthropic', group('ollama'), [cred('a', 'anthropic'), ollama])).toBeNull();
+  });
+
+  it('group whose local-server key was deleted', () => {
+    const g = group('ollama', { model: 'llama3.3' });
+
+    expect(resolveRoute('anthropic', g, [cred('a', 'anthropic')])).toBeNull();
+    expect(buildNoCredentialMessage('anthropic', ['anthropic'], g)).toBe(
+      'No API key for Ollama (local) found. Add one to your wallet, or assign this app to a provider you already have a key for.',
+    );
+    // Same family: the app's OpenAI key doesn't stand in either.
+    expect(resolveRoute('openai', g, [cred('o', 'openai')])).toBeNull();
+  });
+
+  it('group with a stale pin', () => {
+    const g = group('gemini', { credentialId: 'removed' });
+
+    expect(resolveRoute('anthropic', g, [cred('a', 'anthropic'), cred('g', 'gemini')])).toBeNull();
+  });
+
+  it('still routes when the group can serve the request', () => {
+    const decision = resolveRoute('anthropic', group('ollama', { model: 'llama3.3' }), [cred('a', 'anthropic'), ollama]);
+    expect(decision?.credential.id).toBe('ol');
+    expect(decision?.translation?.dstModel).toBe('llama3.3');
+  });
+});
+
 describe('resolveCrossFamilyRoute (direct)', () => {
   it('returns undefined when no group', () => {
     expect(resolveCrossFamilyRoute(undefined, 'openai', [cred('c1', 'anthropic')])).toBeUndefined();
@@ -296,13 +337,19 @@ describe('buildNoCredentialMessage', () => {
   it('points at the missing destination provider when group binds elsewhere', () => {
     const g = group('anthropic');
     const msg = buildNoCredentialMessage('openai', ['openai'], g);
-    expect(msg).toContain('No anthropic API key found');
+    expect(msg).toContain('No API key for Anthropic found');
   });
 
   it('lists existing credentials when wallet has some but not the requested one', () => {
     const msg = buildNoCredentialMessage('anthropic', ['openai', 'gemini'], undefined);
-    expect(msg).toContain('You have keys for: openai, gemini');
-    expect(msg).toContain('Add a anthropic key');
+    expect(msg).toBe(
+      'No API key for Anthropic found. You have keys for: OpenAI, Google Gemini. Add one, or assign this app to one of those providers.',
+    );
+  });
+
+  it('names an unknown provider by its id', () => {
+    expect(buildNoCredentialMessage('nope' as never, ['constructor' as never], undefined))
+      .toBe('No API key for nope found. You have keys for: constructor. Add one, or assign this app to one of those providers.');
   });
 
   it('tells the user the wallet is empty when there are no credentials', () => {
@@ -521,5 +568,52 @@ describe('local OpenAI-compatible servers (F032)', () => {
       dstProviderId: 'anthropic',
       dstModel: 'claude-sonnet-4-6',
     });
+  });
+});
+
+// The routing cases every wallet runs (iOS RoutingResolverTests, Android
+// RoutingResolverTest), written by scripts/gen-routing-vectors.mjs from core.
+// A failure here means routing.ts changed: regenerate the file, review its
+// diff, and bring the mobile resolvers in line.
+describe('vectors/routing.json', () => {
+  it('lists every provider with core\'s family and routing model', () => {
+    expect(Object.keys(routingVectors.providers)).toEqual(Object.keys(PROVIDERS).sort());
+    for (const [id, row] of Object.entries(routingVectors.providers)) {
+      expect({ family: familyOf(id), autoRouteModel: autoRouteModelFor(id) ?? null }, id).toEqual(row);
+    }
+  });
+
+  it.each(routingVectors.cases.map((c) => [c.name, c] as const))('%s', (_name, c) => {
+    const credentials: Credential[] = c.credentials.map((k) => ({
+      id: k.id,
+      providerId: k.providerId,
+      label: k.id,
+      authMethod: 'api_key',
+      encryptedKey: '',
+      createdAt: k.createdAt,
+    }));
+    const g: Group | undefined = c.group
+      ? {
+          id: c.group.providerId ? 'g' : 'default',
+          name: 'Group',
+          providerId: c.group.providerId,
+          credentialId: c.group.credentialId ?? undefined,
+          model: c.group.model ?? undefined,
+          createdAt: 0,
+        }
+      : undefined;
+
+    const route = resolveRoute(c.requested, g, credentials);
+
+    expect(route && {
+      credential: route.credential.id,
+      translation: route.translation
+        ? { dstProviderId: route.translation.dstProviderId, dstModel: route.translation.dstModel }
+        : null,
+      swap: route.swap ? { dstProviderId: route.swap.dstProviderId, dstModel: route.swap.dstModel ?? null } : null,
+      modelOverride: route.modelOverride ?? null,
+    }).toEqual(c.expect);
+    if (route?.translation) expect(route.translation.srcProviderId).toBe(c.requested);
+    if (route?.swap) expect(route.swap.srcProviderId).toBe(c.requested);
   });
 });

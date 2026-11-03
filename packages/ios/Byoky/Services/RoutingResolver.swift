@@ -20,7 +20,10 @@ struct RoutingResolver {
     ///   1. Cross-family translation (group binds to a different family)
     ///   2. Same-family swap (group binds to a different openai-family
     ///      provider with the same wire format)
-    ///   3. Direct credential for the provider the SDK called
+    ///   3. Direct credential for the provider the SDK called — unless the
+    ///      app's group binds another provider: a group 1 and 2 can't serve
+    ///      (no model to translate with, its key deleted, a stale pin) gets
+    ///      nothing, never the app's own key
     ///   4. Auto cross-family translation — opportunistic fallback when the
     ///      user holds credentials only in other families and the app has no
     ///      group binding. Skipped when a group is set (group intent wins).
@@ -73,6 +76,12 @@ struct RoutingResolver {
             guard let pinned = credentials.first(where: { $0.id == pinnedId && $0.providerId == requestedProviderId }) else { return nil }
             return RoutingDecision(credential: pinned, translation: nil, modelOverride: override)
         }
+        // A group bound to another provider that steps 1 and 2 couldn't
+        // serve never falls back to the app's own key: the user routed this
+        // app away from it (e.g. onto a local server). The empty providerId
+        // is the default group, which binds nothing. Core's resolveRoute
+        // does the same.
+        if let group, !group.providerId.isEmpty, group.providerId != requestedProviderId { return nil }
         if let cred = credentials.first(where: { $0.providerId == requestedProviderId }) {
             return RoutingDecision(credential: cred, translation: nil, modelOverride: override)
         }
@@ -99,26 +108,27 @@ struct RoutingResolver {
     }
 
     /// Whether a request for `providerId` from an app in `group` can be
-    /// served at all, and with which key: `resolve` with any model. A connect
-    /// request names no model, while the proxy routes every request that
-    /// carries one, so availability must not depend on it. Used for the
-    /// connect response's per-provider `available` flags.
+    /// served at all, and with which key. A connect request names no model,
+    /// and routing doesn't depend on one. Used for the connect response's
+    /// per-provider `available` flags.
     static func canServe(
         providerId: String,
         group: Group?,
         credentials: [Credential],
         engine: TranslationEngine = .shared
     ) -> Credential? {
-        resolve(requestedProviderId: providerId, requestedModel: anyModel, group: group,
+        resolve(requestedProviderId: providerId, requestedModel: nil, group: group,
                 credentials: credentials, engine: engine)?.credential
     }
 
-    /// Stand-in source model for `canServe`; never sent anywhere.
-    private static let anyModel = "*"
-
     /// Cross-family resolution. Returns nil if any precondition fails.
-    /// Mirrors `resolveCrossFamilyRoute` exactly: the destination model is
-    /// the group's, or else core's routing default for the group's provider.
+    /// Mirrors `resolveCrossFamilyRoute`: the destination model is the
+    /// group's, or else core's routing default for the group's provider.
+    /// The request's own model doesn't matter: a request without one (a
+    /// GET, a multipart upload) is still routed by the group, and `route`
+    /// then refuses it as not a chat request rather than sending it to the
+    /// provider the group routes this app away from. `srcModel` is empty
+    /// then.
     private static func tryCrossFamily(
         requestedProviderId: String,
         requestedModel: String?,
@@ -129,7 +139,6 @@ struct RoutingResolver {
         guard let group else { return nil }
         guard group.providerId != requestedProviderId else { return nil }
         guard let dstModel = group.model?.nilIfEmpty ?? engine.autoRouteModel(for: group.providerId) else { return nil }
-        guard let srcModel = requestedModel, !srcModel.isEmpty else { return nil }
 
         // Family compatibility check via the JS bridge — single source of truth.
         guard engine.shouldTranslate(srcProviderId: requestedProviderId, dstProviderId: group.providerId) else {
@@ -154,7 +163,7 @@ struct RoutingResolver {
             translation: RoutingTranslation(
                 srcProviderId: requestedProviderId,
                 dstProviderId: group.providerId,
-                srcModel: srcModel,
+                srcModel: requestedModel ?? "",
                 dstModel: dstModel
             )
         )
@@ -219,8 +228,9 @@ struct RoutingResolver {
     /// The destination model is core's `autoRouteModelFor` for the
     /// candidate's provider; providers it names none for (OpenAI-compatible
     /// hosts other than OpenAI and OpenRouter, Azure, Ollama, LM Studio) are
-    /// skipped. The `srcModel` field of RoutingTranslation is populated from
-    /// the inbound request body when available.
+    /// skipped. The `srcModel` field of RoutingTranslation is the inbound
+    /// request's model, empty when it names none: like core, routing doesn't
+    /// depend on it (`route` refuses a request that isn't chat).
     ///
     /// A request meant for a local server (Ollama, LM Studio) is never
     /// auto-routed: the app asked for a model on the user's own machine, so
@@ -250,14 +260,6 @@ struct RoutingResolver {
             return min(a.createdAt, now) > min(b.createdAt, now)
         }
 
-        guard let srcModel = requestedModel, !srcModel.isEmpty else {
-            // Translation needs a source model to build the outbound body.
-            // The extension extracts it from the request body earlier in the
-            // proxy pipeline; on mobile, missing srcModel → skip auto-route
-            // and surface PROVIDER_UNAVAILABLE so the user notices.
-            return nil
-        }
-
         for cred in sorted {
             guard engine.shouldTranslate(srcProviderId: requestedProviderId, dstProviderId: cred.providerId) else {
                 continue
@@ -268,7 +270,7 @@ struct RoutingResolver {
                 translation: RoutingTranslation(
                     srcProviderId: requestedProviderId,
                     dstProviderId: cred.providerId,
-                    srcModel: srcModel,
+                    srcModel: requestedModel ?? "",
                     dstModel: dstModel
                 )
             )
@@ -312,14 +314,20 @@ struct RoutingResolver {
             let modelMissing = group?.model?.nilIfEmpty == nil && engine.autoRouteModel(for: groupBinding) == nil
             if modelMissing, userCredentialProviderIds.contains(groupBinding),
                engine.shouldTranslate(srcProviderId: req, dstProviderId: groupBinding) {
-                return "This app's group routes it to \(groupBinding), which needs a model to translate \(req) requests. Set a model on the group."
+                return "This app's group routes it to \(providerName(groupBinding)), which needs a model to translate \(providerName(req)) requests. Set a model on the group."
             }
-            return "No \(groupBinding) API key found. Add a \(groupBinding) key to your wallet, or assign this app to a provider you already have a key for."
+            return "No API key for \(providerName(groupBinding)) found. Add one to your wallet, or assign this app to a provider you already have a key for."
         }
         if !userCredentialProviderIds.isEmpty {
-            return "No \(req) API key found. Keys: \(userCredentialProviderIds.joined(separator: ", ")). Add a \(req) key, or assign this app to one of those providers."
+            let list = userCredentialProviderIds.map(providerName).joined(separator: ", ")
+            return "No API key for \(providerName(req)) found. You have keys for: \(list). Add one, or assign this app to one of those providers."
         }
         return "No API keys in your wallet. Add a key for any provider to get started."
+    }
+
+    /// A provider's display name ("Ollama (local)"), or its id when unknown.
+    private static func providerName(_ providerId: String) -> String {
+        Provider.find(providerId)?.name ?? providerId
     }
 
     /// Best-effort `model` extraction from a JSON request body. Returns nil

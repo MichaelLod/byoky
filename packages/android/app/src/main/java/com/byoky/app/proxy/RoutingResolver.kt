@@ -2,6 +2,7 @@ package com.byoky.app.proxy
 
 import com.byoky.app.data.Credential
 import com.byoky.app.data.Group
+import com.byoky.app.data.Provider
 import com.byoky.app.data.RoutingDecision
 import com.byoky.app.data.RoutingTranslation
 import okhttp3.HttpUrl
@@ -44,7 +45,8 @@ object RoutingResolver {
      *   1. Cross-family translation (group binds to a different family)
      *   2. Same-family swap (group binds to a different openai-family
      *      provider with the same wire format)
-     *   3. Direct credential for the provider the SDK called
+     *   3. Direct credential for the provider the SDK called — unless the
+     *      app's group binds another provider (see [resolveDirect])
      *   4. Auto cross-family translation — opportunistic fallback when the
      *      user holds credentials only in other families and the app has no
      *      group binding. Skipped when a group is set (group intent wins).
@@ -98,8 +100,17 @@ object RoutingResolver {
      * key (pins are for cost attribution). Otherwise the first key of the
      * provider. A model the group pins is surfaced as `modelOverride`: the
      * group is the strongest routing force, stronger than the app's choice.
+     *
+     * A group bound to another provider gets null, never the app's own key:
+     * the user routed this app away from it (e.g. onto a local server), and
+     * when translation or a swap can't serve the group (no model to
+     * translate with, its key deleted, a stale pin, no translation engine)
+     * the request must fail rather than go to the provider it was routed
+     * away from. The empty providerId is the default group, which binds
+     * nothing.
      */
     fun resolveDirect(requestedProviderId: String, group: Group?, credentials: List<Credential>): RoutingDecision? {
+        if (group != null && group.providerId.isNotEmpty() && group.providerId != requestedProviderId) return null
         val bindsProvider = group != null && group.providerId == requestedProviderId
         val override = if (bindsProvider) group?.model?.takeIf { it.isNotEmpty() } else null
         val pin = if (bindsProvider) group?.credentialId else null
@@ -113,16 +124,12 @@ object RoutingResolver {
 
     /**
      * Whether a request for [providerId] from an app in [group] can be
-     * served at all, and with which key: [resolve] with any model. A connect
-     * request names no model, while the proxy routes every request that
-     * carries one, so availability must not depend on it. Used for the
-     * connect response's per-provider `available` flags.
+     * served at all, and with which key. A connect request names no model,
+     * and routing doesn't depend on one. Used for the connect response's
+     * per-provider `available` flags.
      */
     fun canServe(providerId: String, group: Group?, credentials: List<Credential>, engine: Families): Credential? =
-        resolve(providerId, ANY_MODEL, group, credentials, engine)?.credential
-
-    /** Stand-in source model for [canServe]; never sent anywhere. */
-    private const val ANY_MODEL = "*"
+        resolve(providerId, null, group, credentials, engine)?.credential
 
     /** User-run local servers (core `isLocalServerProvider`). */
     private val LOCAL_SERVER_PROVIDERS = setOf("ollama", "lm_studio")
@@ -140,7 +147,9 @@ object RoutingResolver {
      * The destination model is core's `autoRouteModelFor` for the
      * candidate's provider; providers it names none for (OpenAI-compatible
      * hosts other than OpenAI and OpenRouter, Azure, Ollama, LM Studio) are
-     * skipped. `srcModel` is taken from the inbound request body.
+     * skipped. `srcModel` is the inbound request's model, empty when it
+     * names none: like core, routing doesn't depend on it (`forward`
+     * refuses a request that isn't chat).
      *
      * A request meant for a local server (Ollama, LM Studio) is never
      * auto-routed: the app asked for a model on the user's own machine, so
@@ -157,7 +166,6 @@ object RoutingResolver {
         // guard for callers invoking this method in isolation.
         if (credentials.any { it.providerId == requestedProviderId }) return null
         if (requestedProviderId in LOCAL_SERVER_PROVIDERS) return null
-        if (requestedModel.isNullOrEmpty()) return null
 
         for (cred in autoCandidateOrder(credentials)) {
             if (!engine.shouldTranslate(requestedProviderId, cred.providerId)) continue
@@ -167,7 +175,7 @@ object RoutingResolver {
                 translation = RoutingTranslation(
                     srcProviderId = requestedProviderId,
                     dstProviderId = cred.providerId,
-                    srcModel = requestedModel,
+                    srcModel = requestedModel.orEmpty(),
                     dstModel = dstModel,
                 )
             )
@@ -204,8 +212,13 @@ object RoutingResolver {
 
     /**
      * Cross-family resolution. Returns null if any precondition fails.
-     * Mirrors `resolveCrossFamilyRoute` exactly: the destination model is
-     * the group's, or else core's routing default for the group's provider.
+     * Mirrors `resolveCrossFamilyRoute`: the destination model is the
+     * group's, or else core's routing default for the group's provider.
+     * The request's own model doesn't matter: a request without one (a GET,
+     * a multipart upload) is still routed by the group, and `forward` then
+     * refuses it as not a chat request rather than sending it to the
+     * provider the group routes this app away from. `srcModel` is empty
+     * then.
      */
     private fun tryCrossFamily(
         requestedProviderId: String,
@@ -219,7 +232,6 @@ object RoutingResolver {
         val dstModel = group.model?.takeIf { it.isNotEmpty() }
             ?: engine.autoRouteModel(group.providerId)?.takeIf { it.isNotEmpty() }
             ?: return null
-        if (requestedModel.isNullOrEmpty()) return null
 
         // Family compatibility check via the JS bridge — single source of truth.
         if (!engine.shouldTranslate(requestedProviderId, group.providerId)) return null
@@ -240,7 +252,7 @@ object RoutingResolver {
             translation = RoutingTranslation(
                 srcProviderId = requestedProviderId,
                 dstProviderId = group.providerId,
-                srcModel = requestedModel,
+                srcModel = requestedModel.orEmpty(),
                 dstModel = dstModel,
             )
         )
@@ -290,6 +302,64 @@ object RoutingResolver {
             swapDstModel = group.model?.takeIf { it.isNotEmpty() },
         )
     }
+
+    /**
+     * Actionable message for the PROVIDER_UNAVAILABLE error when [resolve]
+     * gives null (core `buildNoCredentialMessage`, plus two cases of its own):
+     *   1. The group's pinned key is gone (or isn't one of its provider's).
+     *   2. The group binds another provider and this phone can't route
+     *      ([routingSupported] false: no JavaScriptSandbox, which needs
+     *      Android System WebView 110 or newer). The group's key may well be
+     *      in the wallet, so naming a missing key would mislead.
+     *   3. The app's group routes to a provider with no key → name it; with
+     *      a key but no model to translate with → ask for a model.
+     *   4. The wallet has keys, just not for this provider → list them;
+     *      where the phone can't route, only this provider's key helps.
+     *   5. The wallet is empty → ask for any key.
+     */
+    fun noCredentialMessage(
+        providerId: String,
+        credentials: List<Credential>,
+        group: Group?,
+        engine: Families?,
+        routingSupported: Boolean,
+    ): String {
+        val pin = group?.credentialId
+        if (group != null && pin != null && credentials.none { it.id == pin && it.providerId == group.providerId }) {
+            return "The key this app's group \"${group.name}\" is pinned to is no longer in your wallet. Edit the group and pick another key."
+        }
+        // An empty providerId is the default sentinel group: no routing.
+        val groupBinding = group?.providerId?.takeIf { it.isNotEmpty() }
+        if (group != null && groupBinding != null && groupBinding != providerId) {
+            if (!routingSupported) {
+                return "This phone can't route requests to another provider: that needs Android System WebView 110 or newer. " +
+                    "Update Android System WebView from the Play Store, or move this app out of the group \"${group.name}\", " +
+                    "which routes it to ${providerName(groupBinding)}."
+            }
+            val modelMissing = group.model.isNullOrEmpty() && engine?.autoRouteModel(groupBinding) == null
+            if (modelMissing && engine != null && credentials.any { it.providerId == groupBinding } &&
+                engine.shouldTranslate(providerId, groupBinding)
+            ) {
+                return "This app's group routes it to ${providerName(groupBinding)}, which needs a model to translate " +
+                    "${providerName(providerId)} requests. Set a model on the group."
+            }
+            return "No API key for ${providerName(groupBinding)} found. Add one to your wallet, or assign this app to a provider you already have a key for."
+        }
+        val held = credentials.map { it.providerId }.distinct().sorted()
+        if (held.isNotEmpty() && !routingSupported) {
+            val name = providerName(providerId)
+            return "No API key for $name found. This phone can't route requests to another provider's key: that needs " +
+                "Android System WebView 110 or newer. Add a key for $name, or update Android System WebView from the Play Store."
+        }
+        if (held.isNotEmpty()) {
+            return "No API key for ${providerName(providerId)} found. You have keys for: ${held.joinToString(", ") { providerName(it) }}. " +
+                "Add one, or assign this app to one of those providers."
+        }
+        return "No API keys in your wallet. Add a key for any provider to get started."
+    }
+
+    /** A provider's display name ("Ollama (local)"), or its id when unknown. */
+    private fun providerName(providerId: String): String = Provider.find(providerId)?.name ?: providerId
 
     /**
      * Best-effort `model` extraction from a JSON request body. Returns null

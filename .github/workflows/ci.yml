@@ -79,6 +79,11 @@ jobs:
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: node scripts/gen-backup-fixtures.mjs --check
 
+      # The iOS and Android routing tests run core's decisions from this file.
+      - name: Routing vectors match core
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: node scripts/gen-routing-vectors.mjs --check
+
   # The npm packages that CI otherwise never builds: the bridge, the OpenClaw
   # plugin (which inlines the bridge's dist) and the scaffolder; and the
   # typecheck of every package, which needs all of those builds.

@@ -767,36 +767,14 @@ class ProxyService(
         } catch (_: Exception) { body }
     }
 
-    /**
-     * Actionable message for the PROVIDER_UNAVAILABLE error:
-     *   1. The group's pinned key is gone (or isn't one of its provider's).
-     *   2. The app's group routes to a provider with no key → name it; with
-     *      a key but no model to translate with → ask for a model.
-     *   3. The wallet has keys, just not for this provider → list them.
-     *   4. The wallet is empty → ask for any key.
-     */
+    /** Actionable message for the PROVIDER_UNAVAILABLE error ([RoutingResolver.noCredentialMessage]). */
     private fun noCredentialMessage(providerId: String, credentials: List<Credential>, group: Group?): String {
-        val pin = group?.credentialId
-        if (group != null && pin != null && credentials.none { it.id == pin && it.providerId == group.providerId }) {
-            return "The key this app's group \"${group.name}\" is pinned to is no longer in your wallet. Edit the group and pick another key."
-        }
-        // An empty providerId is the default sentinel group: no routing.
-        val groupBinding = group?.providerId?.takeIf { it.isNotEmpty() }
-        if (groupBinding != null && groupBinding != providerId) {
-            val engine = translationEngine
-            val modelMissing = group?.model.isNullOrEmpty() && engine?.autoRouteModelFor(groupBinding) == null
-            if (modelMissing && engine != null && credentials.any { it.providerId == groupBinding } &&
-                engine.shouldTranslate(providerId, groupBinding)
-            ) {
-                return "This app's group routes it to $groupBinding, which needs a model to translate $providerId requests. Set a model on the group."
-            }
-            return "No $groupBinding API key found. Add a $groupBinding key to your wallet, or assign this app to a provider you already have a key for."
-        }
-        val held = credentials.map { it.providerId }.distinct().sorted()
-        if (held.isNotEmpty()) {
-            return "No $providerId API key found. Keys: ${held.joinToString(", ")}. Add a $providerId key, or assign this app to one of those providers."
-        }
-        return "No API keys in your wallet. Add a key for any provider to get started."
+        val engine = translationEngine
+        return RoutingResolver.noCredentialMessage(
+            providerId, credentials, group,
+            engine = engine?.let { families(it) },
+            routingSupported = engine?.isSupported == true,
+        )
     }
 
     companion object {
