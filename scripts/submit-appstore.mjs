@@ -105,7 +105,14 @@ async function api(path, opts = {}) {
   const text = await res.text()
   const data = text ? JSON.parse(text) : {}
   if (!res.ok) {
-    const errs = data.errors?.map(e => e.detail).join('; ') || res.statusText
+    // A 409 "cannot be reviewed" names the real reasons only in
+    // meta.associatedErrors (e.g. an unanswered age rating question).
+    const reasons = (e) => [
+      e.detail,
+      ...Object.entries(e.meta?.associatedErrors ?? {})
+        .flatMap(([path, list]) => list.map((a) => `${path.replace(/^\/v1\//, '')}: ${a.detail}`)),
+    ]
+    const errs = data.errors?.flatMap(reasons).filter(Boolean).join('; ') || res.statusText
     throw new Error(`${res.status}: ${errs}`)
   }
   return data

@@ -100,6 +100,17 @@ test('both submission APIs failing exits 1', () => {
   assert.match(r.out, /v2 refused/)
 })
 
+test('a refused submission names the reasons App Store Connect gives (associated errors)', () => {
+  const refusal = { errors: [{ detail: 'This resource cannot be reviewed, please check associated errors to see why.', meta: { associatedErrors: {
+    '/v1/ageRatingDeclarations/V1': [{ detail: "You must provide a value for the attribute 'socialMedia' with this request" }],
+  } } }] }
+  const routes = asc({ builds: [[build('VALID')]], v1Submit: 409 })
+    .map((r) => (r.method === 'POST' && r.url.endsWith('/reviewSubmissionItems') ? { ...r, status: 409, body: refusal } : r))
+  const r = submit(routes)
+  assert.equal(r.code, 1, r.out)
+  assert.match(r.out, /ageRatingDeclarations\/V1: You must provide a value for the attribute 'socialMedia'/)
+})
+
 test('another version in review blocks this one: exit 4, nothing changed', () => {
   const r = submit(asc({ versions: [version('V110', '1.1.0', 'WAITING_FOR_REVIEW')], builds: [[build('VALID')]] }))
   assert.equal(r.code, 4, r.out)
