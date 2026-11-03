@@ -1,6 +1,6 @@
-A security update with many fixes.
-• Browser extension: keys, trusted sites and limits are protected against tampering; tampered limits pause apps until you resume them. Older versions can't open the upgraded wallet.
-• Routing between AI providers carries tools, images and documents more reliably.
-• The in-wallet browser handles uploads, links and load errors.
-• Better screen reader and large text support.
+A security update.
+• Browser extension: keys, trusted sites and limits are protected against tampering; tampered limits pause apps until you resume them. Older versions can't open the upgraded wallet. Long requests no longer break off.
+• A token limit of 0 now blocks an app.
+• Phone apps keep passwords and keys out of screenshots.
+• Fixes for routing, the in-wallet browser, screen readers and large text.
 Desktop bridge and plugin users: update both, then set their limits and groups again.
