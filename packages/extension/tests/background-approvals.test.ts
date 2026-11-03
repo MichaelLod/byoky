@@ -165,6 +165,23 @@ describe('background: what the popup is told about the wallet', () => {
     expect(locked).toMatchObject({ success: false, attemptsLeft: 0, lockedUntil: fifth.lockedUntil });
   });
 
+  // F052: a wallet view opened during a lockout learned of it only from
+  // its next, refused, try.
+  it('reports a running lockout to a view that asks whether the wallet is unlocked', async () => {
+    const h = await startBackground({ local: await walletStorage([]) });
+    expect(await h.internal('isUnlocked')).toEqual({ unlocked: false });
+    for (let i = 0; i < 5; i++) await h.unlock('wrong');
+    const { lockedUntil } = await h.unlock('wrong');
+    expect(await h.internal('isUnlocked')).toEqual({ unlocked: false, lockedUntil });
+    // Over once it ends, and gone after the right password.
+    const now = vi.spyOn(Date, 'now');
+    now.mockReturnValue(lockedUntil + 1);
+    expect(await h.internal('isUnlocked')).toEqual({ unlocked: false });
+    expect((await h.unlock()).success).toBe(true);
+    expect(await h.internal('isUnlocked')).toEqual({ unlocked: true });
+    now.mockRestore();
+  });
+
   it('reports the lockout on the export re-authentication too', async () => {
     const h = await startBackground({ local: await walletStorage([]) });
     await h.unlock();
@@ -205,5 +222,108 @@ describe('background: what the popup is told about the wallet', () => {
     now.mockReturnValue(start + 39 * 60_000 + 1);
     keepalive();
     expect((await h.internal('isUnlocked')).unlocked).toBe(false);
+  });
+});
+
+// F053: a connect whose tab was closed stayed on the wallet's approval
+// screen for two minutes, and approving it made a session for a page that
+// no longer existed.
+describe('background: a request whose page went away', () => {
+  const GRACE_MS = 1_500;
+  const approvalsChanged = (h: Harness) => h.broadcasts.filter((b) => b.action === 'approvalsChanged').length;
+
+  /** A connect whose reply nobody may read (its port closes). */
+  function connectFrom(h: Harness, tabId: number) {
+    const c = h.connect(APP, OPENAI, { tabId });
+    c.response.catch(() => {});
+    return c;
+  }
+
+  it('is dropped once the page that sent it is gone', async () => {
+    const h = await wallet();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const { port } = connectFrom(h, 1);
+    await h.until(async () => (await pending(h)).length === 1);
+    port.close();
+    await h.settle();
+    // A reload gets a moment to connect again.
+    expect(await pending(h)).toHaveLength(1);
+    const before = approvalsChanged(h);
+    vi.advanceTimersByTime(GRACE_MS);
+    await h.settle();
+    expect(await pending(h)).toHaveLength(0);
+    expect(approvalsChanged(h)).toBe(before + 1);
+    expect((await h.internal('getSessions')).sessions).toHaveLength(0);
+  });
+
+  it('stays for another page of the app that waits on it', async () => {
+    const h = await wallet();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const first = connectFrom(h, 1);
+    await h.until(async () => (await pending(h)).length === 1);
+    const second = h.connect(APP, OPENAI, { tabId: 2 });
+    await h.settle();
+    first.port.close();
+    vi.advanceTimersByTime(GRACE_MS * 2);
+    await h.settle();
+    expect(await pending(h)).toHaveLength(1);
+    await approveNext(h);
+    expect((await second.response).type).toBe('BYOKY_CONNECT_RESPONSE');
+  });
+
+  it('is dropped once every page waiting on it is gone', async () => {
+    const h = await wallet();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const first = connectFrom(h, 1);
+    await h.until(async () => (await pending(h)).length === 1);
+    const second = connectFrom(h, 2);
+    await h.settle();
+    second.port.close();
+    vi.advanceTimersByTime(GRACE_MS * 2);
+    await h.settle();
+    expect(await pending(h)).toHaveLength(1);
+    first.port.close();
+    vi.advanceTimersByTime(GRACE_MS);
+    await h.settle();
+    expect(await pending(h)).toHaveLength(0);
+  });
+
+  it('is kept for a reloaded page that connects again in time', async () => {
+    const h = await wallet();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const before = connectFrom(h, 1);
+    await h.until(async () => (await pending(h)).length === 1);
+    const [queued] = await pending(h);
+    before.port.close();
+    vi.advanceTimersByTime(GRACE_MS / 3);
+    const reloaded = h.connect(APP, OPENAI, { tabId: 1 });
+    await h.settle();
+    vi.advanceTimersByTime(GRACE_MS * 2);
+    await h.settle();
+    const after = await pending(h);
+    expect(after.map((a) => a.id)).toEqual([queued.id]);
+    await approveNext(h);
+    expect((await reloaded.response).type).toBe('BYOKY_CONNECT_RESPONSE');
+  });
+
+  it('leaves a request being approved alone', async () => {
+    const h = await wallet();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const first = connectFrom(h, 1);
+    await h.until(async () => (await pending(h)).length === 1);
+    const second = h.connect(APP, OPENAI, { tabId: 2 });
+    await h.settle();
+    // Creating the session takes a while.
+    h.local.latency = () => 30;
+    const [approval] = await pending(h);
+    const approving = h.internal('approveConnect', { approvalId: approval.id, trust: false });
+    await h.settle();
+    first.port.close();
+    vi.advanceTimersByTime(GRACE_MS * 2);
+    expect(await approving).toEqual({ success: true });
+    h.local.latency = () => 0;
+    expect((await second.response).type).toBe('BYOKY_CONNECT_RESPONSE');
+    expect((await h.internal('getSessions')).sessions).toHaveLength(1);
+    expect(await pending(h)).toHaveLength(0);
   });
 });

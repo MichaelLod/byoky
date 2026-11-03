@@ -153,26 +153,41 @@ export default defineBackground(() => {
   function updateBadge() {
     const count = _pendingMap.size;
     const text = count > 0 ? String(count) : '';
+    // MV3 (Chrome) calls it action; the MV2 builds (Firefox, Safari) only
+    // have browserAction.
+    const action: typeof browser.action | typeof browser.browserAction | undefined = browser.action ?? browser.browserAction;
+    if (!action) return;
     try {
-      browser.action.setBadgeText({ text });
-      browser.action.setBadgeBackgroundColor({ color: '#7C3AED' });
+      action.setBadgeText({ text })?.catch(() => {});
+      action.setBadgeBackgroundColor({ color: '#7C3AED' })?.catch(() => {});
     } catch {
-      // Fallback for older APIs
+      // Safari on iOS has no badge colour.
     }
   }
 
   type ConnectMessage = { id: string; payload: ConnectRequest };
+  type Waiter = {
+    message: ConnectMessage;
+    sender: Runtime.MessageSender;
+    resolve: (response: unknown) => void;
+    /** Aborts once the page that sent it is gone (closed, reloaded, navigated away). */
+    gone?: AbortSignal;
+  };
   type PendingEntry = {
     approval: PendingApproval;
     originalMessageId: string;
     resolve: (response: unknown) => void;
     tabId?: number;
+    /** Aborts once the page that sent the request is gone. */
+    gone?: AbortSignal;
+    /** The auto-reject after APPROVAL_TIMEOUT_MS. */
+    timer?: ReturnType<typeof setTimeout>;
     /**
      * Later connects from the same origin, waiting for this one's outcome.
      * Once it is approved they run again (and mostly reuse the session);
      * if it is rejected or times out, so are they.
      */
-    waiters: Array<{ message: ConnectMessage; sender: Runtime.MessageSender; resolve: (response: unknown) => void }>;
+    waiters: Waiter[];
     /**
      * Set once the request is left for the user (not trusted, or the wallet
      * is locked) and the wallet was shown for it. Until then it is still
@@ -187,11 +202,12 @@ export default defineBackground(() => {
   const pendingApprovals = {
     get size() { return _pendingMap.size; },
     get(id: string) { return _pendingMap.get(id); },
-    set(id: string, entry: PendingEntry) { _pendingMap.set(id, entry); updateBadge(); notifyApprovalsChanged(); },
+    set(id: string, entry: PendingEntry) { _pendingMap.set(id, entry); updateBadge(); notifyApprovalsChanged(); syncApprovalHold(); },
     delete(id: string) {
       const r = _pendingMap.delete(id);
       updateBadge();
       if (r) notifyApprovalsChanged();
+      syncApprovalHold();
       return r;
     },
     values() { return _pendingMap.values(); },
@@ -201,6 +217,51 @@ export default defineBackground(() => {
   // connect from the same origin meanwhile waits on them rather than
   // queueing a second prompt (or being told it was rejected).
   const settlingApprovals = new Set<PendingEntry>();
+
+  // Chrome stops an MV3 service worker 30 s after the last extension event,
+  // and an open port doesn't count as one; Safari suspends its
+  // non-persistent background page the same way. Work that waits on
+  // something outside the extension would die with it: an upstream call cut
+  // off unlogged and uncharged, a connect request gone before the user
+  // answers. Such work holds the worker: while a hold is out, an extension
+  // API call every 20 s resets the idle timer (Chrome 110+). The content
+  // script also pings the ports it waits on (content.ts).
+  const KEEPALIVE_INTERVAL_MS = 20_000;
+  let workerHolds = 0;
+  let keepaliveTimer: ReturnType<typeof setInterval> | null = null;
+
+  /** Keep the worker running until the returned release is called (more calls do nothing). */
+  function holdWorker(): () => void {
+    workerHolds++;
+    keepaliveTimer ??= setInterval(() => {
+      try {
+        browser.runtime.getPlatformInfo().catch(() => {});
+      } catch { /* not available here */ }
+    }, KEEPALIVE_INTERVAL_MS);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      workerHolds--;
+      if (workerHolds === 0 && keepaliveTimer) {
+        clearInterval(keepaliveTimer);
+        keepaliveTimer = null;
+      }
+    };
+  }
+
+  // Queued and settling approvals hold the worker until the last one is
+  // answered, dropped or timed out (after two minutes).
+  let releaseApprovalHold: (() => void) | null = null;
+  function syncApprovalHold() {
+    const waiting = _pendingMap.size > 0 || settlingApprovals.size > 0;
+    if (waiting && !releaseApprovalHold) {
+      releaseApprovalHold = holdWorker();
+    } else if (!waiting && releaseApprovalHold) {
+      releaseApprovalHold();
+      releaseApprovalHold = null;
+    }
+  }
 
   function notifyApprovalsChanged() {
     browser.runtime.sendMessage({ type: 'BYOKY_INTERNAL', action: 'approvalsChanged' }).catch(() => {});
@@ -480,6 +541,14 @@ export default defineBackground(() => {
   const connectRateLimit = new Map<string, number[]>();
   const CONNECT_RATE_LIMIT = 10; // max requests per window
   const CONNECT_RATE_WINDOW = 60_000; // 1 minute
+  // How long a connect request waits for the user, and how many may wait:
+  // in all, and from one tab (whose frames may be any number of origins).
+  const APPROVAL_TIMEOUT_MS = 120_000;
+  const MAX_QUEUED_APPROVALS = 5;
+  const MAX_QUEUED_APPROVALS_PER_TAB = 2;
+  // How long a request whose page went away is kept for the page to come
+  // back (a reload connects again) before it is dropped.
+  const REQUESTER_GRACE_MS = 1_500;
 
   function checkConnectRateLimit(origin: string): { limited: true; retryAfter: number } | { limited: false } {
     const now = Date.now();
@@ -644,11 +713,18 @@ export default defineBackground(() => {
     }
 
     if (port.name === 'byoky-message') {
+      // The page's end closes when its tab is closed, reloaded or navigated
+      // away: a connect it left waiting for the user is then dropped.
+      const requesterGone = new AbortController();
+      port.onDisconnect.addListener(() => requesterGone.abort());
       // Handle connect/disconnect/status/usage via port so the message doesn't
       // broadcast to the side-panel's onMessage listener (which can interfere
       // in Chrome MV3 when multiple listeners exist).
       port.onMessage.addListener(async (raw: unknown) => {
         const message = raw as Record<string, unknown>;
+        // The content script's ping while it waits for the answer: it only
+        // keeps the worker running (see holdWorker).
+        if (message?.type === 'BYOKY_KEEPALIVE') return;
         const sender = port.sender as Runtime.MessageSender;
         // Before any await: Chrome opens the side panel only within the
         // page's user gesture, which ends at this listener's first await.
@@ -659,7 +735,7 @@ export default defineBackground(() => {
         let response: unknown;
 
         if (message.type === 'BYOKY_CONNECT_REQUEST') {
-          response = await handleConnect(message as { id: string; payload: ConnectRequest }, sender, panelOpened);
+          response = await handleConnect(message as { id: string; payload: ConnectRequest }, sender, panelOpened, requesterGone.signal);
         } else if (message.type === 'BYOKY_DISCONNECT') {
           const { sessionKey } = message.payload as { sessionKey: string };
           const session = sessions.get(sessionKey);
@@ -883,6 +959,9 @@ export default defineBackground(() => {
       let responseChunks: string[] | undefined;
       let streamComplete = false;
       let fetchSent = false;
+      // Until the response is through and counted: a slow upstream (a
+      // reasoning model, a long non-streamed answer) sends nothing for a while.
+      const releaseWorker = holdWorker();
 
       try {
         const apiKey = await decryptCredentialKey(credential);
@@ -1179,10 +1258,15 @@ export default defineBackground(() => {
           }
         } catch { /* usage bookkeeping must not break the response */ }
         reservation.release();
+        releaseWorker();
       }
     };
 
     port.onMessage.addListener(async (raw: unknown) => {
+      // Pings while the request runs only keep the worker running; they are
+      // not activity of the app (see holdWorker), and they must not close
+      // the port of the request they keep alive.
+      if ((raw as { type?: unknown } | null)?.type === 'BYOKY_KEEPALIVE') return;
       try {
         await handleRequest(raw);
       } finally {
@@ -1250,12 +1334,14 @@ export default defineBackground(() => {
   /**
    * `panelOpened` is the side panel the port listener tried to open inside
    * the page's gesture (Chrome), if it did; the wallet is shown some other
-   * way when that didn't work.
+   * way when that didn't work. `gone` aborts once the requesting page is
+   * gone, which drops a request left waiting for the user.
    */
   async function handleConnect(
     message: { id: string; payload: ConnectRequest },
     sender: Runtime.MessageSender,
     panelOpened?: Promise<boolean>,
+    gone?: AbortSignal,
   ): Promise<unknown> {
     const origin = resolveOrigin(sender);
     const refuse = (code: string, text: string) => ({
@@ -1314,6 +1400,9 @@ export default defineBackground(() => {
       };
     }
 
+    // The page went away before its request got this far: nobody to ask for.
+    if (gone?.aborted) return refuse('USER_REJECTED', 'The page that asked to connect is gone');
+
     // A request from this origin is already waiting for the user (or being
     // approved right now): wait for its outcome.
     const inFlight = pendingFor(origin);
@@ -1322,10 +1411,36 @@ export default defineBackground(() => {
       // a request the user is being asked about. One still checked against
       // the trusted sites shows it if it comes to asking, and one being
       // approved needs nothing.
-      if (inFlight.askedUser && !settlingApprovals.has(inFlight)) openWalletUI(sender.tab?.id, panelOpened);
+      if (inFlight.askedUser && !settlingApprovals.has(inFlight)) openWalletUI(sender.tab, panelOpened);
       return new Promise((resolve) => {
-        inFlight.waiters.push({ message: { id: message.id, payload: request }, sender, resolve });
+        const waiter: Waiter = { message: { id: message.id, payload: request }, sender, resolve, gone };
+        inFlight.waiters.push(waiter);
+        // A waiting page that goes away stops waiting; the request is
+        // dropped once nobody waits for it.
+        gone?.addEventListener('abort', () => {
+          const i = inFlight.waiters.indexOf(waiter);
+          if (i < 0) return;
+          inFlight.waiters.splice(i, 1);
+          dropIfAbandoned(inFlight);
+        }, { once: true });
       });
+    }
+
+    // Only so many requests wait for the user, per tab and in all: each
+    // subdomain a page frames has a rate limit of its own. A site trusted to
+    // connect without a prompt (as far as the last trust read knows) isn't
+    // held back by the others.
+    const queueFull = masterPassword && silentTrustSnapshot.has(origin) ? null : approvalQueueFull(sender.tab?.id);
+    if (queueFull) {
+      return {
+        type: 'BYOKY_ERROR',
+        requestId: message.id,
+        payload: {
+          code: 'RATE_LIMITED',
+          message: 'Too many connection requests are waiting. Answer them in Byoky, or try again later.',
+          retryAfter: queueFull.retryAfter,
+        },
+      };
     }
 
     // An app with a session that now asks for more providers is asked about
@@ -1346,15 +1461,25 @@ export default defineBackground(() => {
         originalMessageId: message.id,
         resolve,
         tabId: sender.tab?.id,
+        gone,
         waiters: [],
       };
       pendingApprovals.set(approval.id, queued);
+
+      // The page that asked is gone (closed, reloaded, navigated away). If
+      // another page of the app waits on the request, it is now that page's;
+      // otherwise it is dropped, unless the page comes back (a reload).
+      gone?.addEventListener('abort', () => {
+        if (pendingApprovals.get(approval.id) !== queued) return;
+        if (queued.waiters.length > 0) queued.tabId = queued.waiters[0].sender.tab?.id;
+        dropIfAbandoned(queued);
+      }, { once: true });
 
       // The wallet is shown only for a request that waits for the user, not
       // for one a trusted site gets approved without a prompt.
       const askUser = () => {
         queued.askedUser = true;
-        openWalletUI(sender.tab?.id, panelOpened);
+        openWalletUI(sender.tab, panelOpened);
         browser.runtime.sendMessage({ type: 'BYOKY_INTERNAL', action: 'newPendingApproval' }).catch(() => {});
       };
 
@@ -1386,14 +1511,47 @@ export default defineBackground(() => {
       }
 
       // Auto-reject after 2 minutes
-      setTimeout(() => {
+      queued.timer = setTimeout(() => {
         const entry = pendingApprovals.get(approval.id);
         if (entry) {
           pendingApprovals.delete(approval.id);
           rejectPending(entry, 'Connection request timed out');
         }
-      }, 120_000);
+      }, APPROVAL_TIMEOUT_MS);
     });
+  }
+
+  /**
+   * Drop a queued request that no page waits for any more (the one that
+   * sent it and every one waiting on it are gone), after a grace period in
+   * which a reloaded page can connect again and keep it. The queue's change
+   * takes it off the wallet's approval screen.
+   */
+  function dropIfAbandoned(entry: PendingEntry) {
+    if (pendingApprovals.get(entry.approval.id) !== entry) return;
+    if (!entry.gone?.aborted || entry.waiters.length > 0) return;
+    setTimeout(() => {
+      if (pendingApprovals.get(entry.approval.id) !== entry || entry.waiters.length > 0) return;
+      clearTimeout(entry.timer);
+      pendingApprovals.delete(entry.approval.id);
+      // Only frees what awaits it: the ports it would answer are closed.
+      rejectPending(entry, 'The page that asked to connect is gone');
+    }, REQUESTER_GRACE_MS);
+  }
+
+  /**
+   * Whether the queue has no room for another request from `tabId`, and if
+   * so, in how many seconds the oldest request in the way times out.
+   */
+  function approvalQueueFull(tabId: number | undefined): { retryAfter: number } | null {
+    const queued = [..._pendingMap.values()];
+    const fromTab = tabId === undefined ? [] : queued.filter((e) => e.tabId === tabId);
+    const blocking = queued.length >= MAX_QUEUED_APPROVALS
+      ? queued
+      : fromTab.length >= MAX_QUEUED_APPROVALS_PER_TAB ? fromTab : null;
+    if (!blocking) return null;
+    const oldest = Math.min(...blocking.map((e) => e.approval.timestamp));
+    return { retryAfter: Math.max(1, Math.ceil((oldest + APPROVAL_TIMEOUT_MS - Date.now()) / 1000)) };
   }
 
   /** Whether `session` already has every provider in `providers` approved. */
@@ -1432,21 +1590,24 @@ export default defineBackground(() => {
     before?: () => Promise<void>,
   ): Promise<void> {
     settlingApprovals.add(entry);
+    syncApprovalHold();
     let session: Session;
     try {
       await before?.();
       session = await createSession(entry.approval.appOrigin, providers);
     } catch {
       settlingApprovals.delete(entry);
+      syncApprovalHold();
       rejectPending(entry, 'Could not create the session', 'UNKNOWN');
       return;
     }
     settlingApprovals.delete(entry);
+    syncApprovalHold();
     entry.resolve(buildSessionResponse(session, entry.originalMessageId));
     // Each waiter runs again: one the session covers reuses it at once, one
     // asking for more providers is queued for those.
     for (const w of entry.waiters) {
-      handleConnect(w.message, w.sender).then(w.resolve, () => {
+      handleConnect(w.message, w.sender, undefined, w.gone).then(w.resolve, () => {
         w.resolve({ type: 'BYOKY_ERROR', requestId: w.message.id, payload: { code: 'UNKNOWN', message: 'Could not connect' } });
       });
     }
@@ -1612,6 +1773,8 @@ export default defineBackground(() => {
           ensureWalletUpgraded().catch(() => {});
           // Count what finished while the wallet was locked.
           if (Object.keys(pendingUsage).length > 0) commitPendingUsage().catch(() => {});
+          // Other open wallet views leave their unlock screen.
+          browser.runtime.sendMessage({ type: 'BYOKY_INTERNAL', action: 'sessionChanged' }).catch(() => {});
           processPendingAfterUnlock();
           return { success: true };
         }
@@ -1645,7 +1808,12 @@ export default defineBackground(() => {
         return { success: true };
 
       case 'isUnlocked':
-        return { unlocked: masterPassword !== null };
+        // A running password lockout too, so a wallet view opened during it
+        // shows it rather than a form that will be refused.
+        return {
+          unlocked: masterPassword !== null,
+          ...(passwordLockoutError() ? { lockedUntil: unlockLockedUntil } : {}),
+        };
 
       case 'isInitialized': {
         const data = await browser.storage.local.get('passwordHash');
@@ -3002,22 +3170,49 @@ export default defineBackground(() => {
   }
 
   /**
-   * Show the wallet for a request that needs the user. Chrome: the side
-   * panel (opened in the page's gesture if `panelOpened` says so; without
-   * a gesture Chrome refuses it), else the action popup, unless a wallet
-   * view is already open. Firefox and Safari, and Chrome's last resort: the
-   * popup in a window of its own.
+   * Show the wallet for a request that needs the user, from the requesting
+   * `tab`. Chrome: the side panel (opened in the page's gesture if
+   * `panelOpened` says so; without a gesture Chrome refuses it), else the
+   * action popup, unless a wallet view is already open. Firefox: nothing
+   * more when the wallet's sidebar is open in the tab's window. Firefox and
+   * Safari, and Chrome's last resort: the popup in a window of its own.
    */
-  function openWalletUI(tabId?: number, panelOpened?: Promise<boolean>) {
+  function openWalletUI(tab?: { id?: number; windowId?: number }, panelOpened?: Promise<boolean>) {
+    const tabId = tab?.id;
     void (async () => {
       if (typeof chrome !== 'undefined' && chrome.sidePanel && tabId) {
         if (await panelOpened) return;
         if (await chrome.sidePanel.open({ tabId }).then(() => true, () => false)) return;
         if (await walletViewOpen()) return;
         if (await chrome.action?.openPopup?.().then(() => true, () => false)) return;
+      } else if (await sidebarOpen(tab?.windowId)) {
+        return;
       }
-      openPopupWindow();
+      await openPopupWindow();
     })().catch(() => {});
+  }
+
+  /** Firefox: whether the wallet's sidebar is open in `windowId` (the topmost window if unknown). */
+  async function sidebarOpen(windowId?: number): Promise<boolean> {
+    try {
+      return (await browser.sidebarAction?.isOpen(windowId === undefined ? {} : { windowId })) === true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Firefox and Safari: whether a wallet page other than a sidebar is open
+   * (a wallet tab or window, Safari's toolbar popover); it shows the queue.
+   * A sidebar only counts in the requesting tab's window (sidebarOpen).
+   */
+  function walletPageOpen(): boolean {
+    try {
+      const popup = new URL(browser.runtime.getURL('/popup.html')).pathname;
+      return (browser.extension?.getViews?.() ?? []).some((view) => view.location.pathname === popup);
+    } catch {
+      return false;
+    }
   }
 
   /** Whether a popup, side panel or popup window of the wallet is open (Chrome 116+). */
@@ -3031,14 +3226,54 @@ export default defineBackground(() => {
     }
   }
 
-  function openPopupWindow() {
-    const popupUrl = browser.runtime.getURL('/popup.html');
-    browser.windows.create({
-      url: popupUrl,
+  // The window openPopupWindow opened for the wallet, while it is open: the
+  // next request focuses it rather than opening another. Kept in
+  // storage.session too, since Safari's background page restarts.
+  let walletWindowId: number | undefined;
+  let walletWindowShowing: Promise<void> | null = null;
+  let watchingWalletWindow = false;
+
+  // Forgets the window once it is closed. Listened for only once there is
+  // one: a listener added at startup would wake Chrome's worker for every
+  // window closed in the browser. A restarted worker doesn't hear of it, but
+  // focusing a closed window fails, and showWalletWindow opens a new one.
+  function watchWalletWindow() {
+    if (watchingWalletWindow) return;
+    watchingWalletWindow = true;
+    browser.windows?.onRemoved?.addListener((windowId: number) => {
+      if (windowId !== walletWindowId) return;
+      walletWindowId = undefined;
+      if (hasSessionStorage) browser.storage.session.remove('_walletWindow').catch(() => {});
+    });
+  }
+
+  /** Show the wallet in a window of its own: the one already open, else a new one. Concurrent calls share one. */
+  function openPopupWindow(): Promise<void> {
+    walletWindowShowing ??= showWalletWindow().finally(() => { walletWindowShowing = null; });
+    return walletWindowShowing;
+  }
+
+  async function showWalletWindow(): Promise<void> {
+    if (walletWindowId === undefined && hasSessionStorage) {
+      const stored = await browser.storage.session.get('_walletWindow').catch(() => ({} as Record<string, unknown>));
+      if (typeof stored._walletWindow === 'number') walletWindowId = stored._walletWindow;
+    }
+    if (walletWindowId !== undefined) {
+      // Rejected once the window is gone.
+      if (await browser.windows.update(walletWindowId, { focused: true }).then(() => true, () => false)) return;
+      walletWindowId = undefined;
+    }
+    if (walletPageOpen()) return;
+    const created = await browser.windows.create({
+      url: browser.runtime.getURL('/popup.html'),
       type: 'popup',
       width: 400,
       height: 600,
-    }).catch(() => {});
+    });
+    walletWindowId = created?.id;
+    if (walletWindowId === undefined) return;
+    watchWalletWindow();
+    if (hasSessionStorage) browser.storage.session.set({ _walletWindow: walletWindowId }).catch(() => {});
   }
 
   async function getStoredCredentials(): Promise<Credential[]> {

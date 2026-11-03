@@ -7,6 +7,12 @@ const NOTIFY_RETRY_MIN_MS = 1_000;
 const NOTIFY_RETRY_MAX_MS = 60_000;
 const NOTIFY_STABLE_MS = 10_000;
 
+// How often a port that waits on the background (a proxy request, a connect
+// left for the user) pings it. The background is stopped 30 s after its last
+// extension event (Chrome's MV3 worker, Safari's non-persistent page), and a
+// port that is merely open isn't one; a message on it is.
+const KEEPALIVE_MS = 15_000;
+
 // What the page gets when this script has been cut off from the extension.
 const WALLET_RELOADED = {
   code: 'WALLET_RELOADED',
@@ -73,15 +79,18 @@ export default defineContentScript({
         }
         proxyPorts.set(requestId, port);
 
+        port.postMessage(data);
+        // Until the response ends, the port closes or the page cancels.
+        keepAlive(port);
+
         // Stops tracking the request. False if the response already finished
         // or the page cancelled it.
         const untrack = () => {
           if (proxyPorts.get(requestId) !== port) return false;
           proxyPorts.delete(requestId);
+          stopKeepalive(port);
           return true;
         };
-
-        port.postMessage(data);
 
         port.onMessage.addListener((msg) => {
           const type = (msg as { type?: string } | null)?.type;
@@ -108,6 +117,7 @@ export default defineContentScript({
         const port = proxyPorts.get(data.requestId);
         if (!port) return;
         proxyPorts.delete(data.requestId);
+        stopKeepalive(port);
         // disconnect() doesn't fire this side's onDisconnect, so the page
         // gets no "Extension disconnected" error for its own cancel.
         port.disconnect();
@@ -140,14 +150,18 @@ export default defineContentScript({
         }
         let replied = false;
         port.postMessage(data);
+        // A connect can wait up to two minutes for the user.
+        keepAlive(port);
         port.onMessage.addListener((msg) => {
           replied = true;
+          stopKeepalive(port);
           // The background acknowledges a disconnect only so this port can
           // close; the page doesn't need it.
           if (!isDisconnect) reply(msg);
           port.disconnect();
         });
         port.onDisconnect.addListener(() => {
+          stopKeepalive(port);
           if (replied || isDisconnect) return;
           reply({
             type: 'BYOKY_ERROR',
@@ -249,6 +263,26 @@ export default defineContentScript({
       } catch {
         return false;
       }
+    }
+
+    // The keepalive timer of each port that waits on the background.
+    const keepalives = new Map<Runtime.Port, ReturnType<typeof setInterval>>();
+
+    /** Ping `port` every KEEPALIVE_MS until stopKeepalive(port); the background ignores the pings. */
+    function keepAlive(port: Runtime.Port) {
+      keepalives.set(port, setInterval(() => {
+        try {
+          port.postMessage({ type: 'BYOKY_KEEPALIVE' });
+        } catch {
+          // The port closed under us.
+          stopKeepalive(port);
+        }
+      }, KEEPALIVE_MS));
+    }
+
+    function stopKeepalive(port: Runtime.Port) {
+      clearInterval(keepalives.get(port));
+      keepalives.delete(port);
     }
 
     // A port to the background, or null once this script is cut off. The

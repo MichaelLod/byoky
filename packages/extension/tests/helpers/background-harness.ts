@@ -307,6 +307,8 @@ export async function startBackground(opts: HarnessOptions = {}): Promise<Harnes
     onConnect: new FakeEvent(),
     onInstalled: new FakeEvent(),
     sendMessage: vi.fn(async (msg: unknown) => { broadcasts.push(wire(msg)); return undefined; }),
+    // The background's keepalive call while it holds the worker.
+    getPlatformInfo: vi.fn(async () => ({ os: 'mac', arch: 'arm64' })),
     connectNative: vi.fn((host: string) => {
       const conn = new FakeNativeConnection(host);
       conn.handler = (m, c) => harness.nativeHost(m, c);
@@ -315,16 +317,38 @@ export async function startBackground(opts: HarnessOptions = {}): Promise<Harnes
     }),
   };
 
+  // Windows the background opened, by id (the first is 99), until closed.
+  const openWindows = new Set<number>();
+  let nextWindowId = 99;
+  const windows = {
+    create: vi.fn(async () => {
+      const id = nextWindowId++;
+      openWindows.add(id);
+      return { id };
+    }),
+    update: vi.fn(async (id: number) => {
+      if (!openWindows.has(id)) throw new Error(`Invalid window ID: ${id}`);
+      return { id };
+    }),
+    /** The user closes a window: onRemoved fires. */
+    remove: vi.fn(async (id: number) => {
+      if (openWindows.delete(id)) windows.onRemoved.emit(id);
+    }),
+    onRemoved: new FakeEvent(),
+  };
+
   const browser: any = {
     runtime,
     storage: { local, ...(session ? { session } : {}) },
-    action: { setBadgeText: vi.fn(), setBadgeBackgroundColor: vi.fn() },
-    windows: { create: vi.fn(async () => ({ id: 99 })) },
+    windows,
     alarms: { create: vi.fn(), clear: vi.fn(async () => true), onAlarm: new FakeEvent() },
   };
   if (opts.firefox) {
-    browser.sidebarAction = { toggle: vi.fn() };
-    browser.browserAction = { onClicked: new FakeEvent() };
+    // MV2: browserAction, and no action.
+    browser.sidebarAction = { toggle: vi.fn(), isOpen: vi.fn(async () => false) };
+    browser.browserAction = { onClicked: new FakeEvent(), setBadgeText: vi.fn(), setBadgeBackgroundColor: vi.fn() };
+  } else {
+    browser.action = { setBadgeText: vi.fn(), setBadgeBackgroundColor: vi.fn() };
   }
 
   const chrome = opts.chrome

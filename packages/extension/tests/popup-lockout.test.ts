@@ -105,6 +105,21 @@ describe('password lockout in the popup (F118)', () => {
     expect(errorText(view.container)).toBe('Incorrect password');
   });
 
+  // F052: the countdown started only from an unlock reply, so a wallet view
+  // opened during a lockout (the toolbar popup closes on every blur) showed
+  // a plain form that the background then refused.
+  it('shows a lockout still running when the wallet view opens', async () => {
+    bg.handlers.isUnlocked = () => ({ unlocked: false, lockedUntil: Date.now() + 54_000 });
+    view = await mount(App);
+    const { container } = view;
+    const button = () => container.querySelector<HTMLButtonElement>('button[type=submit]')!;
+    expect(errorText(container)).toBe('Too many attempts. Try again in 54s');
+    expect(button().disabled).toBe(true);
+    await tick(54_000);
+    expect(errorText(container)).toBeNull();
+    expect(button().disabled).toBe(false);
+  });
+
   it('clears a stale error once the user types again', async () => {
     bg.handlers.unlock = () => ({ success: false });
     view = await mount(App);
@@ -117,6 +132,17 @@ describe('password lockout in the popup (F118)', () => {
 });
 
 describe('export re-authentication shares the lockout countdown (F118)', () => {
+  it('shows a lockout still running when the wallet view opens (F052)', async () => {
+    bg.state.credentials = [{ id: 'c1', providerId: 'anthropic', label: 'Personal', authMethod: 'api_key', createdAt: 1 }];
+    bg.handlers.isUnlocked = () => ({ unlocked: true, lockedUntil: Date.now() + 30_000 });
+    view = await mount(App);
+    const { container } = view;
+    await run(() => useWalletStore.getState().navigate('settings'));
+    await run(() => buttonByText(container, 'Export backup')!.click());
+    expect(errorText(container)).toBe('Too many attempts. Try again in 30s');
+    expect(container.querySelector<HTMLButtonElement>('button[type=submit]')!.disabled).toBe(true);
+  });
+
   it('counts the lockout down in the export form', async () => {
     bg.state.credentials = [{ id: 'c1', providerId: 'anthropic', label: 'Personal', authMethod: 'api_key', createdAt: 1 }];
     bg.handlers.exportVault = () => ({

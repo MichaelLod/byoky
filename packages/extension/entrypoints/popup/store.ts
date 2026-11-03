@@ -49,6 +49,13 @@ interface WalletState {
   limitsHold: 'settings' | 'usage' | null;
   currentPage: Page;
   modal: 'add-credential' | null;
+  /**
+   * How many forms the current page has open (useFormInUse). A request that
+   * comes in meanwhile doesn't take the view over; App shows a banner.
+   */
+  formsInUse: number;
+  /** The page the approval screen was opened over, to go back to once the queue is empty. */
+  returnTo: Page | null;
   /** Only while the popup first asks the background what state the wallet is in. */
   loading: boolean;
   /** A form is waiting on the background (unlock, setup, adding a key); the page stays up. */
@@ -111,6 +118,7 @@ const LOCKED_STATE = {
   appGroups: {},
   currentPage: 'unlock',
   modal: null,
+  returnTo: null,
 } satisfies Partial<WalletState>;
 
 async function sendInternal(action: string, payload?: unknown): Promise<Record<string, unknown>> {
@@ -138,6 +146,8 @@ export const useWalletStore = create<WalletState>((set, get) => ({
   limitsHold: null,
   currentPage: 'unlock',
   modal: null,
+  formsInUse: 0,
+  returnTo: null,
   loading: true,
   submitting: false,
   error: null,
@@ -160,6 +170,10 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       isUnlocked: unlocked,
       currentPage: page,
       showRetiredFeaturesNotice: noticeResult.show === true,
+      // A lockout still running (the unlock form and the export form share
+      // it): the toolbar popup closes on every blur, so reopening it during
+      // one is the usual case.
+      lockedUntil: lockedUntilFrom(unlockResult),
       loading: false,
     });
 
@@ -272,11 +286,18 @@ export const useWalletStore = create<WalletState>((set, get) => ({
   setLockedUntil: (lockedUntil) => set({ lockedUntil }),
 
   // The background also locks on its own (auto-lock after idle) and only
-  // announces it as a session change, so the popup has to ask.
+  // announces it as a session change, so the popup has to ask. The same
+  // goes for an unlock in another wallet view: this one follows it, to the
+  // waiting request if there is one. Not while this view's own unlock runs;
+  // it lands on its own.
   syncLockState: async () => {
     const { unlocked } = await sendInternal('isUnlocked');
     if (!unlocked && get().isUnlocked) {
       set({ ...LOCKED_STATE, error: null });
+    } else if (unlocked && !get().isUnlocked && get().isInitialized && !get().submitting) {
+      set({ isUnlocked: true, currentPage: 'dashboard', error: null, lockedUntil: null });
+      await get().refreshData();
+      if (get().pendingApprovals.length > 0) set({ currentPage: 'approval' });
     }
     return unlocked === true;
   },
@@ -293,6 +314,9 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       set({ modal: page, error: null });
       return;
     }
+    // The approval screen has no nav: once the queue is empty it goes back
+    // to where the user was.
+    if (page === 'approval' && get().currentPage !== 'approval') set({ returnTo: get().currentPage });
     set({ currentPage: page, error: null, modal: null });
   },
 
@@ -489,6 +513,7 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       limitsHold: null,
       currentPage: 'setup',
       modal: null,
+      returnTo: null,
       error: null,
     });
   },
@@ -524,7 +549,7 @@ export const useWalletStore = create<WalletState>((set, get) => ({
     const leaveApproval = get().currentPage === 'approval' && pendingApprovals.length === 0 && !get().error;
 
     set({
-      ...(leaveApproval ? { currentPage: 'dashboard' as const } : {}),
+      ...(leaveApproval ? { currentPage: get().returnTo ?? 'dashboard', returnTo: null } : {}),
       credentials: metas,
       sessions: (sessionResult.sessions ?? []) as Session[],
       requestLog: (logResult.log ?? []) as RequestLogEntry[],

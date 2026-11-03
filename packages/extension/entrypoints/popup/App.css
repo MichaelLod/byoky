@@ -315,6 +315,34 @@ html.popup .app {
   display: block;
 }
 
+/* A connection request waiting while the view stays where the user is. */
+.pending-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px 8px 14px;
+  background: var(--violet-soft);
+  border-bottom: 1px solid var(--violet);
+}
+
+.pending-banner-raven {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+.pending-banner-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--lilac);
+  overflow-wrap: anywhere;
+}
+
+.pending-banner .btn {
+  flex-shrink: 0;
+}
+
 /* ── Content ── */
 
 .content {

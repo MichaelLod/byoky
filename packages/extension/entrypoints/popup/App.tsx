@@ -12,6 +12,7 @@ import { Settings } from './pages/Settings';
 import { FloatingActionMenu } from './components/FloatingActionMenu';
 import { Raven } from './components/Raven';
 import { Modal } from './components/Modal';
+import { describeOrigin } from './utils/origin';
 
 export default function App() {
   const {
@@ -33,14 +34,21 @@ export default function App() {
       const msg = message as Record<string, string> | null;
       if (!msg || msg.type !== 'BYOKY_INTERNAL') return;
       if (msg.action === 'newPendingApproval') {
-        // While locked, the unlock screen lists what is waiting instead.
+        // While locked, the unlock screen lists what is waiting instead,
+        // unless the wallet was unlocked in another view: then this one
+        // follows it (syncLockState).
         if (!useWalletStore.getState().isUnlocked) {
-          useWalletStore.getState().refreshPending();
+          useWalletStore.getState().syncLockState().then((unlocked) => {
+            if (!unlocked) useWalletStore.getState().refreshPending();
+          });
           return;
         }
         useWalletStore.getState().refreshData().then(() => {
-          if (useWalletStore.getState().pendingApprovals.length > 0) {
-            useWalletStore.getState().navigate('approval');
+          const { pendingApprovals: queue, modal: openModal, formsInUse, currentPage: page, navigate } = useWalletStore.getState();
+          // Not over a form in use (what was typed would be lost) or a page
+          // with one (Settings): there the banner says a request waits.
+          if (queue.length > 0 && openModal === null && formsInUse === 0 && APPROVAL_OVER_PAGES.includes(page)) {
+            navigate('approval');
           }
         });
       } else if (msg.action === 'sessionChanged') {
@@ -160,6 +168,7 @@ export default function App() {
           <StatusRaven key={nodFor ?? 'none'} nodFor={nodFor} noddedFor={noddedFor} />
         </div>
       )}
+      {showNav && <PendingRequestBanner />}
       <main className={`content ${showFab ? 'has-fab' : ''}`}>
         <div key={currentPage} className="page-enter">
           {/* Starts over with each page and each request at the head of the queue. */}
@@ -182,6 +191,38 @@ export default function App() {
         </Modal>
       )}
       <div className="scanlines" aria-hidden="true" />
+    </div>
+  );
+}
+
+// The pages an incoming request may replace with the approval screen; they
+// hold no form. A form on them (an editor, the add-credential sheet) says it
+// is in use (useFormInUse).
+const APPROVAL_OVER_PAGES: string[] = ['dashboard', 'connect', 'request-history', 'approval'];
+
+/**
+ * A connection request waiting while the view stays where the user is (a
+ * form in use, Settings). The background drops a request after two
+ * minutes, so this is hard to miss.
+ */
+function PendingRequestBanner() {
+  const { pendingApprovals, navigate } = useWalletStore();
+  const head = pendingApprovals[0];
+  if (!head) return null;
+  // Outside the page's error boundary, so it takes nothing on trust.
+  const app = typeof head.appOrigin === 'string' ? describeOrigin(head.appOrigin).label : 'An app';
+  return (
+    <div className="pending-banner" role="status">
+      <span className="pending-banner-raven" aria-hidden="true">
+        <Raven view="head" size={30} state="alert" />
+      </span>
+      <span className="pending-banner-text">
+        {app} wants to connect
+        {pendingApprovals.length > 1 && ` (+${pendingApprovals.length - 1} more)`}
+      </span>
+      <button type="button" className="btn btn-primary btn-sm" onClick={() => navigate('approval')}>
+        Review
+      </button>
     </div>
   );
 }
