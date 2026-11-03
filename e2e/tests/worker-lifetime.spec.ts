@@ -87,7 +87,7 @@ function listen(server: http.Server): Promise<number> {
 
 async function devToolsPort(profile: string): Promise<number> {
   const file = path.join(profile, 'DevToolsActivePort');
-  for (let i = 0; i < 100; i++) {
+  for (let i = 0; i < 300; i++) {
     if (fs.existsSync(file)) {
       const port = Number(fs.readFileSync(file, 'utf-8').split('\n')[0]);
       if (port > 0) return port;
@@ -203,6 +203,9 @@ test.describe('the extension background outlives a long request and a pending co
       '--no-first-run', '--no-default-browser-check', '--disable-default-apps',
       // Never touch the macOS login keychain (it would prompt the user).
       '--use-mock-keychain', '--password-store=basic',
+      // As Playwright does on Linux: Ubuntu 24.04+ blocks the unprivileged
+      // user namespaces Chrome's sandbox needs, so it would exit at once.
+      ...(process.platform === 'linux' ? ['--no-sandbox'] : []),
       'about:blank',
     ], { stdio: 'ignore' });
 
