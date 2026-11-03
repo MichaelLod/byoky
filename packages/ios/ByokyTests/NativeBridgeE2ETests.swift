@@ -32,6 +32,28 @@ final class NativeBridgeE2ETests: XCTestCase {
         XCTAssertEqual(h.wallet.requestLogs.first?.statusCode, 200)
     }
 
+    /// Headers naming the account behind the key never reach the page (F040).
+    @MainActor
+    func testAccountHeadersAreStripped() async throws {
+        let h = try await BridgeHarness.make(self)
+        StubUpstream.script(.init(headers: [
+            "Content-Type": "application/json",
+            "openai-organization": "user-victim123",
+            "openai-project": "proj_abc",
+            "x-request-id": "req_2",
+            "x-ratelimit-limit-tokens": "30000000",
+        ], chunks: [Data("{}".utf8)]))
+
+        let replies = try await h.proxy(body: #"{"model":"gpt-5.5","messages":[]}"#)
+
+        let headers = try XCTUnwrap(replies.first?["headers"] as? [String: String])
+        XCTAssertNil(headers["openai-organization"])
+        XCTAssertNil(headers["openai-project"])
+        XCTAssertEqual(headers["x-request-id"], "req_2")
+        XCTAssertEqual(headers["x-ratelimit-limit-tokens"], "30000000")
+        XCTAssertEqual(headers["content-type"], "application/json")
+    }
+
     @MainActor
     func testEventStreamPassesThroughAndEndsWithDone() async throws {
         let h = try await BridgeHarness.make(self)
@@ -264,6 +286,43 @@ final class NativeBridgeE2ETests: XCTestCase {
         XCTAssertNil(providers["openai"])
     }
 
+    // MARK: - Providers without a fixed host (F020)
+
+    /// The SDK's listModels and a createFetch app know only the registry's
+    /// placeholder host; the request goes to the credential's endpoint.
+    @MainActor
+    func testPlaceholderHostGoesToTheCredentialsEndpoint() async throws {
+        let h = try await BridgeHarness.make(self, provider: "azure_openai", baseUrl: "https://myres.openai.azure.com")
+        StubUpstream.script(.init(chunks: [Data("{}".utf8)]))
+
+        let replies = try await h.proxy(
+            providerId: "azure_openai",
+            url: "https://YOUR_RESOURCE.openai.azure.com/openai/v1/chat/completions?api-version=preview",
+            body: #"{"model":"gpt-5.5","messages":[]}"#
+        )
+
+        XCTAssertEqual(replies.last?.type, "BYOKY_PROXY_RESPONSE_DONE")
+        XCTAssertEqual(StubUpstream.requests.first?.url?.absoluteString,
+                       "https://myres.openai.azure.com/openai/v1/chat/completions?api-version=preview")
+        XCTAssertEqual(h.wallet.requestLogs.first?.url, "https://myres.openai.azure.com/openai/v1/chat/completions")
+    }
+
+    /// Any other host is still refused.
+    @MainActor
+    func testAnotherHostIsStillRefused() async throws {
+        let h = try await BridgeHarness.make(self, provider: "azure_openai", baseUrl: "https://myres.openai.azure.com")
+
+        let replies = try await h.proxy(
+            providerId: "azure_openai",
+            url: "https://evil.openai.azure.com/openai/v1/chat/completions",
+            body: #"{"model":"gpt-5.5","messages":[]}"#
+        )
+
+        XCTAssertEqual(replies.last?.type, "BYOKY_PROXY_RESPONSE_ERROR")
+        XCTAssertEqual((replies.last?["error"] as? [String: Any])?["code"] as? String, "INVALID_URL")
+        XCTAssertTrue(StubUpstream.requests.isEmpty)
+    }
+
     // MARK: - Pinned model (R3-05)
 
     /// A group pinning another OpenAI model fits the app's request to it.
@@ -284,6 +343,20 @@ final class NativeBridgeE2ETests: XCTestCase {
         XCTAssertEqual(sent["max_completion_tokens"] as? Int, 64)
         XCTAssertNil(sent["max_tokens"])
         XCTAssertNil(sent["temperature"])
+    }
+
+    /// An embeddings call keeps the app's model under a pinned chat model,
+    /// which OpenAI would refuse there (F003).
+    @MainActor
+    func testPinnedModelLeavesEmbeddingsAlone() async throws {
+        let h = try await BridgeHarness.make(self, pinnedModel: "gpt-5.5-mini")
+        StubUpstream.script(.init(chunks: [Data(#"{"data":[],"usage":{"prompt_tokens":1,"total_tokens":1}}"#.utf8)]))
+        let body = #"{"model":"text-embedding-3-small","input":"hello"}"#
+
+        let replies = try await h.proxy(url: "https://api.openai.com/v1/embeddings", body: body)
+
+        XCTAssertEqual(replies.last?.type, "BYOKY_PROXY_RESPONSE_DONE")
+        XCTAssertEqual(StubUpstream.bodies.first.map { String(decoding: $0, as: UTF8.self) }, body)
     }
 
     /// A request the pinned model can't serve gets a clear error and goes nowhere.
@@ -482,10 +555,12 @@ final class BridgeHarness: NSObject, WKNavigationDelegate {
 
     /// A wallet with one `provider` key and, for providers other than
     /// OpenAI, a group routing the app to it (cross-family translation).
-    /// `pinnedModel` puts the app in a group on `provider` pinning that model.
+    /// `baseUrl` is the key's endpoint (Azure, local servers); `pinnedModel`
+    /// puts the app in a group on `provider` pinning that model.
     static func make(
         _ test: XCTestCase,
         provider: String = "openai",
+        baseUrl: String? = nil,
         pinnedModel: String? = nil,
         maxTranslatedErrorBytes: Int = NativeBridgeHandler.defaultMaxTranslatedErrorBytes
     ) async throws -> BridgeHarness {
@@ -500,7 +575,7 @@ final class BridgeHarness: NSObject, WKNavigationDelegate {
             WalletStore.shared.resetWallet()
             StubUpstream.reset()
         }
-        try wallet.addCredential(providerId: provider, label: "Test", apiKey: apiKey)
+        try wallet.addCredential(providerId: provider, label: "Test", apiKey: apiKey, baseUrl: baseUrl)
         if let pinnedModel {
             let group = try wallet.createGroup(name: "Pinned", providerId: provider, model: pinnedModel)
             try wallet.setAppGroup(origin: origin, groupId: group.id)

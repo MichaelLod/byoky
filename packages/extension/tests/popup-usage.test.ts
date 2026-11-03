@@ -103,4 +103,24 @@ describe('each credential card shows its own usage (F127)', () => {
     expect(sheet.textContent).toContain('claude-sonnet-4-5');
     expect(sheet.textContent).not.toContain('claude-haiku-4-5');
   });
+  // F066: By Model named the model the app asked for, which a routed or
+  // pinned request's key never served.
+  it('the usage sheet lists the models the key served', async () => {
+    bg.state.credentials = [key('a1', 'anthropic', 'Personal'), key('g1', 'gemini', 'Gemini')];
+    bg.state.log = [
+      entry({ providerId: 'anthropic', credentialId: 'g1', actualProviderId: 'gemini', model: 'claude-haiku-4-5-20251001', actualModel: 'gemini-3.6-flash' }),
+      entry({ providerId: 'gemini', credentialId: 'g1', model: 'gemini-2.5-flash' }),
+      entry({ providerId: 'anthropic', credentialId: 'a1', model: 'claude-haiku-4-5-20251001', actualModel: 'claude-sonnet-5-5' }),
+    ];
+    view = await mount(App);
+    const { container } = view;
+    const models = () => [...container.querySelectorAll('[role=dialog] .usage-model-name')].map((m) => m.textContent);
+
+    await run(() => container.querySelector<HTMLButtonElement>('button[aria-label="View usage for Gemini"]')!.click());
+    expect(models().sort()).toEqual(['gemini-2.5-flash', 'gemini-3.6-flash']);
+    await run(() => container.querySelector<HTMLButtonElement>('[role=dialog] button[aria-label="Close"]')!.click());
+
+    await run(() => container.querySelector<HTMLButtonElement>('button[aria-label="View usage for Personal"]')!.click());
+    expect(models()).toEqual(['claude-sonnet-5-5']);
+  });
 });

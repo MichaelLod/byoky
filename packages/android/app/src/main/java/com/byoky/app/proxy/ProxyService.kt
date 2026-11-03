@@ -239,7 +239,9 @@ class ProxyService(
                 requestBody = if (binaryBody) null else body,
                 usage = counted,
                 actualProviderId = routing?.translation?.dstProviderId ?: routing?.swapToProviderId,
-                actualModel = routing?.translation?.dstModel ?: routing?.swapDstModel ?: routing?.modelOverride,
+                // A pin isn't applied to embeddings, audio and the like.
+                actualModel = routing?.translation?.dstModel ?: routing?.swapDstModel
+                    ?: routing?.modelOverride?.takeIf { EndpointPolicy.isModelPinnable(appUrl) },
                 groupId = group?.id,
             )
         } catch (_: Exception) {
@@ -403,9 +405,14 @@ class ProxyService(
     ) {
         val meter = exchange.meter
         val providerId = provider.id
+        // An app knows only the registry's placeholder host for a provider
+        // without a fixed one (Azure's YOUR_RESOURCE, a local server's
+        // default port): it goes to the credential's own server (F020).
         // Gemini names the model in the URL (and ignores one in the body), so
         // a pinned model goes there.
-        val target = modelOverride?.takeIf { providerId == "gemini" }?.let { RoutingResolver.geminiUrl(url, it) } ?: url
+        val target = UpstreamPolicy.rebase(provider, url, credential.baseUrl)
+            ?: modelOverride?.takeIf { providerId == "gemini" }?.let { RoutingResolver.geminiUrl(url, it) }
+            ?: url
         val upstreamUrl = allowedTarget(provider, target, credential)
         val apiKey = apiKey(credential, provider.name)
 
@@ -659,7 +666,7 @@ class ProxyService(
         val out = mutableMapOf<String, String>()
         for ((name, values) in response.headers.toMultimap()) {
             val lower = name.lowercase()
-            if (lower in SENSITIVE_RESPONSE_HEADERS || lower in HOP_BY_HOP_RESPONSE_HEADERS) continue
+            if (lower in HeaderPolicy.STRIPPED_RESPONSE_HEADERS || lower in HOP_BY_HOP_RESPONSE_HEADERS) continue
             out[lower] = values.joinToString(", ")
         }
         return out
@@ -733,10 +740,15 @@ class ProxyService(
             // A body core left as it was (not JSON, already the model) keeps its bytes.
             is ModelRewrite.Body -> if (rewrite.body == text) body else rewrite.body.toByteArray(Charsets.UTF_8)
             is ModelRewrite.Refused -> throw ProxyError(rewrite.code, rewrite.message, 400)
+            // Embeddings, audio and the like keep the app's model, as in core.
             // A Gemini URL that names the model gets the pin instead (a body
             // `model` would be ignored); Gemini's OpenAI-compatible endpoint
             // takes it from the body like everyone else.
-            null -> if (providerId == "gemini" && RoutingResolver.geminiUrl(url, model) != null) body else rewriteModel(body, model)
+            null -> when {
+                !EndpointPolicy.isModelPinnable(url) -> body
+                providerId == "gemini" && RoutingResolver.geminiUrl(url, model) != null -> body
+                else -> rewriteModel(body, model)
+            }
         }
     }
 
@@ -844,10 +856,6 @@ class ProxyService(
 
         fun endpointNotAllowed() = ProxyError(EndpointPolicy.ERROR_CODE, EndpointPolicy.ERROR_MESSAGE, EndpointPolicy.ERROR_STATUS)
 
-        val SENSITIVE_RESPONSE_HEADERS = setOf(
-            "server", "x-request-id", "x-cloud-trace-context",
-            "set-cookie", "set-cookie2", "alt-svc", "via",
-        )
         // The body is re-emitted as decoded text chunks, so framing and
         // encoding headers from upstream no longer describe it.
         private val HOP_BY_HOP_RESPONSE_HEADERS = setOf(

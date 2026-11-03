@@ -21,6 +21,7 @@ import { anthropicAdapter } from './adapters/anthropic.js';
 import { openaiAdapter } from './adapters/openai.js';
 import { geminiAdapter } from './adapters/gemini.js';
 import { cohereAdapter } from './adapters/cohere.js';
+import { isModelPinnableRequest } from '../proxy-utils.js';
 
 // ─── Adapter registration ─────────────────────────────────────────────────
 
@@ -58,8 +59,9 @@ export function translateRequest(ctx: TranslationContext, body: string): string 
  *
  * A body that already names the model, or isn't a JSON object, is returned
  * as it was, as is the body of a call whose URL names the model (Gemini's
- * generateContent; see rewriteRequestUrl). Throws TranslationError when the
- * model can't serve the request at all.
+ * generateContent; see rewriteRequestUrl) and of one the pin doesn't apply
+ * to (embeddings, audio, images and the like; see isModelPinnableRequest).
+ * Throws TranslationError when the model can't serve the request at all.
  *
  * `url` is the URL the app called; `dstProviderId` the provider the request
  * goes to (the same family as the app's).
@@ -68,6 +70,8 @@ export function rewriteRequestModel(
   ctx: { dstProviderId: ProviderId; dstModel: string; url: string },
   body: string,
 ): string {
+  // A pinned chat model would only get an embeddings or speech call refused.
+  if (!isModelPinnableRequest(ctx.url)) return body;
   let parsed: unknown;
   try {
     parsed = JSON.parse(body);

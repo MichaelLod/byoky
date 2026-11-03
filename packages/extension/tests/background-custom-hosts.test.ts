@@ -84,6 +84,26 @@ describe('background: bridge requests for providers without a fixed host', () =>
     expect(h.fetch.mock.calls[1][0]).toBe('http://localhost:11500/v1/chat/completions');
   });
 
+  it('takes only the origin from a credential that has a path', async () => {
+    // LM Studio's docs give OpenAI clients http://localhost:1234/v1; the
+    // request path already carries the /v1.
+    for (const [baseUrl, sent] of [
+      ['http://localhost:1234/v1', 'http://localhost:1234/v1/chat/completions'],
+      ['http://127.0.0.1:1234/v1', 'http://127.0.0.1:1234/v1/chat/completions'],
+    ]) {
+      const h = await startBackground({ local: await walletStorage([{ id: 'lm', providerId: 'lm_studio', key: '', baseUrl }]) });
+      await h.unlock();
+      const { payload } = await connectApproved(h, APP, { providers: [{ id: 'lm_studio' }] });
+      const bridge = await startBridge(h, payload.sessionKey);
+      h.fetch.mockImplementation(async () => jsonResponse({ choices: [] }));
+      expect((await bridgeRequest(h, bridge, payload.sessionKey, {
+        providerId: 'lm_studio',
+        url: 'http://localhost:1234/v1/chat/completions',
+      })).type, baseUrl).toBe('proxy_http_response_meta');
+      expect(h.fetch.mock.calls[0][0], baseUrl).toBe(sent);
+    }
+  });
+
   it('still refuses a request naming another host', async () => {
     const h = await startBackground({ local: await walletStorage(CUSTOM) });
     await h.unlock();
@@ -94,6 +114,78 @@ describe('background: bridge requests for providers without a fixed host', () =>
       url: 'https://evil.openai.azure.com/openai/deployments/d/chat/completions',
     });
     expect(reply).toMatchObject({ type: 'proxy_http_error', error: 'Request URL does not match the credential\'s registered base URL' });
+    expect(h.fetch).not.toHaveBeenCalled();
+  });
+});
+
+describe('background: app requests for providers without a fixed host', () => {
+  // F020: the SDK's listModels and createFetch know only the registry's
+  // placeholder host, which the page path refused (F029 fixed the bridge).
+  const CUSTOM: CredentialSpec[] = [
+    { id: 'az', providerId: 'azure_openai', key: 'az-key', baseUrl: 'https://myres.openai.azure.com' },
+    { id: 'ol', providerId: 'ollama', key: '', baseUrl: 'http://localhost:11500' },
+  ];
+
+  async function connected() {
+    const h = await startBackground({ local: await walletStorage(CUSTOM) });
+    await h.unlock();
+    const { payload } = await connectApproved(h, APP, { providers: [{ id: 'azure_openai' }, { id: 'ollama' }] });
+    return { h, sessionKey: payload.sessionKey as string };
+  }
+
+  it('sends a placeholder-host request to the credential\'s own host', async () => {
+    const { h, sessionKey } = await connected();
+    h.fetch.mockImplementation(async () => jsonResponse({ data: [] }));
+
+    const azure = await h.proxy(APP, {
+      sessionKey, providerId: 'azure_openai', method: 'GET', body: undefined,
+      url: 'https://YOUR_RESOURCE.openai.azure.com/openai/models?api-version=2024-10-21',
+    }).result;
+    expect(azure.error).toBeUndefined();
+    expect(h.fetch.mock.calls[0][0]).toBe('https://myres.openai.azure.com/openai/models?api-version=2024-10-21');
+    // Logged without the query, at the real host.
+    await h.until(() => requestLog(h).length === 1);
+    expect(requestLog(h)[0].url).toBe('https://myres.openai.azure.com/openai/models');
+
+    const ollama = await h.proxy(APP, {
+      sessionKey, providerId: 'ollama', method: 'GET', body: undefined, url: 'http://localhost:11434/api/tags',
+    }).result;
+    expect(ollama.error).toBeUndefined();
+    expect(h.fetch.mock.calls[1][0]).toBe('http://localhost:11500/api/tags');
+  });
+
+  it('takes only the origin from a credential that has a path', async () => {
+    // LM Studio's docs give OpenAI clients http://localhost:1234/v1, and the
+    // app's path already carries the /v1: a request on that origin goes out
+    // unchanged, and one to the placeholder gets only the credential's origin.
+    for (const [baseUrl, sent] of [
+      ['http://localhost:1234/v1', 'http://localhost:1234/v1/chat/completions'],
+      ['http://127.0.0.1:1234/v1', 'http://127.0.0.1:1234/v1/chat/completions'],
+    ]) {
+      const h = await startBackground({ local: await walletStorage([{ id: 'lm', providerId: 'lm_studio', key: '', baseUrl }]) });
+      await h.unlock();
+      const { payload } = await connectApproved(h, APP, { providers: [{ id: 'lm_studio' }] });
+      h.fetch.mockImplementation(async () => jsonResponse({ choices: [] }));
+      const r = await h.proxy(APP, {
+        sessionKey: payload.sessionKey, providerId: 'lm_studio',
+        url: 'http://localhost:1234/v1/chat/completions', body: '{"messages":[]}',
+      }).result;
+      expect(r.error, baseUrl).toBeUndefined();
+      expect(h.fetch.mock.calls[0][0], baseUrl).toBe(sent);
+      await h.until(() => requestLog(h).length === 1);
+      expect(requestLog(h)[0].url, baseUrl).toBe(sent);
+    }
+  });
+
+  it('still refuses a request naming another host', async () => {
+    const { h, sessionKey } = await connected();
+    for (const [providerId, url] of [
+      ['azure_openai', 'https://evil.openai.azure.com/openai/deployments/d/chat/completions'],
+      ['ollama', 'http://127.0.0.1:11434/api/chat'],
+    ]) {
+      const r = await h.proxy(APP, { sessionKey, providerId, url, body: '{"messages":[]}' }).result;
+      expect(r.error?.error.code, url).toBe('INVALID_URL');
+    }
     expect(h.fetch).not.toHaveBeenCalled();
   });
 });

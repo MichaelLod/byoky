@@ -230,3 +230,67 @@ describe('background: bridge HTTP proxy sessions', () => {
     expect(h.session!.data._bridgeKey).toBeUndefined();
   });
 });
+
+// F062: neither side closed a finished request's port, so one port pair
+// (and the request it carried) stayed open per call for the life of the
+// worker or the tab.
+describe('background: a finished request\'s port', () => {
+  async function connected() {
+    const h = await startBackground({ local: await walletStorage([{ id: 'a1', providerId: 'anthropic', key: 'sk-ant-1' }]) });
+    await h.unlock();
+    const { payload } = await connectApproved(h, APP, { providers: [{ id: 'anthropic', required: true }] });
+    return { h, sessionKey: payload.sessionKey as string };
+  }
+
+  const sse = (...events: string[]) => new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const e of events) controller.enqueue(new TextEncoder().encode(e));
+      controller.close();
+    },
+  });
+  const STREAM = [
+    'event: message_start\ndata: {"type":"message_start","message":{"usage":{"input_tokens":5}}}\n\n',
+    'event: message_delta\ndata: {"type":"message_delta","usage":{"output_tokens":7}}\n\n',
+  ];
+
+  it('is closed by the background once usage is counted, success or not', async () => {
+    const { h, sessionKey } = await connected();
+    h.fetch.mockImplementation(async () => jsonResponse({ usage: { input_tokens: 3, output_tokens: 4 } }));
+    const json = h.proxy(APP, chat(sessionKey, { body: '{"model":"claude-x","max_tokens":10,"messages":[]}' }));
+    expect((await json.result).done).toBe(true);
+    await h.until(() => json.port.closedByBackground, 5_000, 'the port closed');
+    // Closed after the usage was recorded, which the close didn't change.
+    expect(usage(h)).toBe(7);
+    expect(requestLog(h)[0]).toMatchObject({ status: 200, inputTokens: 3, outputTokens: 4 });
+
+    h.fetch.mockImplementation(async () => new Response(sse(...STREAM), { headers: { 'content-type': 'text/event-stream' } }));
+    const stream = h.proxy(APP, chat(sessionKey));
+    expect((await stream.result).done).toBe(true);
+    await h.until(() => stream.port.closedByBackground, 5_000, 'the port closed');
+    expect(usage(h)).toBe(19);
+    // DONE was the last thing the page got; no error followed it.
+    expect(stream.port.received.at(-1).type).toBe('BYOKY_PROXY_RESPONSE_DONE');
+  });
+
+  it('is closed after a refusal or a failed stream too', async () => {
+    const { h, sessionKey } = await connected();
+    const refused = h.proxy(APP, chat(sessionKey, { url: 'https://api.anthropic.com/v1/files', method: 'GET' }));
+    expect((await refused.result).error.error.code).toBe('ENDPOINT_NOT_ALLOWED');
+    await h.until(() => refused.port.closedByBackground, 5_000, 'the port closed');
+
+    const expired = h.proxy(APP, chat('not-a-session'));
+    expect((await expired.result).error.error.code).toBe('SESSION_EXPIRED');
+    await h.until(() => expired.port.closedByBackground, 5_000, 'the port closed');
+
+    h.fetch.mockImplementation(async () => new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(STREAM[0]));
+        controller.error(new TypeError('network error'));
+      },
+    }), { headers: { 'content-type': 'text/event-stream' } }));
+    const cut = h.proxy(APP, chat(sessionKey));
+    expect((await cut.result).error.error.code).toBe('PROXY_ERROR');
+    await h.until(() => cut.port.closedByBackground, 5_000, 'the port closed');
+    expect(requestLog(h)[0].status).toBe(200);
+  });
+});

@@ -50,7 +50,56 @@ final class ProxyPolicyTests: XCTestCase {
         }
     }
 
+    /// F003. Mirrors the `isModelPinnableRequest` cases in core's proxy-utils.test.ts.
+    func testPinnedModelAppliesToGenerationAndTokenCountsOnly() {
+        let gemini = "https://generativelanguage.googleapis.com/v1beta/models"
+        let cases: [(String, Bool)] = [
+            ("https://api.openai.com/v1/chat/completions", true),
+            ("https://api.openai.com/v1/completions", true),
+            ("https://api.openai.com/v1/responses", true),
+            ("https://api.openai.com/v1/responses/input_tokens", true),
+            ("https://api.anthropic.com/v1/messages?beta=true", true),
+            ("https://api.anthropic.com/v1/messages/count_tokens", true),
+            ("https://api.cohere.com/v2/chat", true),
+            ("http://localhost:11434/api/generate", true),
+            ("http://localhost:11434/api/chat", true),
+            ("https://api.groq.com/openai/v1/chat/completions", true),
+            ("\(gemini)/gemini-2.5-flash:generateContent", true),
+            ("\(gemini)/gemini-2.5-flash:streamGenerateContent?alt=sse", true),
+            ("\(gemini)/gemini-2.5-flash:countTokens", true),
+            ("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", true),
+            ("https://api.openai.com/v1/embeddings", false),
+            ("https://api.openai.com/v1/moderations", false),
+            ("https://api.openai.com/v1/audio/speech", false),
+            ("https://api.openai.com/v1/audio/transcriptions", false),
+            ("https://api.openai.com/v1/images/generations", false),
+            ("https://api.openai.com/v1/images/edits", false),
+            ("https://api.cohere.com/v2/embed", false),
+            ("https://api.cohere.com/v2/rerank", false),
+            ("https://api.mistral.ai/v1/fim/completions", false),
+            ("http://localhost:11434/api/embed", false),
+            ("http://localhost:11434/api/show", false),
+            ("\(gemini)/text-embedding-004:embedContent", false),
+            ("\(gemini)/text-embedding-004:batchEmbedContents", false),
+            ("https://api.openai.com/v1/models", false),
+            ("not a url", false),
+        ]
+        for (url, expected) in cases {
+            XCTAssertEqual(ProxyPolicy.isModelPinnableRequest(url: url), expected, url)
+        }
+    }
+
     // MARK: - Headers
+
+    /// F040. packages/core/tests/vectors/response-headers.json, shared with
+    /// core's `STRIPPED_RESPONSE_HEADERS` and Android.
+    func testResponseHeaderDenyListMatchesTheSharedVectors() throws {
+        let vectors = try SharedVectors.load("response-headers")
+        let stripped = try XCTUnwrap(vectors["stripped"] as? [String])
+        let kept = try XCTUnwrap(vectors["kept"] as? [String])
+        XCTAssertEqual(ProxyPolicy.strippedResponseHeaders, Set(stripped))
+        XCTAssertTrue(ProxyPolicy.strippedResponseHeaders.isDisjoint(with: kept))
+    }
 
     func testOnlyAllowlistedHeadersAreForwarded() {
         let forwarded = ProxyPolicy.forwardedHeaders([

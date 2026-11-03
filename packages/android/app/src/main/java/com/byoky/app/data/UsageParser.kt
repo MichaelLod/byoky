@@ -1,5 +1,7 @@
 package com.byoky.app.data
 
+import com.byoky.app.proxy.RoutingResolver
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import org.json.JSONObject
 
 /**
@@ -21,6 +23,14 @@ object UsageParser {
             null
         }
     }
+
+    /**
+     * The model a logged request names: its body's, or for Gemini, which
+     * names it in the path (`…/models/{model}:generateContent`), its URL's,
+     * as the extension logs it (F066).
+     */
+    fun loggedModel(providerId: String, url: String, body: ByteArray?): String? =
+        parseModel(body) ?: if (providerId == "gemini") url.toHttpUrlOrNull()?.let { RoutingResolver.geminiModel(it) } else null
 
     /** Usage in a complete response body (JSON or SSE), or null. */
     fun parseUsage(providerId: String, body: String): TokenUsage? {

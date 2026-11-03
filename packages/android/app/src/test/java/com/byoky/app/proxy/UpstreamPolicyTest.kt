@@ -89,6 +89,52 @@ class UpstreamPolicyTest {
         assertEquals(UpstreamPolicy.Override.Base("http://[::1]:11434"), UpstreamPolicy.rewriteOverride("ollama", "http://[::1]:11434/"))
     }
 
+    /**
+     * F020: the SDK's listModels (and a createFetch app) knows only the
+     * registry's placeholder host; it goes to the credential's own server.
+     */
+    @Test
+    fun placeholderHostIsRebasedOntoTheCredential() {
+        val azurePlaceholder = "https://YOUR_RESOURCE.openai.azure.com/openai/models?api-version=2024-10-21".toHttpUrl()
+        assertTrue(UpstreamPolicy.requestUrlAllowed(azure, azurePlaceholder))
+        val rebased = UpstreamPolicy.rebase(azure, azurePlaceholder, "https://myres.openai.azure.com/")
+        assertEquals("https://myres.openai.azure.com/openai/models?api-version=2024-10-21", rebased.toString())
+        assertEquals(UpstreamPolicy.Target.Allowed(rebased.toString()), UpstreamPolicy.target(azure, rebased!!, "https://myres.openai.azure.com/"))
+        assertEquals(
+            "http://localhost:11500/api/tags",
+            UpstreamPolicy.rebase(ollama, "http://localhost:11434/api/tags".toHttpUrl(), "http://localhost:11500").toString(),
+        )
+        assertEquals(
+            "http://127.0.0.1:1234/v1/models",
+            UpstreamPolicy.rebase(Provider.find("lm_studio")!!, "http://localhost:1234/v1/models".toHttpUrl(), "http://127.0.0.1:1234").toString(),
+        )
+        // Only the credential's origin: LM Studio's docs give OpenAI clients
+        // http://localhost:1234/v1, and the app's path already carries the /v1.
+        val lmStudio = Provider.find("lm_studio")!!
+        assertEquals(
+            "http://127.0.0.1:1234/v1/chat/completions?x=1",
+            UpstreamPolicy.rebase(lmStudio, "http://localhost:1234/v1/chat/completions?x=1".toHttpUrl(), "http://127.0.0.1:1234/v1").toString(),
+        )
+        assertEquals(
+            "http://[::1]:11500/api/tags",
+            UpstreamPolicy.rebase(ollama, "http://localhost:11434/api/tags".toHttpUrl(), "http://[::1]:11500/").toString(),
+        )
+        // A request already on the credential's origin goes out unchanged.
+        val onCredential = "http://localhost:1234/v1/chat/completions".toHttpUrl()
+        assertNull(UpstreamPolicy.rebase(lmStudio, onCredential, "http://localhost:1234/v1"))
+        assertEquals(
+            UpstreamPolicy.Target.Allowed("http://localhost:1234/v1/chat/completions"),
+            UpstreamPolicy.target(lmStudio, onCredential, "http://localhost:1234/v1"),
+        )
+        // Another host is checked as it is (and refused by target).
+        assertNull(UpstreamPolicy.rebase(azure, "https://evil.openai.azure.com/openai/models".toHttpUrl(), "https://myres.openai.azure.com"))
+        assertNull(UpstreamPolicy.rebase(ollama, "http://127.0.0.1:11434/api/tags".toHttpUrl(), "http://localhost:11500"))
+        // No usable base URL, or a provider with a fixed host: nothing.
+        assertNull(UpstreamPolicy.rebase(azure, azurePlaceholder, null))
+        assertNull(UpstreamPolicy.rebase(ollama, "http://localhost:11434/api/tags".toHttpUrl(), "http://192.168.1.20:11434"))
+        assertNull(UpstreamPolicy.rebase(openai, "https://api.openai.com/v1/models".toHttpUrl(), "https://evil.example"))
+    }
+
     /** packages/core/tests/vectors/local-server-urls.json, shared with core and iOS. */
     @Test
     fun serverUrlsMatchTheSharedVectors() {

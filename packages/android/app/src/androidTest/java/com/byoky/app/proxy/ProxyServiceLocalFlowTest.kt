@@ -164,6 +164,23 @@ class ProxyServiceLocalFlowTest {
         assertFalse(sent.has("temperature"))
     }
 
+    /**
+     * An embeddings request keeps the app's model under a pinned chat model,
+     * which the provider would refuse there, and the log names no pin (F003).
+     */
+    @Test
+    fun aPinnedModelLeavesAnEmbeddingsRequestAlone() {
+        val group = wallet.createGroup("Pinned", "ollama", model = "gpt-5.5")
+        wallet.setAppGroup("https://app.example", group.id)
+        server.reply = FakeServer.Reply("application/json", """{"data":[]}""".toByteArray())
+        val body = """{"model":"nomic-embed-text","input":"hello"}"""
+        proxy.forward("https://app.example", "ollama", "${server.base}/v1/embeddings", "POST",
+            mapOf("content-type" to "application/json"), body.toByteArray(), CollectingSink())
+        assertEquals(body, String(server.requests.single().body))
+        val entry = wallet.requestLogs.value.first()
+        assertEquals(null, entry.actualModel)
+    }
+
     /** A body that isn't JSON keeps its bytes under a pinned model. */
     @Test
     fun aPinnedModelLeavesABinaryBodyIntact() {

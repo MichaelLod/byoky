@@ -957,7 +957,7 @@ final class WalletStore: ObservableObject {
             timestamp: Date()
         )
 
-        entry.model = UsageParser.parseModel(from: requestBody)
+        entry.model = UsageParser.loggedModel(providerId: providerId, url: url, body: requestBody)
         entry.inputTokens = usage?.inputTokens
         entry.outputTokens = usage?.outputTokens
 

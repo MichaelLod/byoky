@@ -247,6 +247,37 @@ struct Provider: Identifiable, Hashable {
             && port(a) == port(b)
     }
 
+    /// The host core's provider registry, and so the SDK (`listModels`, a
+    /// `createFetch` app), names for each provider without a fixed one.
+    static let placeholderBaseUrls: [String: String] = [
+        "azure_openai": "https://YOUR_RESOURCE.openai.azure.com",
+        "ollama": "http://localhost:11434",
+        "lm_studio": "http://localhost:1234",
+    ]
+
+    /// `urlString` on the credential's own origin when it names the
+    /// placeholder host of a provider without a fixed one (an app knows no
+    /// other), path and query as they were: the placeholder has no path, so
+    /// the app's path is already whole, and a credential's own path (LM
+    /// Studio's `http://localhost:1234/v1`) is not put in front of it again.
+    /// Nil for any other URL (checked by `validateUrl` as it is), one already
+    /// on the credential's origin, or a credential without a usable endpoint.
+    /// Mirrors the extension's `rebaseOntoCredential` and Android's
+    /// `UpstreamPolicy.rebase`.
+    static func rebasedOntoCredential(_ urlString: String, for providerId: String, credentialBaseUrl: String?) -> String? {
+        guard let placeholder = placeholderBaseUrls[providerId].flatMap({ URL(string: $0) }),
+              let base = customBaseUrl(for: providerId, credentialBaseUrl: credentialBaseUrl),
+              let components = URLComponents(string: urlString),
+              let url = components.url, url.host != nil,
+              sameOrigin(url, placeholder), !sameOrigin(url, base),
+              var origin = URLComponents(url: base, resolvingAgainstBaseURL: false) else { return nil }
+        // Scheme, host (as written, so an IPv6 literal keeps its brackets)
+        // and port of the credential; nothing of its path.
+        origin.percentEncodedPath = ""
+        guard let prefix = origin.string else { return nil }
+        return prefix + components.percentEncodedPath + (components.percentEncodedQuery.map { "?\($0)" } ?? "")
+    }
+
     /// Check that a request URL targets the provider's upstream before any
     /// key is attached. Fixed-host providers must hit their registered origin
     /// (a credential base URL is ignored); custom-host providers must hit

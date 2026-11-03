@@ -29,6 +29,8 @@ import {
   injectStreamUsageOptions,
   computeAllowanceCheck,
   shouldEstimateUsage,
+  isModelPinnableRequest,
+  filterResponseHeaders,
   validateProxyUrl,
   isAllowedProxyRequest,
   resolveProviderBaseUrl,
@@ -744,8 +746,17 @@ export default defineBackground(() => {
       if (!portOpen) return;
       try { port.postMessage(message); } catch { portOpen = false; }
     };
+    // Closes the port once its request is over, however it ended, so
+    // finished ports don't pile up for the life of the worker or the tab
+    // (F062). What was posted before still arrives, and closing from this
+    // side doesn't fire our own onDisconnect, so nothing is aborted.
+    const close = () => {
+      if (!portOpen) return;
+      portOpen = false;
+      try { port.disconnect(); } catch { /* already gone */ }
+    };
 
-    port.onMessage.addListener(async (raw: unknown) => {
+    const handleRequest = async (raw: unknown) => {
       await sessionsRestored;
       const msg = raw as ProxyRequest;
       if (msg.sessionKey == null) return;
@@ -801,13 +812,16 @@ export default defineBackground(() => {
       // page could keep the wallet from locking with junk requests.
       resetIdleTimer();
 
+      // From here on the request is the approved app's: a refusal also goes
+      // in the request log, so History shows why it got nothing (F065). It
+      // is logged first, so the entry is there when the app hears of it.
+      const refuse = async (status: number, code: string, message: string) => {
+        await logRefusal(session, msg, status, code, message).catch(() => {});
+        send({ type: 'BYOKY_PROXY_RESPONSE_ERROR', requestId: msg.requestId, status, error: { code, message } });
+      };
+
       if (!masterPassword) {
-        send({
-          type: 'BYOKY_PROXY_RESPONSE_ERROR',
-          requestId: msg.requestId,
-          status: 423,
-          error: { code: 'WALLET_LOCKED', message: 'Wallet is locked' },
-        });
+        await refuse(423, 'WALLET_LOCKED', 'Wallet is locked');
         return;
       }
 
@@ -835,36 +849,32 @@ export default defineBackground(() => {
           Array.from(new Set(allCreds.map((c) => c.providerId))).sort(),
           group,
         );
-        send({
-          type: 'BYOKY_PROXY_RESPONSE_ERROR',
-          requestId: msg.requestId,
-          status: 403,
-          error: { code: 'PROVIDER_UNAVAILABLE', message },
-        });
+        await refuse(403, 'PROVIDER_UNAVAILABLE', message);
         return;
       }
       // The key goes out with the headers of effectiveProviderId, so it has
       // to be that provider's (see resolveSessionProviders).
       if (credential.providerId !== effectiveProviderId) {
-        send({
-          type: 'BYOKY_PROXY_RESPONSE_ERROR',
-          requestId: msg.requestId,
-          status: 403,
-          error: { code: 'PROVIDER_UNAVAILABLE', message: `The key this app is routed to is not a ${effectiveProviderId} key` },
-        });
+        await refuse(403, 'PROVIDER_UNAVAILABLE', `The key this app is routed to is not a ${effectiveProviderId} key`);
         return;
       }
+
+      // An app knows only the registry's placeholder host for a provider
+      // without a fixed one (Azure's YOUR_RESOURCE, a local server's default
+      // port; the SDK's listModels uses it too). Unrouted, such a request
+      // goes to the credential's own host, as on the bridge path; any other
+      // host is still checked as it is (sourceUrlAllowed below).
+      const appUrl = !translation && !swap && PROVIDERS[msg.providerId]?.requiresCustomBaseUrl
+        ? rebaseOntoCredential(msg.providerId, msg.url, credential.baseUrl) ?? msg.url
+        : msg.url;
+      // The request as logged and charged: where it went.
+      const appRequest: ProxyRequest = appUrl === msg.url ? msg : { ...msg, url: appUrl };
 
       // Check the token allowance and hold what this request may use in one
       // step, so a burst of parallel requests can't all pass the check.
       const reservation = await checkAndReserveAllowance(session.appOrigin, msg.providerId, msg);
       if (!reservation.allowed) {
-        send({
-          type: 'BYOKY_PROXY_RESPONSE_ERROR',
-          requestId: msg.requestId,
-          status: 429,
-          error: { code: 'QUOTA_EXCEEDED', message: reservation.reason },
-        });
+        await refuse(429, 'QUOTA_EXCEEDED', reservation.reason);
         return;
       }
       let logEntryId: string | undefined;
@@ -880,7 +890,7 @@ export default defineBackground(() => {
         // The URL the SDK sent must match the SOURCE provider's base URL.
         // (After translation we issue against the destination's URL — see
         // rewriteProxyUrl below.)
-        if (!sourceUrlAllowed(msg.providerId, msg.url, !!(translation || swap), credential.baseUrl)) {
+        if (!sourceUrlAllowed(msg.providerId, appUrl, !!(translation || swap), credential.baseUrl)) {
           send({
             type: 'BYOKY_PROXY_RESPONSE_ERROR',
             requestId: msg.requestId,
@@ -906,7 +916,7 @@ export default defineBackground(() => {
         // Translate the request body up front, before any branch (the OAuth
         // bridge path needs to see the translated body too).
         let translatedBody: string | undefined = msg.body;
-        let translatedUrl = msg.url;
+        let translatedUrl = appUrl;
         if (translation) {
           if (msg.bodyEncoding) {
             // Binary bodies cannot be translated — translation requires JSON.
@@ -1033,10 +1043,12 @@ export default defineBackground(() => {
           signal: upstreamAbort.signal,
         });
 
-        const respHeaders: Record<string, string> = {};
+        const upstreamHeaders: Record<string, string> = {};
         response.headers.forEach((v, k) => {
-          respHeaders[k] = v;
+          upstreamHeaders[k] = v;
         });
+        // Without the ones naming the account behind the key (F040).
+        const respHeaders = filterResponseHeaders(upstreamHeaders);
 
         send({
           type: 'BYOKY_PROXY_RESPONSE_META',
@@ -1048,12 +1060,14 @@ export default defineBackground(() => {
 
         responseStatus = response.status;
         responseContentType = respHeaders['content-type'] ?? '';
-        logEntryId = await logRequest(session, msg, response.status);
+        logEntryId = await logRequest(session, appRequest, response.status);
 
         // Decide streaming vs single-shot from the response Content-Type.
         // Translation activates a per-chunk SSE rewriter for streaming
-        // responses, or a one-shot JSON translator for non-streaming.
-        const isStreamingResponse = (respHeaders['content-type'] ?? '').includes('text/event-stream');
+        // responses, or a one-shot JSON translator for non-streaming. Only a
+        // success streams: Gemini sends its errors as plain JSON labelled
+        // text/event-stream, which the stream translator would drop (F010).
+        const isStreamingResponse = response.ok && (respHeaders['content-type'] ?? '').includes('text/event-stream');
         const sseRewriter = translation && isStreamingResponse
           ? buildResponseStreamRewriter(translation, msg.requestId, msg.body, msg.url)
           : undefined;
@@ -1157,14 +1171,22 @@ export default defineBackground(() => {
         // usage is counted, so the tokens are never counted nowhere.
         try {
           if (logEntryId && responseChunks) {
-            await recordProxyUsage(session.appOrigin, msg, effectiveProviderId, logEntryId, responseStatus, responseContentType, responseChunks.join(''), streamComplete);
+            await recordProxyUsage(session.appOrigin, appRequest, effectiveProviderId, logEntryId, responseStatus, responseContentType, responseChunks.join(''), streamComplete);
           } else if (fetchSent && upstreamAbort.signal.aborted) {
             // Cancelled before the response headers (for a non-streaming
             // reply that's until generation ends): the provider still bills.
-            await chargeCancelledRequest(session, msg);
+            await chargeCancelledRequest(session, appRequest);
           }
         } catch { /* usage bookkeeping must not break the response */ }
         reservation.release();
+      }
+    };
+
+    port.onMessage.addListener(async (raw: unknown) => {
+      try {
+        await handleRequest(raw);
+      } finally {
+        close();
       }
     });
   });
@@ -2154,9 +2176,11 @@ export default defineBackground(() => {
         if (response.type === 'proxy_response_meta') {
           bridgeResponded = true;
           status = response.status ?? 0;
-          const respHeaders = response.headers ?? {};
+          // The bridge strips the account headers too; an older one doesn't.
+          const respHeaders = filterResponseHeaders(response.headers ?? {});
           contentType = respHeaders['content-type'] ?? '';
-          isStreamingResponse = (respHeaders['content-type'] ?? '').includes('text/event-stream');
+          // Only a success streams; an error is translated whole at the end.
+          isStreamingResponse = status >= 200 && status < 300 && (respHeaders['content-type'] ?? '').includes('text/event-stream');
           send({
             type: 'BYOKY_PROXY_RESPONSE_META',
             requestId: msg.requestId,
@@ -2480,7 +2504,14 @@ export default defineBackground(() => {
       });
       return;
     }
+    // A refusal of this session's request also goes in the request log, as
+    // on the page path (F065), before the tool hears of it.
+    const logRefused = (status: number, code: string, message: string) =>
+      logRefusal(session, { providerId, url, method, body, bodyEncoding } as ProxyRequest, status, code, message)
+        .catch(() => {});
+
     if (!masterPassword) {
+      await logRefused(423, 'WALLET_LOCKED', 'Wallet is locked');
       bridgeProxyPort?.postMessage({
         type: 'proxy_http_error',
         requestId,
@@ -2493,6 +2524,7 @@ export default defineBackground(() => {
 
     // Validate providerId is one the session actually granted access to
     if (!session.providers.some((p) => p.providerId === providerId && p.available)) {
+      await logRefused(403, 'PROVIDER_UNAVAILABLE', 'Provider not available in this session');
       bridgeProxyPort?.postMessage({
         type: 'proxy_http_error',
         requestId,
@@ -2529,6 +2561,7 @@ export default defineBackground(() => {
         Array.from(new Set(allCreds.map((c) => c.providerId))).sort(),
         group,
       );
+      await logRefused(403, 'PROVIDER_UNAVAILABLE', message);
       bridgeProxyPort?.postMessage({
         type: 'proxy_http_error',
         requestId,
@@ -2544,6 +2577,7 @@ export default defineBackground(() => {
     const effectiveProviderId = translation?.dstProviderId ?? swap?.dstProviderId ?? providerId;
     // The key goes out with effectiveProviderId's headers (as on the page path).
     if (credential.providerId !== effectiveProviderId) {
+      await logRefused(403, 'PROVIDER_UNAVAILABLE', `The key this app is routed to is not a ${effectiveProviderId} key`);
       bridgeProxyPort?.postMessage({
         type: 'proxy_http_error',
         requestId,
@@ -2717,6 +2751,7 @@ export default defineBackground(() => {
         const nativePort = bridgeProxyPort;
         const reservation = await checkAndReserveAllowance(session.appOrigin, providerId, appRequest);
         if (!reservation.allowed) {
+          await logRefused(429, 'QUOTA_EXCEEDED', reservation.reason);
           nativePort.postMessage({ type: 'proxy_http_error', requestId, error: reservation.reason });
           return;
         }
@@ -2757,7 +2792,7 @@ export default defineBackground(() => {
               if (!outputTokens) outputTokens = Math.ceil(responseChars / 4);
             }
             const logId = await logRequest(session, appRequest, status);
-            await updateLogEntry(logId, { inputTokens, outputTokens, model: parseModel(body) });
+            await updateLogEntry(logId, { inputTokens, outputTokens, model: loggedModel(appRequest) });
             browser.runtime.sendMessage({ type: 'BYOKY_INTERNAL', action: 'usageUpdated' }).catch(() => {});
             await addUsage(session.appOrigin, providerId, (inputTokens ?? 0) + (outputTokens ?? 0));
           };
@@ -2773,7 +2808,7 @@ export default defineBackground(() => {
         } else {
           // Older bridges don't report back; log what is known now.
           reservation.release();
-          const model = parseModel(body);
+          const model = loggedModel(appRequest);
           logRequest(session, appRequest, 200).then((logId) => {
             if (model) updateLogEntry(logId, { model });
           });
@@ -2799,6 +2834,7 @@ export default defineBackground(() => {
       // as on the page path.
       const reservation = await checkAndReserveAllowance(session.appOrigin, providerId, appRequest);
       if (!reservation.allowed) {
+        await logRefused(429, 'QUOTA_EXCEEDED', reservation.reason);
         bridgeProxyPort?.postMessage({ type: 'proxy_http_error', requestId, error: reservation.reason });
         return;
       }
@@ -2820,10 +2856,12 @@ export default defineBackground(() => {
         });
         responseStatus = response.status;
 
-        const responseHeaders: Record<string, string> = {};
+        const upstreamHeaders: Record<string, string> = {};
         response.headers.forEach((value, key) => {
-          responseHeaders[key] = value;
+          upstreamHeaders[key] = value;
         });
+        // Without the ones naming the account behind the key, as for apps.
+        const responseHeaders = filterResponseHeaders(upstreamHeaders);
         responseContentType = responseHeaders['content-type'] ?? '';
 
         bridgeProxyPort?.postMessage({
@@ -2835,8 +2873,9 @@ export default defineBackground(() => {
 
         logEntryId = await logRequest(session, appRequest, response.status);
 
-        // Translation: stream rewriter for SSE responses, one-shot for JSON.
-        const isStreamingResponse = (responseHeaders['content-type'] ?? '').includes('text/event-stream');
+        // Translation: stream rewriter for SSE responses, one-shot for JSON
+        // and for any error (Gemini labels its JSON errors text/event-stream).
+        const isStreamingResponse = response.ok && (responseHeaders['content-type'] ?? '').includes('text/event-stream');
         const sseRewriter = translation && isStreamingResponse
           ? buildResponseStreamRewriter(translation, requestId, body, url)
           : undefined;
@@ -3048,6 +3087,14 @@ export default defineBackground(() => {
     return ctx;
   }
 
+  /**
+   * The model a request names, for the log: its body's, or for Gemini, which
+   * names it in the path, its URL's (F066). An encoded (binary) body has none.
+   */
+  function loggedModel(req: Pick<ProxyRequest, 'url' | 'body' | 'bodyEncoding'>): string | undefined {
+    return (req.bodyEncoding ? undefined : parseModel(req.body)) ?? modelFromUrl(req.url);
+  }
+
   /** Gemini puts the model in the path: /v1beta/models/{model}:generateContent. */
   function modelFromUrl(url: string | undefined): string | undefined {
     if (!url) return undefined;
@@ -3080,11 +3127,14 @@ export default defineBackground(() => {
   }
 
   /**
-   * The bridge knows only the registry's placeholder host for a provider
-   * without a fixed one (Azure's YOUR_RESOURCE, the local servers' default
-   * ports). A request it sends there goes to the credential's own host,
-   * same path and query. Null when `url` names another host (validated as
-   * it is) or the credential has no usable base URL.
+   * Apps and the bridge know only the registry's placeholder host for a
+   * provider without a fixed one (Azure's YOUR_RESOURCE, the local servers'
+   * default ports). A request they send there goes to the credential's own
+   * origin, same path and query: the placeholder has no path, so the app's
+   * path is already whole, and a credential's own path (LM Studio's
+   * `http://localhost:1234/v1`) is not put in front of it again. Null when
+   * `url` names another host (validated as it is), already names the
+   * credential's origin, or the credential has no usable base URL.
    */
   function rebaseOntoCredential(providerId: string, url: string, credentialBaseUrl: string | undefined): string | null {
     const placeholder = PROVIDERS[providerId]?.baseUrl;
@@ -3092,8 +3142,9 @@ export default defineBackground(() => {
     if (!placeholder || !base) return null;
     try {
       const target = new URL(url);
-      if (target.origin !== new URL(placeholder).origin) return null;
-      return `${base.replace(/\/$/, '')}${target.pathname}${target.search}`;
+      const origin = new URL(base).origin;
+      if (target.origin !== new URL(placeholder).origin || target.origin === origin) return null;
+      return `${origin}${target.pathname}${target.search}`;
     } catch {
       return null;
     }
@@ -3227,6 +3278,7 @@ export default defineBackground(() => {
     session: Session,
     req: ProxyRequest,
     status: number,
+    error?: string,
   ): Promise<string> {
     const id = crypto.randomUUID();
     // Strip query params from URL to avoid logging secrets (e.g. API keys in query strings)
@@ -3254,6 +3306,7 @@ export default defineBackground(() => {
       status,
       timestamp: Date.now(),
     };
+    if (error) entry.error = error;
 
     if (sp) entry.credentialId = sp.credentialId;
     if (translation) {
@@ -3262,7 +3315,8 @@ export default defineBackground(() => {
     } else if (swap) {
       entry.actualProviderId = swap.dstProviderId;
       if (swap.dstModel) entry.actualModel = swap.dstModel;
-    } else if (sp?.modelOverride) {
+    } else if (sp?.modelOverride && isModelPinnableRequest(req.url)) {
+      // Embeddings, audio and the like keep the app's model (rewriteRequestModel).
       entry.actualModel = sp.modelOverride;
     }
 
@@ -3293,6 +3347,31 @@ export default defineBackground(() => {
     });
 
     return id;
+  }
+
+  // When each kind of refusal was last logged, by app, provider and code.
+  const loggedRefusals = new Map<string, number>();
+  const REFUSAL_REPEAT_MS = 5_000;
+
+  /**
+   * Log a request of an approved app (or bridge session) that the wallet
+   * refused before calling upstream: over its limit, apps paused, no key
+   * for it, wallet locked. Not refusals any page can cause (another
+   * origin, a blocked endpoint), which could flood the log. The same
+   * refusal again within a few seconds isn't logged again, so an app
+   * retrying can't push real entries out of the log. Usage skips it
+   * (status 400 and up).
+   */
+  async function logRefusal(session: Session, req: ProxyRequest, status: number, code: string, message: string): Promise<void> {
+    const now = Date.now();
+    for (const [k, at] of loggedRefusals) if (now - at >= REFUSAL_REPEAT_MS) loggedRefusals.delete(k);
+    const key = JSON.stringify([session.appOrigin, req.providerId, code]);
+    if (loggedRefusals.has(key)) return;
+    loggedRefusals.set(key, now);
+    const entryId = await logRequest(session, req, status, message);
+    const model = loggedModel(req);
+    if (model) await updateLogEntry(entryId, { model });
+    browser.runtime.sendMessage({ type: 'BYOKY_INTERNAL', action: 'usageUpdated' }).catch(() => {});
   }
 
   async function updateLogEntry(
@@ -3421,7 +3500,7 @@ export default defineBackground(() => {
     const inputTokens = req.body && !req.bodyEncoding ? Math.ceil(req.body.length / 4) : 0;
     const outputTokens = Math.max(0, estimateRequestTokens(req) - inputTokens);
     const logEntryId = await logRequest(session, req, 499);
-    await updateLogEntry(logEntryId, { inputTokens, outputTokens, model: req.bodyEncoding ? undefined : parseModel(req.body) });
+    await updateLogEntry(logEntryId, { inputTokens, outputTokens, model: loggedModel(req) });
     await addUsage(session.appOrigin, req.providerId, inputTokens + outputTokens);
   }
 
@@ -3461,7 +3540,7 @@ export default defineBackground(() => {
     responseText: string,
     complete: boolean,
   ) {
-    const model = req.bodyEncoding ? undefined : parseModel(req.body);
+    const model = loggedModel(req);
     const ok = status >= 200 && status < 300;
     const parsed = ok ? parseUsage(upstreamProviderId, responseText) : undefined;
     let inputTokens = parsed?.inputTokens;

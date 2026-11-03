@@ -20,7 +20,7 @@ import {
   sliceForNativeMessaging,
   type ProxyResponseMessage,
 } from './proxy-server.js';
-import { createToolNameSSERewriter, isTextContentType, parseUsage, rewriteToolNamesInJSONBody } from '@byoky/core';
+import { createToolNameSSERewriter, filterResponseHeaders, isTextContentType, parseUsage, rewriteToolNamesInJSONBody } from '@byoky/core';
 
 interface BridgeRequest {
   type: 'proxy';
@@ -288,8 +288,10 @@ export function createHost(opts: HostOptions): Host {
       timer = setTimeout(abort, idleTimeoutMs);
       outcome.status = res.status;
 
-      const resHeaders: Record<string, string> = {};
-      res.headers.forEach((v, k) => { resHeaders[k] = v; });
+      const upstreamHeaders: Record<string, string> = {};
+      res.headers.forEach((v, k) => { upstreamHeaders[k] = v; });
+      // Not the headers naming the account behind the key (F040).
+      const resHeaders = filterResponseHeaders(upstreamHeaders);
 
       send({ type: `${prefix}_meta`, requestId, status: res.status, headers: resHeaders });
 

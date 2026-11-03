@@ -441,6 +441,8 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
         credential: Credential
     ) async -> Int {
         var sent = false
+        var url = url
+        var urlString = urlString
         do {
             // Post-resolve validation for requiresCustomBaseUrl providers.
             // The initial parse in handleProxy was permissive; now we know
@@ -450,6 +452,14 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
                 if let message = Provider.missingEndpointMessage(providerId: providerId, credentialBaseUrl: credential.baseUrl) {
                     deliverProxyError(requestId: requestId, code: "PROVIDER_UNAVAILABLE", message: message)
                     return 0
+                }
+                // An app knows only the registry's placeholder host (Azure's
+                // YOUR_RESOURCE, a local server's default port): such a
+                // request goes to the credential's own endpoint (F020).
+                if let rebased = Provider.rebasedOntoCredential(urlString, for: providerId, credentialBaseUrl: credential.baseUrl),
+                   let rebasedURL = URL(string: rebased) {
+                    url = rebasedURL
+                    urlString = rebased
                 }
                 if Provider.validateUrl(urlString, for: providerId, credentialBaseUrl: credential.baseUrl) == nil {
                     deliverProxyError(requestId: requestId, code: "INVALID_URL",
@@ -970,7 +980,7 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
         var responseHeaders: [String: String] = [:]
         for (key, value) in httpResponse.allHeaderFields {
             let lower = String(describing: key).lowercased()
-            if sensitiveResponseHeaders.contains(lower) { continue }
+            if ProxyPolicy.strippedResponseHeaders.contains(lower) { continue }
             responseHeaders[lower] = String(describing: value)
         }
         deliver(requestId: requestId, message: [
@@ -1108,6 +1118,8 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
             deliverProxyError(requestId: requestId, code: code, message: message, status: 400)
             return nil
         case nil:
+            // Embeddings, audio and the like keep the app's model, as in core.
+            if !ProxyPolicy.isModelPinnableRequest(url: url) { return text }
             // A Gemini URL that names the model gets the pin instead (a body
             // `model` would be ignored); Gemini's OpenAI-compatible endpoint
             // takes it from the body like everyone else.
@@ -1131,12 +1143,6 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
 }
 
 // MARK: - Proxy helpers
-
-/// Upstream response headers that are never forwarded to the web app.
-private let sensitiveResponseHeaders: Set<String> = [
-    "server", "x-request-id", "x-cloud-trace-context",
-    "set-cookie", "set-cookie2", "alt-svc", "via",
-]
 
 /// Providers that need `stream_options.include_usage` injected for streaming.
 private let streamUsageProviders: Set<String> = [

@@ -128,6 +128,31 @@ const GENERATION_PATH_SUFFIXES = [
   'chat/completions', 'completions', 'responses', 'messages', 'chat', 'complete', 'generate',
 ].map((s) => s.split('/'));
 
+const TOKEN_COUNT_PATH_SUFFIXES = ['messages/count_tokens', 'responses/input_tokens'].map((s) => s.split('/'));
+
+/**
+ * Whether a group's pinned model applies to a request to `url` (the URL the
+ * app called): text generation and token counting, the endpoints that take
+ * the chat models a group pins. Embeddings, moderation, audio, images,
+ * rerank, Mistral's fill-in-the-middle and Gemini's embedContent take
+ * models of their own kind, which a pinned chat model would only get
+ * refused, so they keep the app's model. The iOS and Android wallets apply
+ * the same rule where the bundled core can't.
+ */
+export function isModelPinnableRequest(url: string): boolean {
+  let path: string;
+  try {
+    path = new URL(url).pathname;
+  } catch {
+    return false;
+  }
+  const last = path.slice(path.lastIndexOf('/') + 1);
+  if (/:(?:stream)?[Gg]enerateContent$|:countTokens$/.test(last)) return true;
+  const segments = path.toLowerCase().split('/').filter((s) => s.length > 0);
+  if (endsWithSegments(segments, ['fim', 'completions'])) return false;
+  return [...GENERATION_PATH_SUFFIXES, ...TOKEN_COUNT_PATH_SUFFIXES].some((suffix) => endsWithSegments(segments, suffix));
+}
+
 /** Gemini's `models/{model}:{action}` inference actions. */
 const GEMINI_POST_ACTIONS = new Set([
   'generateContent', 'streamGenerateContent', 'countTokens', 'embedContent', 'batchEmbedContents',
@@ -229,6 +254,40 @@ const FORWARDABLE_HEADERS = new Set([
   // Google
   'x-goog-api-client',
 ]);
+
+/**
+ * Upstream response headers an app never gets. Some name the account behind
+ * the key (OpenAI's organization and project, Anthropic's organization id),
+ * which any connected app could read to link the same user across sites and
+ * sessions; the rest are server, tracing and cookie headers. Everything else
+ * is passed on: SDKs read the content type, the request ids and the retry
+ * and rate-limit headers. The iOS and Android wallets strip the same set
+ * (tests/vectors/response-headers.json).
+ */
+export const STRIPPED_RESPONSE_HEADERS: ReadonlySet<string> = new Set([
+  'openai-organization',
+  'openai-project',
+  'anthropic-organization-id',
+  'server',
+  'x-cloud-trace-context',
+  'set-cookie',
+  'set-cookie2',
+  'alt-svc',
+  'via',
+]);
+
+/**
+ * An upstream response's headers as an app may see them: names in lower
+ * case, without STRIPPED_RESPONSE_HEADERS.
+ */
+export function filterResponseHeaders(headers: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [name, value] of Object.entries(headers)) {
+    const lower = name.toLowerCase();
+    if (!STRIPPED_RESPONSE_HEADERS.has(lower)) out[lower] = value;
+  }
+  return out;
+}
 
 /**
  * Reject header values containing CR/LF/NUL — defense against header injection

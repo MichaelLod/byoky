@@ -9,12 +9,16 @@ import {
   validateProxyUrl,
   isAllowedProxyRequest,
   shouldEstimateUsage,
+  isModelPinnableRequest,
   resolveProviderBaseUrl,
   detectRequestCapabilities,
   rewriteToolNamesInJSONBody,
+  STRIPPED_RESPONSE_HEADERS,
+  filterResponseHeaders,
 } from '../src/proxy-utils.js';
 import endpointPolicyVectors from './vectors/endpoint-policy.json';
 import localServerUrlVectors from './vectors/local-server-urls.json';
+import responseHeaderVectors from './vectors/response-headers.json';
 
 // ── validateProxyUrl ────────────────────────────────────
 
@@ -121,6 +125,48 @@ describe('shouldEstimateUsage', () => {
   });
 });
 
+// ── isModelPinnableRequest ──────────────────────────────
+
+// F003. The iOS (ProxyPolicyTests) and Android (EndpointPolicyTest) copies
+// of this rule run the same cases.
+describe('isModelPinnableRequest', () => {
+  const GEMINI = 'https://generativelanguage.googleapis.com/v1beta/models';
+  const cases: [string, boolean][] = [
+    ['https://api.openai.com/v1/chat/completions', true],
+    ['https://api.openai.com/v1/completions', true],
+    ['https://api.openai.com/v1/responses', true],
+    ['https://api.openai.com/v1/responses/input_tokens', true],
+    ['https://api.anthropic.com/v1/messages?beta=true', true],
+    ['https://api.anthropic.com/v1/messages/count_tokens', true],
+    ['https://api.cohere.com/v2/chat', true],
+    ['http://localhost:11434/api/generate', true],
+    ['http://localhost:11434/api/chat', true],
+    ['https://api.groq.com/openai/v1/chat/completions', true],
+    [`${GEMINI}/gemini-2.5-flash:generateContent`, true],
+    [`${GEMINI}/gemini-2.5-flash:streamGenerateContent?alt=sse`, true],
+    [`${GEMINI}/gemini-2.5-flash:countTokens`, true],
+    ['https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', true],
+    ['https://api.openai.com/v1/embeddings', false],
+    ['https://api.openai.com/v1/moderations', false],
+    ['https://api.openai.com/v1/audio/speech', false],
+    ['https://api.openai.com/v1/audio/transcriptions', false],
+    ['https://api.openai.com/v1/images/generations', false],
+    ['https://api.openai.com/v1/images/edits', false],
+    ['https://api.cohere.com/v2/embed', false],
+    ['https://api.cohere.com/v2/rerank', false],
+    ['https://api.mistral.ai/v1/fim/completions', false],
+    ['http://localhost:11434/api/embed', false],
+    ['http://localhost:11434/api/show', false],
+    [`${GEMINI}/text-embedding-004:embedContent`, false],
+    [`${GEMINI}/text-embedding-004:batchEmbedContents`, false],
+    ['https://api.openai.com/v1/models', false],
+    ['not a url', false],
+  ];
+  it.each(cases)('%s → %s', (url, expected) => {
+    expect(isModelPinnableRequest(url)).toBe(expected);
+  });
+});
+
 // ── isAllowedProxyRequest ───────────────────────────────
 
 describe('isAllowedProxyRequest', () => {
@@ -162,6 +208,24 @@ describe('resolveProviderBaseUrl', () => {
     expect(resolveProviderBaseUrl('azure_openai', 'https://myres.openai.azure.com?x=1')).toBeNull();
     expect(resolveProviderBaseUrl('ollama', 'http://10.0.0.2:11434')).toBeNull();
     expect(resolveProviderBaseUrl('nonexistent', 'https://x.example')).toBeNull();
+  });
+});
+
+// ── filterResponseHeaders ──────────────────────────────
+
+// F040. The iOS and Android wallets run the same file against their copies.
+describe('filterResponseHeaders (shared vectors)', () => {
+  const { stripped, kept } = responseHeaderVectors as { stripped: string[]; kept: string[] };
+
+  it('strips exactly the shared deny-list', () => {
+    expect([...STRIPPED_RESPONSE_HEADERS].sort()).toEqual([...stripped].sort());
+  });
+
+  it('drops account identifiers in any case and keeps what SDKs read', () => {
+    const upstream: Record<string, string> = {};
+    for (const name of stripped) upstream[name.toUpperCase()] = 'x';
+    for (const name of kept) upstream[name] = `v-${name}`;
+    expect(filterResponseHeaders(upstream)).toEqual(Object.fromEntries(kept.map((name) => [name, `v-${name}`])));
   });
 });
 

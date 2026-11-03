@@ -23,6 +23,16 @@ class UsageMeterTest {
         return this
     }
 
+    /** The log names a Gemini request's model, which is in its URL (F066). */
+    @Test
+    fun loggedModelComesFromTheBodyOrAGeminiUrl() {
+        val gemini = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+        assertEquals("gemini-2.5-flash", UsageParser.loggedModel("gemini", gemini, """{"contents":[]}""".toByteArray()))
+        assertEquals("x", UsageParser.loggedModel("gemini", gemini, """{"model":"x"}""".toByteArray()))
+        assertEquals("gpt-5.5", UsageParser.loggedModel("openai", "https://api.openai.com/v1/chat/completions", """{"model":"gpt-5.5"}""".toByteArray()))
+        assertNull(UsageParser.loggedModel("openai", "https://api.openai.com/v1/chat/completions", null))
+    }
+
     @Test
     fun anthropicStreamCombinesMessageStartAndDeltaWithCacheTokens() {
         val sse = """

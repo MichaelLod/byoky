@@ -71,6 +71,37 @@ describe('rewriteRequestModel — what it leaves alone', () => {
       .toEqual({ model: 'gemini-3.8-flash', temperature: 0.5, messages: USER });
   });
 
+  // F003: a group pins a chat model; an embeddings, speech, image or
+  // moderation call naming it is refused upstream (OpenAI 400).
+  it('leaves requests that take models of their own kind byte for byte', () => {
+    const GEMINI = 'https://generativelanguage.googleapis.com/v1beta/models';
+    const cases: Array<[string, string, string, string]> = [
+      ['openai', 'gpt-5.5', 'https://api.openai.com/v1/embeddings', '{"model":"text-embedding-3-small","input":"hi"}'],
+      ['openai', 'gpt-5.5', 'https://api.openai.com/v1/audio/speech', '{"model":"gpt-4o-mini-tts","input":"hi","voice":"alloy"}'],
+      ['openai', 'gpt-5.5', 'https://api.openai.com/v1/images/generations', '{"model":"gpt-image-1","prompt":"a raven"}'],
+      ['openai', 'gpt-5.5', 'https://api.openai.com/v1/moderations', '{"model":"omni-moderation-latest","input":"hi"}'],
+      ['cohere', 'command-a-03-2025', 'https://api.cohere.com/v2/embed', '{"model":"embed-v4.0","texts":["hi"]}'],
+      ['cohere', 'command-a-03-2025', 'https://api.cohere.com/v2/rerank', '{"model":"rerank-v3.5","query":"q","documents":["d"]}'],
+      ['mistral', 'mistral-large-latest', 'https://api.mistral.ai/v1/embeddings', '{"model":"mistral-embed","input":["hi"]}'],
+      ['mistral', 'mistral-large-latest', 'https://api.mistral.ai/v1/fim/completions', '{"model":"codestral-latest","prompt":"def"}'],
+      ['gemini', 'gemini-3.8-flash', `${GEMINI}/text-embedding-004:embedContent`, '{"content":{"parts":[{"text":"hi"}]}}'],
+      ['gemini', 'gemini-3.8-flash', `${GEMINI}/text-embedding-004:batchEmbedContents`, '{"requests":[]}'],
+      ['gemini', 'gemini-3.8-flash', 'https://generativelanguage.googleapis.com/v1beta/openai/embeddings', '{"model":"text-embedding-004","input":"hi"}'],
+    ];
+    for (const [dstProviderId, dstModel, url, body] of cases) {
+      expect(rewriteRequestModel({ dstProviderId, dstModel, url }, body), url).toBe(body);
+    }
+  });
+
+  it('still pins generation and token counting', () => {
+    expect(rewrite('openai', 'gpt-5.5', { model: 'gpt-4.1', input: 'hi' }, 'https://api.openai.com/v1/responses/input_tokens').model).toBe('gpt-5.5');
+    expect(rewrite('anthropic', 'claude-sonnet-5-5', { model: 'claude-sonnet-4-6', messages: USER }, 'https://api.anthropic.com/v1/messages/count_tokens').model)
+      .toBe('claude-sonnet-5-5');
+    expect(rewrite('mistral', 'mistral-large-latest', { model: 'mistral-small-latest', messages: USER }, 'https://api.mistral.ai/v1/chat/completions').model)
+      .toBe('mistral-large-latest');
+    expect(rewrite('ollama', 'llama3.3', { model: 'llama3', prompt: 'hi' }, 'http://localhost:11434/api/generate').model).toBe('llama3.3');
+  });
+
   it('only sets the model for families without per-model rules', () => {
     expect(rewrite('cohere', 'command-a-03-2025', { model: 'command-r', temperature: 0.5, messages: USER }, 'https://api.cohere.com/v2/chat'))
       .toEqual({ model: 'command-a-03-2025', temperature: 0.5, messages: USER });

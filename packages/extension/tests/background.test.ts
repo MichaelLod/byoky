@@ -90,6 +90,54 @@ describe('background: proxy boundary', () => {
     await h.until(() => requestLog(h)[0]?.outputTokens === 4, 5_000, 'usage on the log entry');
   });
 
+  // F040: response headers naming the account behind the key let connected
+  // apps link one user across sites; the ones SDKs read still pass.
+  it('passes on the upstream headers without the ones naming the account', async () => {
+    const h = await unlockedWallet();
+    const { payload } = await connectApproved(h, APP, { providers: [{ id: 'anthropic', required: true }] });
+    h.fetch.mockImplementation(async () => jsonResponse({ usage: { input_tokens: 3, output_tokens: 4 } }, 200, {
+      'anthropic-organization-id': '11111111-2222-3333-4444-555555555555',
+      'openai-organization': 'user-victim123',
+      'openai-project': 'proj_abc',
+      server: 'cloudflare',
+      'request-id': 'req_1',
+      'x-request-id': 'req_2',
+      'retry-after': '3',
+      'anthropic-ratelimit-requests-remaining': '9',
+      'x-ratelimit-limit-tokens': '30000000',
+    }));
+    const r = await h.proxy(APP, chat(payload.sessionKey)).result;
+    expect(r.meta.headers).toEqual({
+      'content-type': 'application/json',
+      'request-id': 'req_1',
+      'x-request-id': 'req_2',
+      'retry-after': '3',
+      'anthropic-ratelimit-requests-remaining': '9',
+      'x-ratelimit-limit-tokens': '30000000',
+    });
+  });
+
+  it('strips them from a setup-token reply relayed by the bridge too', async () => {
+    const h = await startBackground({
+      local: await walletStorage([{ id: 'oat', providerId: 'anthropic', key: 'sk-ant-oat01-x', authMethod: 'oauth' }]),
+    });
+    await h.unlock();
+    const { payload } = await connectApproved(h, APP, { providers: [{ id: 'anthropic', required: true }] });
+    h.nativeHost = (msg, conn) => {
+      if (msg.type === 'ping') conn.reply({ type: 'pong' });
+      if (msg.type === 'proxy') {
+        conn.reply({
+          type: 'proxy_response_meta', requestId: msg.requestId, status: 200,
+          headers: { 'content-type': 'application/json', 'anthropic-organization-id': 'org-1', 'request-id': 'req_1' },
+        });
+        conn.reply({ type: 'proxy_response_chunk', requestId: msg.requestId, chunk: '{}' });
+        conn.reply({ type: 'proxy_response_done', requestId: msg.requestId });
+      }
+    };
+    const r = await h.proxy(APP, chat(payload.sessionKey)).result;
+    expect(r.meta.headers).toEqual({ 'content-type': 'application/json', 'request-id': 'req_1' });
+  });
+
   it('refuses a session key used from another origin, without calling upstream', async () => {
     const h = await unlockedWallet();
     const { payload } = await connectApproved(h, APP, { providers: [{ id: 'anthropic', required: true }] });
@@ -115,6 +163,37 @@ describe('background: proxy boundary', () => {
     const r = await h.proxy(APP, chat(payload.sessionKey)).result;
     expect(r.error.error.code).toBe('SESSION_EXPIRED');
     expect(h.fetch).not.toHaveBeenCalled();
+  });
+
+  // F065: a request the wallet refused left no trace in History.
+  it('logs a refused request once, with its reason, and counts nothing', async () => {
+    const h = await unlockedWallet({
+      tokenAllowances: [{ origin: APP, totalLimit: 50 }],
+      usageTotals: { [APP]: { anthropic: 100 } },
+    });
+    const { payload } = await connectApproved(h, APP, { providers: [{ id: 'anthropic', required: true }] });
+    for (let i = 0; i < 3; i++) {
+      expect((await h.proxy(APP, chat(payload.sessionKey)).result).error).toMatchObject({ status: 429, error: { code: 'QUOTA_EXCEEDED' } });
+    }
+    await h.until(() => requestLog(h)[0]?.model != null, 5_000, 'the refusal logged');
+    await h.settle();
+    // An app retrying against its limit adds one entry, not one per try.
+    expect(requestLog(h)).toHaveLength(1);
+    expect(requestLog(h)[0]).toMatchObject({
+      status: 429, providerId: 'anthropic', model: 'claude-x', error: `Token allowance exceeded for ${APP}`,
+    });
+    expect(h.fetch).not.toHaveBeenCalled();
+    expect((h.local.data.usageTotals as any)[APP].anthropic).toBe(100);
+  });
+
+  it('does not log a refusal any page could cause', async () => {
+    const h = await unlockedWallet();
+    const { payload } = await connectApproved(h, APP, { providers: [{ id: 'anthropic', required: true }] });
+    expect((await h.proxy(OTHER, chat(payload.sessionKey)).result).error.error.code).toBe('ORIGIN_MISMATCH');
+    const endpoint = chat(payload.sessionKey, { url: 'https://api.anthropic.com/v1/files', method: 'GET' });
+    expect((await h.proxy(APP, endpoint).result).error.error.code).toBe('ENDPOINT_NOT_ALLOWED');
+    await h.settle();
+    expect(requestLog(h)).toHaveLength(0);
   });
 
   it('holds the allowance of in-flight requests, and releases it when they end', async () => {

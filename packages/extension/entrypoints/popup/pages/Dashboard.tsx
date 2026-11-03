@@ -353,12 +353,15 @@ function CredentialStats({ cred, credentials, requestLog }: {
   for (const e of filtered) {
     totalInput += e.inputTokens ?? 0;
     totalOutput += e.outputTokens ?? 0;
-    if (e.model) {
-      const m = byModel.get(e.model) ?? { requests: 0, inputTokens: 0, outputTokens: 0 };
+    // The model this key served: a routed or pinned request names another
+    // than the app asked for.
+    const served = e.actualModel ?? e.model;
+    if (served) {
+      const m = byModel.get(served) ?? { requests: 0, inputTokens: 0, outputTokens: 0 };
       m.requests++;
       m.inputTokens += e.inputTokens ?? 0;
       m.outputTokens += e.outputTokens ?? 0;
-      byModel.set(e.model, m);
+      byModel.set(served, m);
     }
     const a = byApp.get(e.appOrigin) ?? { origin: e.appOrigin, requests: 0, inputTokens: 0, outputTokens: 0 };
     a.requests++;
