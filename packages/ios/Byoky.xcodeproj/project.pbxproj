@@ -27,6 +27,7 @@
 		2C64B2340885B3A383680C99 /* WalletState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A81990611712DAE8AE2AA2A /* WalletState.swift */; };
 		2E66E9FCCBA7D9AF87AC6A73 /* AppsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F23283E953712EC1E60C89DB /* AppsView.swift */; };
 		317DD5B064C6AC8848F537C4 /* AppGroupSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C49197E9FF917FB760DE1C3 /* AppGroupSync.swift */; };
+		33214282E74B61E8074360A8 /* response-headers.json in Resources */ = {isa = PBXBuildFile; fileRef = 187F2BCC4EEF758C8860C207 /* response-headers.json */; };
 		372B1924E0649EE71532AAD5 /* TranslationEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4178DD3382DFFAC2C8D3B12 /* TranslationEngineTests.swift */; };
 		37A41EB94C5EDE0EEE6DE20F /* ByokyApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6A030A836CCE41CC0B1AE96 /* ByokyApp.swift */; };
 		37C037BF17D918925D0B882D /* Credential.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89DFBFD38410B1E929388841 /* Credential.swift */; };
@@ -42,6 +43,7 @@
 		5CFF0270ACC087AF340AF4C5 /* InstalledApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0558CF4019B73E39B5E6F2BF /* InstalledApp.swift */; };
 		5E08AFA22321BE94E55C6A71 /* SafariWebExtensionHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7068BDC28BA0A572F25D021 /* SafariWebExtensionHandler.swift */; };
 		6D87CA4CD76DF7AC19DD8393 /* RoutingResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E2D5F9CF6302B9D1D820573 /* RoutingResolverTests.swift */; };
+		6FEC0A158C0D4ED354DB509C /* PrivacyCoverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F5D38E9F3B0327127A406EA /* PrivacyCoverTests.swift */; };
 		7132A2CDF55F65B6D684A748 /* Group.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6514E79E49F694CAF5CE711 /* Group.swift */; };
 		74B074187B17D9EB545FDAA7 /* TranslationLiveSmokeTest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1FBDD24D2EACFEA1DF0FA23B /* TranslationLiveSmokeTest.swift */; };
 		7641980494574E8D7535D2C2 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 025A3D6E0A32412866DB3A82 /* SettingsView.swift */; };
@@ -91,6 +93,7 @@
 		F0D83554FE60BDF79FDAAD1C /* UTF8ChunkDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1811DE79EB6C4E121B7AA7B9 /* UTF8ChunkDecoder.swift */; };
 		F21132FD674E614D003A2687 /* BackupFixture.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA571168629B8EA39032DDFA /* BackupFixture.swift */; };
 		F412C79FAC8A6801D094FE8E /* Main.html in Resources */ = {isa = PBXBuildFile; fileRef = 82D67F97E09C62E232ED4E07 /* Main.html */; };
+		F7425BB0799D67AE58EAB076 /* routing.json in Resources */ = {isa = PBXBuildFile; fileRef = BF5D0CC74A8B6AA7993C7E43 /* routing.json */; };
 		FBF600BF92E9965D91807C51 /* WalletLockTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA0B67E3908C43E39B4C7BC4 /* WalletLockTests.swift */; };
 		FD9A6FCE48B4C9508FF7515E /* ClaudeCodeShaping.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44B0F25CD3576AA6EE926141 /* ClaudeCodeShaping.swift */; };
 		FFF648D0F8E1C7F116A9A7CA /* BridgeSecurityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D6A7A4061250895749E7ADD /* BridgeSecurityTests.swift */; };
@@ -164,6 +167,7 @@
 		1028C10BFBA170FC227D8520 /* AppsTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppsTabView.swift; sourceTree = "<group>"; };
 		14DBA97BB88BA3A68D32F2F3 /* ByokyUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = ByokyUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		1811DE79EB6C4E121B7AA7B9 /* UTF8ChunkDecoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UTF8ChunkDecoder.swift; sourceTree = "<group>"; };
+		187F2BCC4EEF758C8860C207 /* response-headers.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "response-headers.json"; sourceTree = "<group>"; };
 		1B6FC24CE3B7E5009CD0FB76 /* UTF8ChunkDecoderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UTF8ChunkDecoderTests.swift; sourceTree = "<group>"; };
 		1E2D5F9CF6302B9D1D820573 /* RoutingResolverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoutingResolverTests.swift; sourceTree = "<group>"; };
 		1E7CB8688EBFF715C21DBA4E /* Byoky (macOS).app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Byoky (macOS).app"; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -202,6 +206,7 @@
 		89DFBFD38410B1E929388841 /* Credential.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Credential.swift; sourceTree = "<group>"; };
 		8BD435CEEF867E4F4393E64D /* SafariExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = SafariExtension.entitlements; sourceTree = "<group>"; };
 		8D41E4979F0A4A1026B140EF /* UsageParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageParser.swift; sourceTree = "<group>"; };
+		8F5D38E9F3B0327127A406EA /* PrivacyCoverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrivacyCoverTests.swift; sourceTree = "<group>"; };
 		9299172D894F0140FE036CB1 /* BackupFileTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupFileTests.swift; sourceTree = "<group>"; };
 		9434DE52C83564557C8A3C68 /* IBMPlexMono-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "IBMPlexMono-Regular.ttf"; sourceTree = "<group>"; };
 		947CA8C33A7D9713FBD7AE26 /* MainTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainTabView.swift; sourceTree = "<group>"; };
@@ -221,6 +226,7 @@
 		B4F3B0F07E12A02FFF8E8AD1 /* BackupFile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupFile.swift; sourceTree = "<group>"; };
 		B641D6799174E3DFA18348D0 /* UnlockView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnlockView.swift; sourceTree = "<group>"; };
 		BBC3049BC4F0C1B1FA036957 /* ProviderURLTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderURLTests.swift; sourceTree = "<group>"; };
+		BF5D0CC74A8B6AA7993C7E43 /* routing.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = routing.json; sourceTree = "<group>"; };
 		C3B5118B3A195AF66ECCB79E /* Script.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = Script.js; sourceTree = "<group>"; };
 		C4B71216FA68A3818CC6A692 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		CDB97EEA66B1280963D09F01 /* endpoint-policy.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "endpoint-policy.json"; sourceTree = "<group>"; };
@@ -356,6 +362,8 @@
 				50244694E4AC59A6FFAC5CB9 /* claude-code-shaping.json */,
 				CDB97EEA66B1280963D09F01 /* endpoint-policy.json */,
 				97F6B6563E70F6ADFA90536F /* local-server-urls.json */,
+				187F2BCC4EEF758C8860C207 /* response-headers.json */,
+				BF5D0CC74A8B6AA7993C7E43 /* routing.json */,
 			);
 			path = vectors;
 			sourceTree = "<group>";
@@ -384,6 +392,7 @@
 				7E75B2D889D92C4DBC7615C8 /* ClaudeCodeShapingTests.swift */,
 				A612886E07EF9C6FDB6FED6E /* InstalledAppTests.swift */,
 				DC61AA894EEA895C6D0262F6 /* NativeBridgeE2ETests.swift */,
+				8F5D38E9F3B0327127A406EA /* PrivacyCoverTests.swift */,
 				BBC3049BC4F0C1B1FA036957 /* ProviderURLTests.swift */,
 				70A9C8261C05288AFEC0AF15 /* ProxyPolicyTests.swift */,
 				1E2D5F9CF6302B9D1D820573 /* RoutingResolverTests.swift */,
@@ -723,6 +732,8 @@
 				EDCFC6FBBCF55E5C76F2D323 /* claude-code-shaping.json in Resources */,
 				186A8620ED07CBE7644F32EC /* endpoint-policy.json in Resources */,
 				088785A56E4CD6773D8FA8AA /* local-server-urls.json in Resources */,
+				33214282E74B61E8074360A8 /* response-headers.json in Resources */,
+				F7425BB0799D67AE58EAB076 /* routing.json in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -805,6 +816,7 @@
 				E1F3C63E291CAFA4AD8DDEA8 /* ClaudeCodeShapingTests.swift in Sources */,
 				7DA5A5B14CF0B75A65306E63 /* InstalledAppTests.swift in Sources */,
 				02F23A186EF306C9FB46AB9E /* NativeBridgeE2ETests.swift in Sources */,
+				6FEC0A158C0D4ED354DB509C /* PrivacyCoverTests.swift in Sources */,
 				EC32070FC63F2D3078E675A2 /* ProviderURLTests.swift in Sources */,
 				B95BE98248900520B468E737 /* ProxyPolicyTests.swift in Sources */,
 				6D87CA4CD76DF7AC19DD8393 /* RoutingResolverTests.swift in Sources */,
@@ -973,7 +985,7 @@
 					"@executable_path/../Frameworks",
 					"@executable_path/../../../../Frameworks",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 12.0;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
 				OTHER_LDFLAGS = (
 					"-framework",
 					SafariServices,
@@ -1018,7 +1030,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 12.0;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
 				OTHER_LDFLAGS = (
 					"-framework",
 					SafariServices,
@@ -1045,7 +1057,7 @@
 					"@executable_path/../Frameworks",
 					"@executable_path/../../../../Frameworks",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 12.0;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
 				OTHER_LDFLAGS = (
 					"-framework",
 					SafariServices,
@@ -1252,7 +1264,7 @@
 				CODE_SIGN_ENTITLEMENTS = SafariExtension/SafariExtension.entitlements;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				INFOPLIST_FILE = SafariExtension/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -1283,7 +1295,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 12.0;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
 				OTHER_LDFLAGS = (
 					"-framework",
 					SafariServices,
@@ -1302,7 +1314,7 @@
 				CODE_SIGN_ENTITLEMENTS = SafariExtension/SafariExtension.entitlements;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				INFOPLIST_FILE = SafariExtension/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
