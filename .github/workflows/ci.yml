@@ -22,7 +22,7 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     strategy:
       fail-fast: false
@@ -88,7 +88,7 @@ jobs:
   # plugin (which inlines the bridge's dist) and the scaffolder; and the
   # typecheck of every package, which needs all of those builds.
   packages:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -123,6 +123,11 @@ jobs:
       - name: Plugin dist checks
         run: npx vitest run packages/openclaw-plugin/tests
 
+      # The built bridge host, started as the browser starts it, answers a
+      # framed ping. (The e2e job drives it end to end.)
+      - name: Bridge host smoke test
+        run: npx vitest run packages/bridge/tests/host-smoke.test.ts
+
       # release.sh, the store scripts and ios-signing against throwaway repos
       # and a stubbed fetch (node:test, not vitest). The cases that run
       # release.sh past the version bump skip off macOS.
@@ -133,7 +138,7 @@ jobs:
   # commit's SDK, must install, build and typecheck. Needs the scaffolder's
   # --template flag (non-interactive).
   templates:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     strategy:
       fail-fast: false
@@ -178,13 +183,21 @@ jobs:
         working-directory: ${{ runner.temp }}/smoke-app
         run: |
           npm install --no-audit --no-fund
+          # The build must not have to rewrite the app's own files: Next
+          # installs a missing @types package into package.json (or, with CI
+          # set, fails) and reshapes a tsconfig.json it disagrees with.
+          mkdir -p ../before && cp package.json tsconfig.json ../before/
           npm run build --if-present
           npm run build:client --if-present
           npx tsc --noEmit
+          diff -u ../before/package.json package.json
+          diff -u ../before/tsconfig.json tsconfig.json
 
   # Fake-provider Playwright run: the real extension, headless, no keys.
   e2e:
-    runs-on: ubuntu-latest
+    # Playwright 1.58 has no Chromium build for ubuntu-26.04 (ubuntu-latest
+    # since October 2026); move up after bumping @playwright/test.
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -198,6 +211,12 @@ jobs:
         run: pnpm exec playwright install --with-deps chromium
       - name: Build and run e2e
         run: pnpm test:e2e
+      # The specs delete the wallet profiles they create (a live run's hold
+      # the real keys); one left over means that cleanup broke.
+      - name: No wallet profile left behind
+        run: |
+          left=$(find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'byoky-e2e-*')
+          if [ -n "$left" ]; then echo "::error::e2e left behind: $left"; exit 1; fi
       - name: Upload traces
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -207,7 +226,7 @@ jobs:
           retention-days: 7
 
   android-unit:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     defaults:
       run:
@@ -232,7 +251,7 @@ jobs:
   # Which changes the iOS suite has to see; the macOS runner is slow and
   # costly, so pushes and PRs that touch none of these skip it.
   ios-changes:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     outputs:
       run: ${{ steps.decide.outputs.run }}

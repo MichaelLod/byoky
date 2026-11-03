@@ -59,11 +59,10 @@ final class ByokyWalletUITests: XCTestCase {
         let password = app.secureTextFields["onboarding.password"]
         XCTAssertTrue(password.waitForExistence(timeout: 5))
         password.tap()
-        password.typeText("CorrectHorse12!")
-        let confirm = app.secureTextFields["onboarding.confirmPassword"]
-        confirm.tap()
-        confirm.typeText("CorrectHorse12!")
-        app.buttons["onboarding.createWallet"].tap()
+        // Return moves on to Confirm and then creates the wallet; on a
+        // smaller phone the keyboard covers both Confirm and the button.
+        password.typeText("CorrectHorse12!\n")
+        app.secureTextFields["onboarding.confirmPassword"].typeText("CorrectHorse12!\n")
         XCTAssertTrue(app.buttons["wallet.settings"].waitForExistence(timeout: 30))
     }
 

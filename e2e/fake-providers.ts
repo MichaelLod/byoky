@@ -31,6 +31,11 @@ export interface SeenRequest {
 export interface FakeProviders {
   /** Every request the fakes answered, in order. */
   requests: SeenRequest[];
+  /**
+   * Holds the answer to the next request for `provider` until release().
+   * `seen` resolves when that request arrives.
+   */
+  holdNext(provider: FakeProviderId): { seen: Promise<SeenRequest>; release: () => void };
 }
 
 const HOSTS = new Map<string, FakeProviderId>([
@@ -183,7 +188,17 @@ const HANDLERS: Record<FakeProviderId, (route: Route, req: SeenRequest, keys: Fa
 };
 
 export async function installFakeProviders(ctx: BrowserContext, keys: FakeKeys): Promise<FakeProviders> {
-  const fakes: FakeProviders = { requests: [] };
+  const holds = new Map<FakeProviderId, { arrived: (req: SeenRequest) => void; released: Promise<void> }>();
+  const fakes: FakeProviders = {
+    requests: [],
+    holdNext(provider) {
+      let arrived!: (req: SeenRequest) => void;
+      let release!: () => void;
+      const seen = new Promise<SeenRequest>((resolve) => { arrived = resolve; });
+      holds.set(provider, { arrived, released: new Promise<void>((resolve) => { release = resolve; }) });
+      return { seen, release };
+    },
+  };
   await ctx.route(
     (url) => url.protocol === 'https:' && HOSTS.has(url.hostname),
     async (route, request) => {
@@ -196,6 +211,15 @@ export async function installFakeProviders(ctx: BrowserContext, keys: FakeKeys):
         body: parseBody(request),
       };
       fakes.requests.push(seen);
+      const hold = holds.get(provider);
+      if (hold) {
+        holds.delete(provider);
+        hold.arrived(seen);
+        await hold.released;
+        // The wallet may have given up on it meanwhile.
+        await HANDLERS[provider](route, seen, keys).catch(() => {});
+        return;
+      }
       await HANDLERS[provider](route, seen, keys);
     },
   );

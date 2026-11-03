@@ -61,7 +61,7 @@ function renderConnect(): void {
           url ? ` <a href="${url}" target="_blank" style="color:#818cf8">Install extension</a>` : ''
         }</p>`;
       } else {
-        errorEl.innerHTML = `<p class="error">${err instanceof Error ? err.message : 'Connection failed'}</p>`;
+        errorEl.innerHTML = `<p class="error">${err instanceof Error ? escapeHtml(err.message) : 'Connection failed'}</p>`;
       }
       btn.disabled = false;
       btn.textContent = 'Connect Wallet';

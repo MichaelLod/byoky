@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { LIVE, bridgeBin, launchWallet, loadSetupToken, startServer, type Wallet } from '../fixtures';
+import { LIVE, bridgeBin, cleanupWallet, launchWallet, loadSetupToken, startServer, type Wallet } from '../fixtures';
 import { getManifestLocations } from '../../packages/bridge/src/native-manifest';
 import { execSync } from 'node:child_process';
 import { spawn as spawnPty, type IPty } from '@lydell/node-pty';
@@ -27,6 +27,7 @@ const PASSWORD = 'MyStr0ng!P@ssw0rd';
 
 let wallet: Wallet;
 let openclawHome = '';
+let pluginPackDir = '';
 let authProc: IPty | null = null;
 
 async function setupWallet(w: Wallet) {
@@ -112,6 +113,7 @@ function packWorkspacePlugin(): string {
     throw new Error('packages/openclaw-plugin is not built — run: pnpm --filter @byoky/openclaw-plugin build');
   }
   const dest = fs.mkdtempSync(path.join(os.tmpdir(), 'byoky-openclaw-plugin-'));
+  pluginPackDir = dest;
   execSync(`pnpm pack --pack-destination ${JSON.stringify(dest)}`, { cwd: pluginDir, stdio: 'inherit' });
   const tarball = fs.readdirSync(dest).find((f) => f.endsWith('.tgz'));
   if (!tarball) throw new Error('pnpm pack produced no tarball');
@@ -167,7 +169,12 @@ test.describe('OpenClaw + byoky extension + bridge full flow', () => {
       try { authProc.kill(); } catch { /* already exited */ }
       authProc = null;
     }
-    try { await wallet?.ctx.close(); } catch { /* ignore */ }
+    // The profile holds the setup token, the HOME a link to the real
+    // ~/.byoky-bridge: rmSync removes the link, not what it points to.
+    await cleanupWallet(wallet);
+    for (const dir of [openclawHome, pluginPackDir]) {
+      if (dir) fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test('set up wallet', async () => {

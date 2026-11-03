@@ -24,7 +24,7 @@ Templates: `chat`, `multi-provider`, `backend-relay`. Run `npx create-byoky-app 
 
 Streaming chat built on the Anthropic SDK with Byoky's proxied fetch.
 
-- Next.js 15 + React
+- Next.js 16 + React
 - Streaming responses via `client.messages.stream()`
 - Connection status and disconnect
 
