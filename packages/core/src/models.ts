@@ -49,7 +49,8 @@ export interface ModelCapabilities {
   parallelToolCalls: boolean;
   /** Image inputs. */
   vision: boolean;
-  /** JSON-schema-constrained outputs (OpenAI `response_format: json_schema`). */
+  /** JSON-schema-constrained outputs (OpenAI `response_format: json_schema`,
+   *  Gemini `responseSchema`, Claude `output_config.format`). */
   structuredOutput: boolean;
   /** Accepts a top-level system prompt. */
   systemPrompt: boolean;
@@ -229,6 +230,17 @@ export const MODELS: ModelEntry[] = [
   },
 
   // ─── Google Gemini ───────────────────────────────────────────────────────
+  // 3.6 Flash is the default (see DEFAULT_MODELS): 3.8 Flash, the newer
+  // one, failed every call on 2 Nov 2026.
+  {
+    id: 'gemini-3.6-flash',
+    providerId: 'gemini',
+    family: 'gemini',
+    displayName: 'Gemini 3.6 Flash',
+    contextWindow: 1_048_576,
+    maxOutput: 65_536,
+    capabilities: FRONTIER,
+  },
   {
     id: 'gemini-3.8-flash',
     providerId: 'gemini',
@@ -240,7 +252,7 @@ export const MODELS: ModelEntry[] = [
   },
   // Google serves the 2.5 models only to projects that used them before;
   // they are not deprecated, but new projects get an error and should use
-  // 3.8 Flash.
+  // a 3.x Flash.
   {
     id: 'gemini-2.5-pro',
     providerId: 'gemini',
@@ -272,8 +284,6 @@ export const MODELS: ModelEntry[] = [
       ...FRONTIER,
       // Command A does not accept image inputs at the chat API surface.
       vision: false,
-      // No structured output constraint equivalent to OpenAI json_schema.
-      structuredOutput: false,
     },
   },
 ];
@@ -284,14 +294,18 @@ export const MODELS: ModelEntry[] = [
  *
  * Pick the family flagship: highest-capability, broadest context, full feature
  * set, and callable by every account. The mini/nano variants are not
- * defaults — users can opt in explicitly. Gemini's is 3.8 Flash, the model
- * Google points new projects to: 2.5 Pro is closed to new projects, and
- * translation hasn't been checked against Gemini 4 Argon's request rules.
+ * defaults — users can opt in explicitly. Gemini's is 3.6 Flash, a stable
+ * model with no shutdown announced (ai.google.dev/gemini-api/docs/
+ * deprecations, checked 2026-11-02): 3.8 Flash, the one Google points new
+ * projects to, failed every call on 2 Nov 2026 (503 "high demand" or no
+ * answer within 45-300 s, 0 of 13) while 3.6 Flash answered every call in
+ * 1.3-3.8 s; 2.5 Pro is closed to new projects, and translation hasn't been
+ * checked against Gemini 4 Argon's request rules.
  */
 export const DEFAULT_MODELS: Record<ModelFamily, string> = {
   anthropic: 'claude-sonnet-4-6',
   openai: 'gpt-5.5',
-  gemini: 'gemini-3.8-flash',
+  gemini: 'gemini-3.6-flash',
   cohere: 'command-a-03-2025',
 };
 
@@ -301,6 +315,31 @@ export const DEFAULT_MODELS: Record<ModelFamily, string> = {
  */
 export function getModel(id: string): ModelEntry | undefined {
   return MODELS.find((m) => m.id === id);
+}
+
+/**
+ * The most tokens `model` writes in one response, when the registry knows
+ * it (OpenRouter's `openai/`-prefixed ids are looked up without the
+ * prefix); undefined for any other id, whose limit Byoky can't know.
+ * `providerId` is the provider the request goes to.
+ */
+export function maxOutputFor(model: string, providerId?: string): number | undefined {
+  const entry =
+    getModel(model) ??
+    (providerId === 'openrouter' && model.startsWith('openai/') ? getModel(model.slice('openai/'.length)) : undefined);
+  return entry?.maxOutput;
+}
+
+/**
+ * `maxTokens` capped at what `model` can write in one response: an app
+ * sizes its output limit for its own model, and a provider refuses a
+ * request whose limit is above the model's (Anthropic: "max_tokens: N >
+ * 64000, which is the maximum allowed number of output tokens"). Unknown
+ * models are left as they are.
+ */
+export function capMaxTokens(maxTokens: number, model: string, providerId?: string): number {
+  const cap = maxOutputFor(model, providerId);
+  return cap !== undefined && maxTokens > cap ? cap : maxTokens;
 }
 
 /**

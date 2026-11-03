@@ -15,6 +15,7 @@ import type {
 } from '../ir.js';
 import { isIRError } from '../ir.js';
 import { geminiError } from '../errors.js';
+import { capMaxTokens } from '../../models.js';
 
 /**
  * Google Gemini (Generative Language v1beta) adapter.
@@ -213,7 +214,7 @@ function parseRequest(body: string): IRRequest {
       ir.stopSequences = gc.stopSequences.slice();
     }
     if (gc.responseMimeType === 'application/json') {
-      const schema = gc.responseJsonSchema ?? gc.responseSchema;
+      const schema = gc.responseJsonSchema ?? fromGeminiOpenApiSchema(gc.responseSchema);
       if (schema) {
         ir.responseFormat = { type: 'json_schema', schema };
       } else {
@@ -236,7 +237,7 @@ function parseRequest(body: string): IRRequest {
         flat.push({
           name: fn.name,
           ...(fn.description ? { description: fn.description } : {}),
-          parameters: fn.parametersJsonSchema ?? fn.parameters ?? { type: 'object', properties: {} },
+          parameters: fn.parametersJsonSchema ?? fromGeminiOpenApiSchema(fn.parameters) ?? { type: 'object', properties: {} },
         });
       }
     }
@@ -272,6 +273,79 @@ type JsonObject = Record<string, unknown>;
 
 function isJsonObject(v: unknown): v is JsonObject {
   return v !== null && typeof v === 'object' && !Array.isArray(v);
+}
+
+/** Gemini's int64 Schema fields, which @google/genai types (and sends) as strings. */
+const OPENAPI_INT64_KEYS = new Set(['minItems', 'maxItems', 'minLength', 'maxLength', 'minProperties', 'maxProperties']);
+
+/**
+ * JSON Schema for a schema in Gemini's OpenAPI subset (functionDeclarations
+ * `parameters`, generationConfig `responseSchema`), which the other
+ * families don't read. @google/genai sends those with upper-case types
+ * (Type.OBJECT is 'OBJECT') and nullability as `nullable`, even when the
+ * developer wrote lower-case JSON Schema. Returns a copy:
+ *  - `type` lower-cased, TYPE_UNSPECIFIED dropped;
+ *  - `nullable: true` as anyOf [schema, {type:'null'}] (not at the root,
+ *    which must stay an object schema for a tool);
+ *  - int64 fields sent as strings ('1') as numbers;
+ *  - Gemini-only `propertyOrdering`, `example` and `format: 'enum'` dropped.
+ * Undefined stays undefined.
+ */
+function fromGeminiOpenApiSchema(schema: unknown): unknown {
+  return openApiToJsonSchema(schema, true);
+}
+
+function openApiToJsonSchema(schema: unknown, root: boolean): unknown {
+  if (!isJsonObject(schema)) return schema;
+  const convert = (v: unknown) => openApiToJsonSchema(v, false);
+  const out: JsonObject = {};
+  for (const [key, value] of Object.entries(schema)) {
+    switch (key) {
+      case 'type':
+        if (typeof value !== 'string') out.type = value;
+        else if (value.toUpperCase() !== 'TYPE_UNSPECIFIED') out.type = value.toLowerCase();
+        break;
+      case 'properties':
+        out.properties = isJsonObject(value)
+          ? Object.fromEntries(Object.entries(value).map(([name, prop]) => [name, convert(prop)]))
+          : value;
+        break;
+      case 'items':
+        out.items = Array.isArray(value) ? value.map(convert) : convert(value);
+        break;
+      case 'anyOf':
+      case 'allOf':
+      case 'oneOf':
+      case 'prefixItems':
+        out[key] = Array.isArray(value) ? value.map(convert) : value;
+        break;
+      case 'nullable':
+      case 'propertyOrdering':
+      case 'example':
+        break;
+      case 'format':
+        if (value !== 'enum') out.format = value;
+        break;
+      default:
+        out[key] = OPENAPI_INT64_KEYS.has(key) && typeof value === 'string' && /^\d+$/.test(value)
+          ? Number(value)
+          : value;
+    }
+  }
+  if (schema.nullable !== true || root || out.type === 'null') return out;
+  const isNull = (s: unknown) => isJsonObject(s) && s.type === 'null';
+  if (Array.isArray(out.anyOf)) {
+    if (!out.anyOf.some(isNull)) out.anyOf = [...out.anyOf, { type: 'null' }];
+    return out;
+  }
+  // The annotations stay on the outside, where a model reads them.
+  const { description, title, default: dflt, ...rest } = out;
+  return {
+    ...(description !== undefined ? { description } : {}),
+    ...(title !== undefined ? { title } : {}),
+    ...(dflt !== undefined ? { default: dflt } : {}),
+    anyOf: [rest, { type: 'null' }],
+  };
 }
 
 /** Copy each snake_case key present to its camelCase name; camelCase wins. */
@@ -492,7 +566,7 @@ function serializeRequest(ctx: TranslationContext, ir: IRRequest): string {
   if (typeof ir.temperature === 'number') gc.temperature = ir.temperature;
   if (typeof ir.topP === 'number') gc.topP = ir.topP;
   if (typeof ir.topK === 'number') gc.topK = ir.topK;
-  if (typeof ir.maxTokens === 'number') gc.maxOutputTokens = ir.maxTokens;
+  if (typeof ir.maxTokens === 'number') gc.maxOutputTokens = capMaxTokens(ir.maxTokens, ctx.dstModel, ctx.dstProviderId);
   if (ir.stopSequences && ir.stopSequences.length > 0) gc.stopSequences = ir.stopSequences.slice();
   if (ir.responseFormat?.type === 'json') {
     gc.responseMimeType = 'application/json';
@@ -504,9 +578,11 @@ function serializeRequest(ctx: TranslationContext, ir: IRRequest): string {
     gc.responseJsonSchema = toGeminiJsonSchema(ir.responseFormat.schema);
   }
   if (ir.thinking?.enabled) {
+    // A budget no larger than the (capped) output limit.
+    const budget = ir.thinking.budgetTokens;
     gc.thinkingConfig = {
-      ...(typeof ir.thinking.budgetTokens === 'number'
-        ? { thinkingBudget: ir.thinking.budgetTokens }
+      ...(typeof budget === 'number'
+        ? { thinkingBudget: typeof gc.maxOutputTokens === 'number' ? Math.min(budget, gc.maxOutputTokens) : budget }
         : {}),
     };
   }
@@ -946,6 +1022,14 @@ function createStreamParser(): IRStreamParser {
     flush(): IRStreamEvent[] {
       if (state.done) return [];
       const events: IRStreamEvent[] = [];
+      // A last frame without its closing blank line: a data: frame, or the
+      // bare error object Google ends a failed stream with.
+      const rest = state.buffer;
+      state.buffer = '';
+      if (rest.trim().length > 0) {
+        processGeminiFrame(rest, state, events);
+        if (state.done) return events;
+      }
       if (state.textBlockOpen && state.textBlockIndex != null) {
         events.push({ type: 'content_block_stop', index: state.textBlockIndex });
         state.textBlockOpen = false;
@@ -986,7 +1070,15 @@ function processGeminiFrame(
   events: IRStreamEvent[],
 ): void {
   const dataLine = extractGeminiDataLine(frame);
-  if (dataLine == null) return;
+  if (dataLine == null) {
+    // An error in the middle of a 200 stream comes as a bare JSON object,
+    // compact or pretty-printed, with no data: prefix (the official SDKs
+    // raise on it: @google/genai parses each raw chunk, google-genai for
+    // Python gathers non-data lines by brace balance).
+    const error = bareStreamError(frame);
+    if (error) pushGeminiStreamError(error, state, events);
+    return;
+  }
 
   let data: GeminiResponse;
   try {
@@ -996,15 +1088,7 @@ function processGeminiFrame(
   }
 
   if (data.error) {
-    state.done = true;
-    events.push({
-      type: 'error',
-      error: {
-        type: data.error.status ?? 'api_error',
-        message: data.error.message ?? 'Gemini stream error',
-        ...(typeof data.error.code === 'number' ? { status: data.error.code } : {}),
-      },
-    });
+    pushGeminiStreamError(data.error, state, events);
     return;
   }
 
@@ -1091,6 +1175,39 @@ function processGeminiFrame(
   if (candidate.finishReason) {
     state.pendingFinish = mapGeminiFinishToIR(candidate.finishReason, state.hasToolUse);
   }
+}
+
+/** Ends the stream with the error Gemini sent: no made-up finish follows. */
+function pushGeminiStreamError(
+  error: NonNullable<GeminiResponse['error']>,
+  state: GeminiParseState,
+  events: IRStreamEvent[],
+): void {
+  state.done = true;
+  events.push({
+    type: 'error',
+    error: {
+      type: error.status ?? 'api_error',
+      message: error.message ?? 'Gemini stream error',
+      ...(typeof error.code === 'number' ? { status: error.code } : {}),
+    },
+  });
+}
+
+/**
+ * The error of a frame that is a bare JSON error object, or one wrapped in
+ * an array as Gemini's non-SSE bodies are; null for anything else.
+ */
+function bareStreamError(frame: string): NonNullable<GeminiResponse['error']> | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(frame.trim());
+  } catch {
+    return null;
+  }
+  if (Array.isArray(parsed) && parsed.length === 1) parsed = parsed[0];
+  if (!isJsonObject(parsed) || !isJsonObject(parsed.error)) return null;
+  return parsed.error as NonNullable<GeminiResponse['error']>;
 }
 
 function extractGeminiDataLine(frame: string): string | null {
@@ -1217,10 +1334,17 @@ function createStreamSerializer(ctx: TranslationContext): IRStreamSerializer {
             });
             state.done = true;
             break;
-          case 'error':
-            out += emitFrame({ error: { ...geminiError(event.error), message: event.error.message } });
+          case 'error': {
+            // Google's own wire format for an error in a 200 stream: a bare
+            // JSON object, no data: prefix and no blank line after it.
+            // @google/genai raises ApiError on that chunk (and, should it
+            // arrive joined to earlier frames, on the unterminated segment
+            // at the end); a data: frame it would yield as an empty chunk.
+            const { code, status } = geminiError(event.error);
+            out += JSON.stringify({ error: { code, message: event.error.message, status } });
             state.done = true;
             break;
+          }
         }
       }
       return out;

@@ -440,7 +440,7 @@ describe('geminiAdapter — JSON Schema fields', () => {
     expect(ir.responseFormat).toEqual({ type: 'json_schema', schema: { type: 'object' } });
   });
 
-  it('still parses the OpenAPI parameters and responseSchema fields', () => {
+  it('parses the OpenAPI parameters and responseSchema fields into JSON Schema', () => {
     const ir = geminiAdapter.parseRequest(
       JSON.stringify({
         contents: [{ role: 'user', parts: [{ text: 'x' }] }],
@@ -448,8 +448,73 @@ describe('geminiAdapter — JSON Schema fields', () => {
         generationConfig: { responseMimeType: 'application/json', responseSchema: { type: 'STRING' } },
       }),
     );
-    expect(ir.tools?.[0].parameters).toEqual({ type: 'OBJECT' });
-    expect(ir.responseFormat).toEqual({ type: 'json_schema', schema: { type: 'STRING' } });
+    expect(ir.tools?.[0].parameters).toEqual({ type: 'object' });
+    expect(ir.responseFormat).toEqual({ type: 'json_schema', schema: { type: 'string' } });
+  });
+
+  // The body @google/genai sends for Type.* schemas (captured from 1.46).
+  const sdkSchema = {
+    type: 'OBJECT',
+    properties: {
+      city: { type: 'STRING', description: 'City name' },
+      unit: { type: 'STRING', format: 'enum', enum: ['C', 'F'], nullable: true, description: 'Unit' },
+      days: { type: 'ARRAY', items: { type: 'INTEGER', example: 3 }, minItems: '1', maxItems: '7' },
+      when: { anyOf: [{ type: 'STRING' }, { type: 'INTEGER' }], nullable: true },
+      extra: { type: 'TYPE_UNSPECIFIED', description: 'anything' },
+    },
+    required: ['city'],
+    propertyOrdering: ['city', 'unit', 'days', 'when', 'extra'],
+  };
+  const jsonSchema = {
+    type: 'object',
+    properties: {
+      city: { type: 'string', description: 'City name' },
+      unit: { description: 'Unit', anyOf: [{ type: 'string', enum: ['C', 'F'] }, { type: 'null' }] },
+      days: { type: 'array', items: { type: 'integer' }, minItems: 1, maxItems: 7 },
+      when: { anyOf: [{ type: 'string' }, { type: 'integer' }, { type: 'null' }] },
+      extra: { description: 'anything' },
+    },
+    required: ['city'],
+  };
+
+  it('turns nested Type.* values, nullable, int64 strings, propertyOrdering and format:enum into JSON Schema', () => {
+    const body = {
+      contents: [{ role: 'user', parts: [{ text: 'x' }] }],
+      tools: [{ functionDeclarations: [{ name: 'get_weather', parameters: sdkSchema }] }],
+    };
+    const before = JSON.stringify(body);
+    const ir = geminiAdapter.parseRequest(before);
+    expect(ir.tools?.[0].parameters).toEqual(jsonSchema);
+    const rf = geminiAdapter.parseRequest(
+      JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: 'x' }] }],
+        generationConfig: { responseMimeType: 'application/json', responseSchema: sdkSchema },
+      }),
+    ).responseFormat;
+    expect(rf).toEqual({ type: 'json_schema', schema: jsonSchema });
+  });
+
+  it('keeps a nullable root an object schema', () => {
+    const ir = geminiAdapter.parseRequest(
+      JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: 'x' }] }],
+        tools: [{ functionDeclarations: [{ name: 'f', parameters: { type: 'OBJECT', nullable: true, properties: {} } }] }],
+      }),
+    );
+    expect(ir.tools?.[0].parameters).toEqual({ type: 'object', properties: {} });
+  });
+
+  it('leaves parametersJsonSchema and responseJsonSchema as they are', () => {
+    const odd = { type: 'object', properties: { a: { type: 'string', example: 'x', format: 'enum' } } };
+    const ir = geminiAdapter.parseRequest(
+      JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: 'x' }] }],
+        tools: [{ functionDeclarations: [{ name: 'f', parametersJsonSchema: odd, parameters: { type: 'OBJECT' } }] }],
+        generationConfig: { responseMimeType: 'application/json', responseJsonSchema: odd, responseSchema: { type: 'STRING' } },
+      }),
+    );
+    expect(ir.tools?.[0].parameters).toEqual(odd);
+    expect(ir.responseFormat).toEqual({ type: 'json_schema', schema: odd });
   });
 });
 
@@ -712,5 +777,75 @@ describe('geminiAdapter — blocked prompts', () => {
     ];
     expect(events.find((e) => e.type === 'text_delta')).toMatchObject({ text: 'Prompt blocked: PROHIBITED_CONTENT' });
     expect(events.find((e) => e.type === 'message_delta')).toMatchObject({ stopReason: 'refusal' });
+  });
+});
+
+describe('geminiAdapter — an error in a 200 stream', () => {
+  const TEXT_FRAME = 'data: {"candidates":[{"content":{"parts":[{"text":"Hel"}],"role":"model"}}],"responseId":"r1"}\r\n\r\n';
+  const ERROR = { code: 503, message: 'The model is overloaded.', status: 'UNAVAILABLE' };
+
+  function parse(chunks: string[]): IRStreamEvent[] {
+    const parser = geminiAdapter.createStreamParser();
+    const events: IRStreamEvent[] = [];
+    for (const c of chunks) events.push(...parser.process(c));
+    events.push(...parser.flush());
+    return events;
+  }
+
+  function expectEndsInError(events: IRStreamEvent[]): void {
+    expect(events.map((e) => e.type)).not.toContain('message_delta');
+    expect(events.map((e) => e.type)).not.toContain('message_stop');
+    expect(events[events.length - 1]).toEqual({
+      type: 'error',
+      error: { type: 'UNAVAILABLE', message: 'The model is overloaded.', status: 503 },
+    });
+  }
+
+  it('reads a bare compact error object, with no data: prefix, as an error', () => {
+    expectEndsInError(parse([TEXT_FRAME + JSON.stringify({ error: ERROR }) + '\r\n\r\n']));
+  });
+
+  it('reads a pretty-printed error object with CRLF line ends', () => {
+    const pretty = JSON.stringify({ error: ERROR }, null, 2).replace(/\n/g, '\r\n');
+    expectEndsInError(parse([TEXT_FRAME, pretty + '\r\n\r\n']));
+  });
+
+  it('reads an error object left unterminated at the end of the stream', () => {
+    expectEndsInError(parse([TEXT_FRAME, JSON.stringify({ error: ERROR }, null, 2).replace(/\n/g, '\r\n') + '\r\n']));
+    expectEndsInError(parse([TEXT_FRAME, JSON.stringify({ error: ERROR })]));
+  });
+
+  it('reads an error wrapped in an array', () => {
+    expectEndsInError(parse([TEXT_FRAME, JSON.stringify([{ error: ERROR }])]));
+  });
+
+  it('keeps a last data: frame that has no blank line after it', () => {
+    const events = parse([
+      TEXT_FRAME,
+      'data: {"candidates":[{"content":{"parts":[{"text":"lo"}],"role":"model"},"finishReason":"MAX_TOKENS"}]}',
+    ]);
+    const text = events.flatMap((e) => (e.type === 'text_delta' ? [e.text] : [])).join('');
+    expect(text).toBe('Hello');
+    expect(events.find((e) => e.type === 'message_delta')).toMatchObject({ stopReason: 'max_tokens' });
+    expect(events[events.length - 1].type).toBe('message_stop');
+  });
+
+  it('ignores a non-JSON frame without a data: line', () => {
+    const events = parse([TEXT_FRAME, ': keep-alive\r\n\r\n']);
+    expect(events.map((e) => e.type)).not.toContain('error');
+    expect(events[events.length - 1].type).toBe('message_stop');
+  });
+
+  it('the serializer sends an error the way Google does: a bare JSON object', () => {
+    const serializer = geminiAdapter.createStreamSerializer(ctx({ isStreaming: true }));
+    const out = serializer.process([
+      { type: 'message_start', id: 'm1', usage: {} },
+      { type: 'content_block_start', index: 0, block: { type: 'text' } },
+      { type: 'text_delta', index: 0, text: 'Hel' },
+      { type: 'error', error: { type: 'overloaded_error', message: 'Overloaded' } },
+    ]) + serializer.flush();
+    expect(out.startsWith('data: ')).toBe(true);
+    const tail = out.slice(out.lastIndexOf('\n\n') + 2);
+    expect(tail).toBe('{"error":{"code":529,"message":"Overloaded","status":"UNAVAILABLE"}}');
   });
 });

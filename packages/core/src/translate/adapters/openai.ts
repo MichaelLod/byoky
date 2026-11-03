@@ -1,6 +1,6 @@
 import type { ModelShapingContext, TranslationContext } from '../types.js';
 import { TranslationError } from '../types.js';
-import { getModel } from '../../models.js';
+import { capMaxTokens, getModel } from '../../models.js';
 import type { FamilyAdapter, IRStreamParser, IRStreamSerializer } from '../adapter.js';
 import type {
   IRRequest,
@@ -94,7 +94,8 @@ type OpenAIMessageContent = string | OpenAIContentPart[];
 type OpenAIContentPart =
   | { type: 'text'; text: string }
   | { type: 'image_url'; image_url: { url: string } | string }
-  | { type: 'file'; file: { filename?: string; file_data?: string; file_id?: string } };
+  | { type: 'file'; file: { filename?: string; file_data?: string; file_id?: string } }
+  | { type: 'input_audio'; input_audio: { data: string; format: string } };
 
 interface OpenAIToolCall {
   id: string;
@@ -310,19 +311,48 @@ function parseOpenAIUserContent(content: OpenAIMessageContent): IRContentBlock[]
     } else if (part.type === 'image_url') {
       const url = extractOpenAIImageUrl((part as { image_url: { url: string } | string }).image_url);
       const source = parseImageUrl(url);
-      if (source) out.push({ type: 'image', source });
+      if (!source) {
+        throw new TranslationError(
+          'UNSUPPORTED_FEATURE',
+          'An image_url that is neither an http(s) URL nor base64 data can\'t be routed to another provider.',
+        );
+      }
+      out.push({ type: 'image', source });
     } else if (part.type === 'file') {
-      const doc = parseOpenAIFilePart((part as { file?: { filename?: unknown; file_data?: unknown } }).file);
+      const doc = parseOpenAIFilePart((part as { file?: { filename?: unknown; file_data?: unknown; file_id?: unknown } }).file);
       if (doc) out.push(doc);
+    } else if (part.type === 'input_audio') {
+      out.push(parseOpenAIAudioPart((part as { input_audio?: { data?: unknown; format?: unknown } }).input_audio));
     }
   }
   return out;
 }
 
-/** A file part with inline data (file_id refers to OpenAI's own storage). */
+/** OpenAI input_audio formats and their media types. */
+const OPENAI_AUDIO_TYPES: Record<string, string> = { wav: 'audio/wav', mp3: 'audio/mpeg' };
+
+/** An input_audio part as an audio document, which destinations take or refuse. */
+function parseOpenAIAudioPart(audio: { data?: unknown; format?: unknown } | undefined): IRDocumentBlock {
+  if (!audio || typeof audio.data !== 'string' || !audio.data || typeof audio.format !== 'string' || !audio.format) {
+    throw new TranslationError('UNSUPPORTED_FEATURE', 'An input_audio part needs base64 data and a format.');
+  }
+  const format = audio.format.toLowerCase();
+  return { type: 'document', source: { kind: 'base64', mediaType: OPENAI_AUDIO_TYPES[format] ?? `audio/${format}`, data: audio.data } };
+}
+
+/**
+ * A file part with inline data. A file_id names a file in OpenAI's own
+ * storage, which no other provider can read.
+ */
 function parseOpenAIFilePart(
-  file: { filename?: unknown; file_data?: unknown } | undefined,
+  file: { filename?: unknown; file_data?: unknown; file_id?: unknown } | undefined,
 ): IRDocumentBlock | null {
+  if (file && (typeof file.file_data !== 'string' || !file.file_data) && typeof file.file_id === 'string' && file.file_id) {
+    throw new TranslationError(
+      'UNSUPPORTED_FEATURE',
+      'A file_id names a file in OpenAI\'s storage, which another provider can\'t read; send the file inline (file_data).',
+    );
+  }
   if (!file || typeof file.file_data !== 'string' || !file.file_data) return null;
   const title = typeof file.filename === 'string' && file.filename ? { title: file.filename } : {};
   const match = /^data:([^;,]+);base64,(.+)$/.exec(file.file_data);
@@ -430,8 +460,9 @@ function serializeRequest(ctx: TranslationContext, ir: IRRequest): string {
     reasoningOffForTools(ctx.dstModel, ctx.dstProviderId);
   if (reasoningOff) out.reasoning_effort = 'none';
   if (typeof ir.maxTokens === 'number') {
-    if (usesMaxCompletionTokens(isReasoningDst, ctx.dstProviderId)) out.max_completion_tokens = ir.maxTokens;
-    else out.max_tokens = ir.maxTokens;
+    const maxTokens = capMaxTokens(ir.maxTokens, ctx.dstModel, ctx.dstProviderId);
+    if (usesMaxCompletionTokens(isReasoningDst, ctx.dstProviderId)) out.max_completion_tokens = maxTokens;
+    else out.max_tokens = maxTokens;
   }
   if (typeof ir.temperature === 'number' && (!isReasoningDst || reasoningOff)) {
     out.temperature = ir.temperature;
@@ -501,6 +532,11 @@ function serializeRequest(ctx: TranslationContext, ir: IRRequest): string {
  * to the app's own body so every field they don't cover is kept.
  */
 function shapeRequestForModel(body: Record<string, unknown>, ctx: ModelShapingContext): void {
+  // An output limit sized for the app's own model, capped at the pinned one's.
+  for (const key of ['max_tokens', 'max_completion_tokens']) {
+    const limit = body[key];
+    if (typeof limit === 'number') body[key] = capMaxTokens(limit, ctx.dstModel, ctx.dstProviderId);
+  }
   if (!isOpenAIReasoningModel(ctx.dstModel)) return;
   if (Array.isArray(body.tools) && body.tools.length > 0 && reasoningOffForTools(ctx.dstModel, ctx.dstProviderId)) {
     body.reasoning_effort = 'none';
@@ -731,6 +767,17 @@ function irDocumentToOpenAIPart(doc: IRDocumentBlock): OpenAIContentPart {
       'UNSUPPORTED_FEATURE',
       'OpenAI chat completions cannot read a document by URL; send it inline.',
     );
+  }
+  if (source.mediaType.startsWith('audio/')) {
+    const format = Object.keys(OPENAI_AUDIO_TYPES).find((f) => OPENAI_AUDIO_TYPES[f] === source.mediaType)
+      ?? ({ 'audio/x-wav': 'wav', 'audio/wave': 'wav', 'audio/mp3': 'mp3' } as Record<string, string>)[source.mediaType];
+    if (!format) {
+      throw new TranslationError(
+        'UNSUPPORTED_FEATURE',
+        `OpenAI chat completions takes WAV and MP3 audio only, not ${source.mediaType}.`,
+      );
+    }
+    return { type: 'input_audio', input_audio: { data: source.data, format } };
   }
   const filename = doc.title ?? (source.mediaType === 'application/pdf' ? 'document.pdf' : 'document');
   return { type: 'file', file: { filename, file_data: `data:${source.mediaType};base64,${source.data}` } };

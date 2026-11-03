@@ -3,6 +3,8 @@ import {
   MODELS,
   DEFAULT_MODELS,
   getModel,
+  maxOutputFor,
+  capMaxTokens,
   modelsForProvider,
   modelsForFamily,
   capabilityGaps,
@@ -30,6 +32,11 @@ describe('MODELS', () => {
 
   it('contains the Gemini model Google points new projects to', () => {
     expect(getModel('gemini-3.8-flash')?.family).toBe('gemini');
+  });
+
+  it('defaults Gemini to 3.6 Flash, which answers (3.8 Flash failed every call on 2 Nov 2026)', () => {
+    expect(DEFAULT_MODELS.gemini).toBe('gemini-3.6-flash');
+    expect(getModel('gemini-3.6-flash')).toMatchObject({ family: 'gemini', maxOutput: 65_536, contextWindow: 1_048_576 });
   });
 
   it('has no shut-down models', () => {
@@ -197,6 +204,13 @@ describe('capabilityGaps', () => {
     expect(capabilityGaps(used, getModel('command-a-03-2025')!)).toEqual(['vision']);
   });
 
+  it('does not flag structured outputs for any registry model: every family takes a JSON schema', () => {
+    // Claude output_config.format, Gemini responseJsonSchema, OpenAI json_schema,
+    // Cohere json_object + json_schema (command-a-03-2025 live 2026-11-02: 200).
+    const used: CapabilitySet = { tools: false, vision: false, structuredOutput: true, reasoning: false };
+    for (const model of MODELS) expect(capabilityGaps(used, model), model.id).toEqual([]);
+  });
+
   it('does not flag capabilities the app never used', () => {
     expect(capabilityGaps(EMPTY_CAPABILITY_SET, textOnly)).toEqual([]);
   });
@@ -241,5 +255,20 @@ describe('capabilityLabel', () => {
     expect(capabilityLabel('vision')).toMatch(/image/i);
     expect(capabilityLabel('structuredOutput')).toMatch(/structured/i);
     expect(capabilityLabel('reasoning')).toMatch(/reasoning/i);
+  });
+});
+
+describe('maxOutputFor / capMaxTokens', () => {
+  it('knows registry models, OpenRouter\'s openai/ ids, and nothing else', () => {
+    expect(maxOutputFor('command-a-03-2025')).toBe(8_000);
+    expect(maxOutputFor('openai/gpt-5.4', 'openrouter')).toBe(128_000);
+    expect(maxOutputFor('openai/gpt-5.4', 'openai')).toBeUndefined();
+    expect(maxOutputFor('some-local-model')).toBeUndefined();
+  });
+
+  it('caps only above the max output of a known model', () => {
+    expect(capMaxTokens(32_000, 'command-a-03-2025')).toBe(8_000);
+    expect(capMaxTokens(4_000, 'command-a-03-2025')).toBe(4_000);
+    expect(capMaxTokens(1_000_000, 'some-local-model')).toBe(1_000_000);
   });
 });

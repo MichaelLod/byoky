@@ -383,3 +383,80 @@ describe('documents from Gemini and OpenAI apps', () => {
     ]);
   });
 });
+
+describe('attachments the parsers cannot carry are refused, never dropped', () => {
+  const openaiBody = (content: unknown[]) => JSON.stringify({ model: 'gpt-5.5', messages: [{ role: 'user', content }] });
+  const audio = { type: 'input_audio', input_audio: { data: 'UklGRg==', format: 'wav' } };
+
+  it('openai → gemini sends input_audio as inline audio', () => {
+    const out = JSON.parse(translateRequest(ctx('openai', 'gemini'), openaiBody([audio, { type: 'text', text: 'transcribe' }])));
+    expect(out.contents[0].parts).toEqual([{ inlineData: { mimeType: 'audio/wav', data: 'UklGRg==' } }, { text: 'transcribe' }]);
+    const mp3 = JSON.parse(
+      translateRequest(ctx('openai', 'gemini'), openaiBody([{ type: 'input_audio', input_audio: { data: 'SUQz', format: 'mp3' } }])),
+    );
+    expect(mp3.contents[0].parts).toEqual([{ inlineData: { mimeType: 'audio/mpeg', data: 'SUQz' } }]);
+  });
+
+  it('openai → anthropic and → cohere refuse input_audio', () => {
+    expect(() => translateRequest(ctx('openai', 'anthropic'), openaiBody([audio, { type: 'text', text: 't' }]))).toThrow(
+      /PDF and plain-text documents only/,
+    );
+    expect(() => translateRequest(ctx('openai', 'cohere'), openaiBody([audio, { type: 'text', text: 't' }]))).toThrow(/binary documents/);
+  });
+
+  it('gemini → openai sends WAV or MP3 audio as input_audio, and refuses other audio', () => {
+    const body = (mimeType: string) =>
+      JSON.stringify({ contents: [{ role: 'user', parts: [{ inlineData: { mimeType, data: 'AAAA' } }, { text: 'transcribe' }] }] });
+    const out = JSON.parse(translateRequest(ctx('gemini', 'openai'), body('audio/wav')));
+    expect(out.messages[0].content).toEqual([
+      { type: 'input_audio', input_audio: { data: 'AAAA', format: 'wav' } },
+      { type: 'text', text: 'transcribe' },
+    ]);
+    expect(JSON.parse(translateRequest(ctx('gemini', 'openai'), body('audio/mp3'))).messages[0].content[0]).toEqual({
+      type: 'input_audio',
+      input_audio: { data: 'AAAA', format: 'mp3' },
+    });
+    expect(() => translateRequest(ctx('gemini', 'openai'), body('audio/ogg'))).toThrow(/WAV and MP3 audio only/);
+  });
+
+  it('openai: a file part naming a file_id is refused', () => {
+    for (const dst of ['anthropic', 'gemini', 'cohere'] as const) {
+      expect(() =>
+        translateRequest(ctx('openai', dst), openaiBody([{ type: 'file', file: { file_id: 'file-abc' } }, { type: 'text', text: 'summarize' }])),
+      ).toThrow(/file_id/);
+    }
+  });
+
+  it('openai: an image_url that is no URL or base64 data is refused', () => {
+    expect(() =>
+      translateRequest(ctx('openai', 'anthropic'), openaiBody([{ type: 'image_url', image_url: { url: 'ftp://x/cat.png' } }])),
+    ).toThrow(/image_url/);
+  });
+
+  it('anthropic: Files API image and document sources are refused toward OpenAI and Gemini', () => {
+    const image = { type: 'image', source: { type: 'file', file_id: 'file_1' } };
+    const doc = { type: 'document', source: { type: 'file', file_id: 'file_2' } };
+    for (const dst of ['openai', 'gemini'] as const) {
+      expect(() => translateRequest(ctx('anthropic', dst), anthropicBody([image, { type: 'text', text: 'what is this' }]))).toThrow(
+        /Files API/,
+      );
+      expect(() => translateRequest(ctx('anthropic', dst), anthropicBody([doc, { type: 'text', text: 'summarize' }]))).toThrow(/Files API/);
+    }
+  });
+
+  it('anthropic: an unknown or malformed source is refused', () => {
+    expect(() =>
+      translateRequest(ctx('anthropic', 'openai'), anthropicBody([{ type: 'image', source: { type: 'base64', data: PNG_B64 } }])),
+    ).toThrow(/malformed base64 source/);
+    expect(() => translateRequest(ctx('anthropic', 'gemini'), anthropicBody([{ type: 'image' }]))).toThrow(/no valid source/);
+    expect(() =>
+      translateRequest(ctx('anthropic', 'gemini'), anthropicBody([{ type: 'document', source: { type: 'weird' } }])),
+    ).toThrow(/source type weird/);
+  });
+
+  it('anthropic: a custom-content document of text becomes a text document', () => {
+    const doc = { type: 'document', source: { type: 'content', content: [{ type: 'text', text: 'a' }, { type: 'text', text: 'b' }] } };
+    const out = JSON.parse(translateRequest(ctx('anthropic', 'gemini'), anthropicBody([doc, { type: 'text', text: 'summarize' }])));
+    expect(out.contents[0].parts).toEqual([{ text: 'a\nb' }, { text: 'summarize' }]);
+  });
+});

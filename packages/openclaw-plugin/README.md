@@ -40,7 +40,7 @@ The plugin registers all 15 Byoky providers with OpenClaw:
 |----------|-------------|--------|
 | Anthropic | `byoky-anthropic` | Claude Opus 5.5, Sonnet 5.5, Haiku 5.5, Fable 5.1, Opus 4.7, Sonnet 4.6, Haiku 4.5 |
 | OpenAI | `byoky-openai` | GPT-5.5, GPT-5.4, GPT-5.4 Mini, GPT-5.4 Nano |
-| Google Gemini | `byoky-gemini` | Gemini 3.8 Flash (2.5 Pro and 2.5 Flash for past users) |
+| Google Gemini | `byoky-gemini` | Gemini 3.6 Flash, 3.8 Flash (2.5 Pro and 2.5 Flash for past users) |
 | xAI | `byoky-xai` | Grok 3, Grok 3 Mini |
 | DeepSeek | `byoky-deepseek` | DeepSeek V3, R1 |
 | Mistral | `byoky-mistral` | Mistral Large |

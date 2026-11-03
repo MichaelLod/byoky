@@ -14,7 +14,7 @@ import type {
   IRToolResultContent,
 } from '../ir.js';
 import { isIRError } from '../ir.js';
-import { getModel } from '../../models.js';
+import { capMaxTokens, getModel } from '../../models.js';
 
 /**
  * Cohere v2 Chat adapter.
@@ -404,7 +404,7 @@ function serializeRequest(ctx: TranslationContext, ir: IRRequest): string {
     messages,
   };
 
-  if (typeof ir.maxTokens === 'number') out.max_tokens = ir.maxTokens;
+  if (typeof ir.maxTokens === 'number') out.max_tokens = capMaxTokens(ir.maxTokens, ctx.dstModel, ctx.dstProviderId);
   if (typeof ir.temperature === 'number') out.temperature = ir.temperature;
   // Cohere documents p as 0.01–0.99 (so the common top_p: 1 is out of
   // range) and k as an integer 0–500.
@@ -436,10 +436,15 @@ function serializeRequest(ctx: TranslationContext, ir: IRRequest): string {
         out.tool_choice = 'REQUIRED';
         break;
       case 'tool':
-        // Cohere has no named forced tool. Silently downgrading "force tool
-        // X" to REQUIRED (any tool) lets the destination model invoke the
-        // wrong tool, which breaks app logic with no signal to the caller.
-        // Fail loud so the caller knows their constraint can't be honored.
+        // Cohere has no named forced tool. When the named tool is the only
+        // one offered (the usual structured-extraction call), REQUIRED means
+        // exactly the same. With more tools, downgrading "force tool X" to
+        // REQUIRED (any tool) lets the model invoke the wrong tool, which
+        // breaks app logic with no signal to the caller: fail loud instead.
+        if (ir.tools?.length === 1 && ir.tools[0].name === ir.toolChoice.name) {
+          out.tool_choice = 'REQUIRED';
+          break;
+        }
         throw new TranslationError(
           'UNSUPPORTED_FEATURE',
           'Cohere does not support forcing a specific tool by name.',
@@ -454,7 +459,11 @@ function serializeRequest(ctx: TranslationContext, ir: IRRequest): string {
   // Cohere's reasoning models think by default, so thinking without a budget
   // (Gemini's dynamic -1) needs no field; leaving it out also keeps the
   // parameter away from non-reasoning models such as command-a-03-2025.
-  const budget = ir.thinking?.enabled ? ir.thinking.budgetTokens : undefined;
+  let budget = ir.thinking?.enabled ? ir.thinking.budgetTokens : undefined;
+  // The budget stays below a max_tokens capped at the model's max output.
+  if (typeof budget === 'number' && typeof out.max_tokens === 'number' && budget >= out.max_tokens) {
+    budget = out.max_tokens - 1;
+  }
   if (typeof budget === 'number' && budget > 0) {
     out.thinking = { type: 'enabled', token_budget: budget };
   }

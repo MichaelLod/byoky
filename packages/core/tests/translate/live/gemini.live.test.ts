@@ -28,7 +28,7 @@ const OPENAI_KEY = process.env.OPENAI_API_KEY;
 
 // The registry's Gemini default; Google serves the 2.5 models only to
 // projects that used them before.
-const GEMINI_DST_MODEL = 'gemini-3.8-flash';
+const GEMINI_DST_MODEL = 'gemini-3.6-flash';
 // Gemini 3.8 Flash can take a couple of minutes to answer.
 const GEMINI_TIMEOUT = 240_000;
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com';

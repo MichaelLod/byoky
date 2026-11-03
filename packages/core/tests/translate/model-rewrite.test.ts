@@ -348,3 +348,27 @@ describe('rewriteRequestModel — OpenAI reasoning models', () => {
     expect(out).toEqual({ model: 'gpt-5.5', max_completion_tokens: 64, messages: USER });
   });
 });
+
+describe('rewriteRequestModel — an output limit above the pinned model\'s', () => {
+  it('caps a Claude max_tokens at the pinned model\'s max output, and a thinking budget below it', () => {
+    // Anthropic: 400 "max_tokens: 100000 > 64000, which is the maximum allowed number of output tokens".
+    const out = rewrite('anthropic', 'claude-haiku-4-5-20251001', {
+      model: 'claude-sonnet-4-6', max_tokens: 100_000, messages: USER, thinking: { type: 'enabled', budget_tokens: 80_000 },
+    });
+    expect(out.max_tokens).toBe(64_000);
+    expect(out.thinking).toEqual({ type: 'enabled', budget_tokens: 63_999 });
+  });
+
+  it('leaves a limit the pinned model takes, and an unknown model\'s', () => {
+    expect(rewrite('anthropic', 'claude-haiku-4-5-20251001', { model: 'claude-sonnet-4-6', max_tokens: 64_000, messages: USER }).max_tokens).toBe(64_000);
+    expect(rewrite('anthropic', 'claude-next-9', { model: 'claude-sonnet-4-6', max_tokens: 500_000, messages: USER }).max_tokens).toBe(500_000);
+    expect(rewrite('openai', 'my-finetune', { model: 'gpt-5.5', max_tokens: 500_000, messages: USER }).max_tokens).toBe(500_000);
+  });
+
+  it('caps an OpenAI max_tokens and max_completion_tokens', () => {
+    expect(rewrite('openai', 'gpt-5.4', { model: 'gpt-x', max_completion_tokens: 200_000, messages: USER }).max_completion_tokens).toBe(128_000);
+    expect(rewrite('openai', 'gpt-5.4', { model: 'gpt-x', max_tokens: 200_000, messages: USER }).max_completion_tokens).toBe(128_000);
+    expect(rewrite('openrouter', 'openai/gpt-5.4', { model: 'gpt-x', max_tokens: 200_000, messages: USER }, 'https://openrouter.ai/api/v1/chat/completions').max_tokens)
+      .toBe(128_000);
+  });
+});

@@ -93,3 +93,37 @@ describe('mobile bridge rewriteRequestModel', () => {
     expect(out.error.message).toContain('gpt-6-astra');
   });
 });
+
+describe('mobile bridge streams: an error in the middle of a Gemini stream', () => {
+  const b = bridge as unknown as Bridge & {
+    createStreamTranslator(ctxJson: string): number;
+    processStreamChunk(handle: number, chunk: string): string;
+    flushStreamTranslator(handle: number): string;
+    releaseStreamTranslator(handle: number): void;
+  };
+  const run = (ctxJson: string, chunks: string[]) => {
+    const h = b.createStreamTranslator(ctxJson);
+    try {
+      return chunks.map((c) => b.processStreamChunk(h, c)).join('') + b.flushStreamTranslator(h);
+    } finally {
+      b.releaseStreamTranslator(h);
+    }
+  };
+
+  it('reaches an Anthropic app as event: error, not end_turn', () => {
+    const out = run(b.buildTranslationContext('anthropic', 'gemini', 'claude-sonnet-4-6', 'gemini-3.6-flash', true, 'r1'), [
+      'data: {"candidates":[{"content":{"parts":[{"text":"Hel"}],"role":"model"}}]}\r\n\r\n',
+      '{"error":{"code":503,"message":"The model is overloaded.","status":"UNAVAILABLE"}}',
+    ]);
+    expect(out).toContain('event: error');
+    expect(out).not.toContain('end_turn');
+  });
+
+  it('reaches a Gemini app as the bare JSON error object Google sends', () => {
+    const out = run(b.buildTranslationContext('gemini', 'anthropic', 'gemini-3.6-flash', 'claude-sonnet-4-6', true, 'r1'), [
+      'event: message_start\ndata: {"type":"message_start","message":{"id":"m1","usage":{"input_tokens":1,"output_tokens":0}}}\n\n',
+      'event: error\ndata: {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}\n\n',
+    ]);
+    expect(out).toBe('{"error":{"code":529,"message":"Overloaded","status":"UNAVAILABLE"}}');
+  });
+});

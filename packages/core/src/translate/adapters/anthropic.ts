@@ -1,6 +1,6 @@
 import type { ModelShapingContext, TranslationContext } from '../types.js';
 import { TranslationError } from '../types.js';
-import { getModel } from '../../models.js';
+import { capMaxTokens, getModel } from '../../models.js';
 import type { FamilyAdapter, IRStreamParser, IRStreamSerializer } from '../adapter.js';
 import type {
   IRRequest,
@@ -71,6 +71,14 @@ interface AnthropicRequest {
   tools?: AnthropicTool[];
   tool_choice?: AnthropicToolChoice;
   thinking?: { type?: 'enabled' | 'adaptive' | 'disabled' | 'between_tools'; budget_tokens?: number };
+  output_config?: { effort?: string; format?: AnthropicOutputFormat };
+  /** Deprecated spelling of output_config.format (structured-outputs beta). */
+  output_format?: AnthropicOutputFormat;
+}
+
+interface AnthropicOutputFormat {
+  type?: string;
+  schema?: unknown;
 }
 
 interface AnthropicSystemBlock {
@@ -101,12 +109,13 @@ type AnthropicImageSource =
   | { type: 'base64'; media_type: string; data: string }
   | { type: 'url'; url: string };
 
-/** PDF as base64 or URL, or plain text. (Content and file sources aren't
- *  translatable: file ids belong to Anthropic's Files API.) */
+/** PDF as base64 or URL, plain text, or text-only custom content. (File
+ *  sources aren't translatable: file ids belong to Anthropic's Files API.) */
 type AnthropicDocumentSource =
   | { type: 'base64'; media_type: string; data: string }
   | { type: 'url'; url: string }
-  | { type: 'text'; media_type: 'text/plain'; data: string };
+  | { type: 'text'; media_type: 'text/plain'; data: string }
+  | { type: 'content'; content: string | Array<{ type: 'text'; text: string }> };
 
 interface AnthropicTool {
   name: string;
@@ -216,6 +225,13 @@ function parseRequest(body: string): IRRequest {
     };
   }
 
+  // Structured output: the constraint the other families' JSON-schema
+  // response formats carry.
+  const format = parsed.output_config?.format ?? parsed.output_format;
+  if (isRecord(format) && format.type === 'json_schema' && isRecord(format.schema)) {
+    ir.responseFormat = { type: 'json_schema', schema: format.schema };
+  }
+
   return ir;
 }
 
@@ -258,13 +274,11 @@ function parseAnthropicContentBlock(
       return null;
     case 'image': {
       const src = (block as { source?: AnthropicImageSource }).source;
-      const irSrc = parseAnthropicImageSource(src);
-      return irSrc ? { type: 'image', source: irSrc } : null;
+      return { type: 'image', source: parseAnthropicImageSource(src) };
     }
     case 'document': {
       const doc = block as { source?: AnthropicDocumentSource; title?: unknown };
       const irSrc = parseAnthropicDocumentSource(doc.source);
-      if (!irSrc) return null;
       return {
         type: 'document',
         source: irSrc,
@@ -298,38 +312,59 @@ function parseAnthropicContentBlock(
   }
 }
 
-function parseAnthropicImageSource(
-  src: AnthropicImageSource | undefined,
-): IRImageSource | null {
-  if (!src || typeof src !== 'object') return null;
-  if (
-    src.type === 'base64' &&
-    typeof src.media_type === 'string' &&
-    typeof src.data === 'string'
-  ) {
-    return { kind: 'base64', mediaType: src.media_type, data: src.data };
-  }
-  if (src.type === 'url' && typeof src.url === 'string') {
-    return { kind: 'url', url: src.url };
-  }
-  return null;
+/**
+ * An image or document source no other provider can read (a Files API id,
+ * a source type Byoky doesn't know, a malformed one) is refused rather than
+ * dropped: the model would answer without the attachment.
+ */
+function untranslatableSource(kind: 'image' | 'document', src: unknown): TranslationError {
+  const type = isRecord(src) && typeof src.type === 'string' ? src.type : undefined;
+  const what =
+    type === undefined ? 'no valid source'
+    : ['base64', 'url', 'text', 'content'].includes(type) ? `a malformed ${type} source`
+    : `source type ${type}`;
+  return new TranslationError(
+    'UNSUPPORTED_FEATURE',
+    type === 'file'
+      ? `An ${kind} from Anthropic's Files API (source type file) can't be routed to another provider; send it inline.`
+      : `An ${kind} with ${what} can't be routed to another provider.`,
+  );
 }
 
-function parseAnthropicDocumentSource(
-  src: AnthropicDocumentSource | undefined,
-): IRDocumentSource | null {
-  if (!src || typeof src !== 'object') return null;
-  if (src.type === 'base64' && typeof src.media_type === 'string' && typeof src.data === 'string') {
-    return { kind: 'base64', mediaType: src.media_type, data: src.data };
+function parseAnthropicImageSource(src: AnthropicImageSource | undefined): IRImageSource {
+  if (isRecord(src)) {
+    if (src.type === 'base64' && typeof src.media_type === 'string' && typeof src.data === 'string') {
+      return { kind: 'base64', mediaType: src.media_type, data: src.data };
+    }
+    if (src.type === 'url' && typeof src.url === 'string') {
+      return { kind: 'url', url: src.url };
+    }
   }
-  // Anthropic fetches URL documents as PDFs.
-  if (src.type === 'url' && typeof src.url === 'string') {
-    return { kind: 'url', url: src.url, mediaType: 'application/pdf' };
+  throw untranslatableSource('image', src);
+}
+
+function parseAnthropicDocumentSource(src: AnthropicDocumentSource | undefined): IRDocumentSource {
+  if (isRecord(src)) {
+    if (src.type === 'base64' && typeof src.media_type === 'string' && typeof src.data === 'string') {
+      return { kind: 'base64', mediaType: src.media_type, data: src.data };
+    }
+    // Anthropic fetches URL documents as PDFs.
+    if (src.type === 'url' && typeof src.url === 'string') {
+      return { kind: 'url', url: src.url, mediaType: 'application/pdf' };
+    }
+    if (src.type === 'text' && typeof src.data === 'string') {
+      return { kind: 'text', text: src.data };
+    }
+    // Custom content: text blocks (or a string) make a text document.
+    if (src.type === 'content') {
+      const content = (src as { content?: unknown }).content;
+      if (typeof content === 'string') return { kind: 'text', text: content };
+      if (Array.isArray(content) && content.every((b) => isRecord(b) && b.type === 'text' && typeof b.text === 'string')) {
+        return { kind: 'text', text: content.map((b) => (b as { text: string }).text).join('\n') };
+      }
+    }
   }
-  if (src.type === 'text' && typeof src.data === 'string') {
-    return { kind: 'text', text: src.data };
-  }
-  return null;
+  throw untranslatableSource('document', src);
 }
 
 function parseAnthropicToolResultContent(
@@ -358,23 +393,27 @@ function serializeRequest(ctx: TranslationContext, ir: IRRequest): string {
     );
   }
 
-  // json_schema has no anthropic equivalent. json mode can be shimmed by
-  // appending a hint to the system prompt; do so for 'json' but refuse for
-  // 'json_schema' since the constraint is too strict to fake.
+  const rules = claudeRequestRules(ctx.dstModel);
+
+  // A JSON schema goes to Claude's structured outputs (output_config.format).
+  // Plain JSON mode has no Claude equivalent: a hint in the system prompt
+  // stands in for it, and for a schema that constrains nothing ({}).
   let systemParts = ir.system.slice();
-  if (ir.responseFormat?.type === 'json_schema') {
-    throw new TranslationError(
-      'UNSUPPORTED_FEATURE',
-      'OpenAI json_schema response format cannot be translated to Anthropic. Pin this app to an OpenAI- or Gemini-family model.',
-    );
-  }
-  if (ir.responseFormat?.type === 'json') {
+  let outputFormat: AnthropicOutputFormat | undefined;
+  if (ir.responseFormat?.type === 'json_schema' && constrainsOutput(ir.responseFormat.schema)) {
+    if (!rules.structuredOutputs) {
+      throw new TranslationError(
+        'UNSUPPORTED_FEATURE',
+        `This app asks for JSON that follows a schema, which ${ctx.dstModel} can't produce (no structured outputs). Pin the app to a model that supports them.`,
+      );
+    }
+    outputFormat = { type: 'json_schema', schema: toClaudeOutputSchema(ir.responseFormat.schema as Record<string, unknown>) };
+  } else if (ir.responseFormat) {
     systemParts.push({
       text: 'Respond with valid JSON only. Do not include any prose outside the JSON object.',
     });
   }
 
-  const rules = claudeRequestRules(ctx.dstModel);
   // Some models reject a forced tool choice with a 400. Anthropic's advice
   // for them is `auto` plus an instruction that names the tool, so the
   // request still asks for the call the app's code expects.
@@ -391,9 +430,11 @@ function serializeRequest(ctx: TranslationContext, ir: IRRequest): string {
   const requestedBudget = ir.thinking?.budgetTokens;
 
   // Anthropic requires max_tokens. Default to the destination model's max
-  // output, capped at 4096 (plus room for thinking), if the source omitted it.
+  // output, capped at 4096 (plus room for thinking), if the source omitted
+  // it; an app's own limit is capped at the destination's max output (before
+  // the thinking budget is fitted under it).
   const dst = getModel(ctx.dstModel);
-  let maxTokens = ir.maxTokens;
+  let maxTokens = typeof ir.maxTokens === 'number' ? capMaxTokens(ir.maxTokens, ctx.dstModel, ctx.dstProviderId) : undefined;
   if (typeof maxTokens !== 'number') {
     maxTokens = wantsThinking
       ? Math.min(
@@ -453,8 +494,166 @@ function serializeRequest(ctx: TranslationContext, ir: IRRequest): string {
   }
 
   if (thinking) out.thinking = thinking;
+  // Never alongside citations (a 400); translated requests carry none.
+  if (outputFormat) out.output_config = { format: outputFormat };
 
   return JSON.stringify(out);
+}
+
+/**
+ * True for a schema that asks for more than some JSON object: {}, `true`
+ * and {type:'object'} with no properties don't (Claude's structured outputs
+ * would narrow the last to an empty object).
+ */
+function constrainsOutput(schema: unknown): boolean {
+  if (!isRecord(schema)) return false;
+  return Object.entries(schema).some(([key, value]) => {
+    if (SCHEMA_METADATA.has(key) || key === 'title' || key === 'description') return false;
+    if (key === 'type') return value !== 'object';
+    if (key === 'additionalProperties') return value !== true && !(isRecord(value) && Object.keys(value).length === 0);
+    return true;
+  });
+}
+
+/** Schema keywords dropped without a trace: nothing a model needs. */
+const SCHEMA_METADATA = new Set(['$schema', '$id', '$comment']);
+
+/** The string formats Claude's structured outputs take. */
+const CLAUDE_STRING_FORMATS = new Set([
+  'date-time', 'time', 'date', 'duration', 'email', 'hostname', 'uri', 'ipv4', 'ipv6', 'uuid',
+]);
+
+function unsupportedSchema(why: string): TranslationError {
+  return new TranslationError(
+    'UNSUPPORTED_FEATURE',
+    `This app's JSON schema can't be sent to Claude as a structured output: ${why}.`,
+  );
+}
+
+/**
+ * `schema` fitted to Claude's structured outputs, as Anthropic's SDKs fit
+ * one (platform.claude.com/docs/en/build-with-claude/structured-outputs,
+ * checked 2026-11-02; @anthropic-ai/sdk transformJSONSchema):
+ *  - every object gets additionalProperties:false, which Claude requires;
+ *  - oneOf becomes anyOf;
+ *  - what Claude doesn't take (minimum, maxLength, maxItems, minItems above
+ *    1, pattern, other string formats, ...) moves into the description,
+ *    where the model still reads it;
+ *  - $schema, $id and $comment are dropped.
+ * A Gemini app's OpenAPI types arrive here as JSON Schema already (the
+ * Gemini parser converts them). Throws UNSUPPORTED_FEATURE for what can't
+ * be expressed: a recursive or external $ref, an object whose properties
+ * are all given by a schema (a map), and a part with no type.
+ */
+function toClaudeOutputSchema(schema: Record<string, unknown>): Record<string, unknown> {
+  assertNoRecursiveRef(schema);
+  return fitClaudeSchema(schema);
+}
+
+function fitClaudeSchema(node: unknown): Record<string, unknown> {
+  if (!isRecord(node)) throw unsupportedSchema('a part of it is not a schema object');
+  const rest: Record<string, unknown> = { ...node };
+  const take = (key: string): unknown => {
+    const value = rest[key];
+    delete rest[key];
+    return value;
+  };
+  for (const key of SCHEMA_METADATA) delete rest[key];
+
+  // Read before a $ref returns: a root {$ref, definitions} (zod-to-json-schema
+  // with a name) needs its definitions, or Claude finds none to point at.
+  const out: Record<string, unknown> = {};
+  for (const kind of ['$defs', 'definitions']) {
+    const defs = take(kind);
+    if (isRecord(defs)) {
+      out[kind] = Object.fromEntries(Object.entries(defs).map(([name, def]) => [name, fitClaudeSchema(def)]));
+    }
+  }
+  const ref = take('$ref');
+  if (typeof ref === 'string') return { ...out, $ref: ref };
+
+  const type = take('type');
+  const anyOf = take('anyOf');
+  const allOf = take('allOf');
+  if (Array.isArray(anyOf)) out.anyOf = anyOf.map(fitClaudeSchema);
+  else if (Array.isArray(rest.oneOf)) out.anyOf = (take('oneOf') as unknown[]).map(fitClaudeSchema);
+  if (Array.isArray(allOf)) out.allOf = allOf.map(fitClaudeSchema);
+  const isType = (t: string) => type === t || (Array.isArray(type) && type.includes(t));
+  const isObject = isType('object') || (type === undefined && isRecord(rest.properties));
+  if (type !== undefined) out.type = type;
+  else if (isObject) out.type = 'object';
+  for (const key of ['title', 'description', 'enum', 'const', 'default']) {
+    if (key in rest) out[key] = take(key);
+  }
+
+  if (isObject) {
+    const properties = take('properties');
+    const additional = take('additionalProperties');
+    if (!isRecord(properties) && isRecord(additional) && Object.keys(additional).length > 0) {
+      throw unsupportedSchema('an object takes any property names, with values given by a schema');
+    }
+    out.properties = isRecord(properties)
+      ? Object.fromEntries(Object.entries(properties).map(([name, prop]) => [name, fitClaudeSchema(prop)]))
+      : {};
+    out.additionalProperties = false;
+    const required = take('required');
+    if (Array.isArray(required)) out.required = required;
+  }
+  if (isType('string') && typeof rest.format === 'string' && CLAUDE_STRING_FORMATS.has(rest.format)) {
+    out.format = take('format');
+  }
+  if (isType('array')) {
+    if (isRecord(rest.items)) out.items = fitClaudeSchema(take('items'));
+    if (rest.minItems === 0 || rest.minItems === 1) out.minItems = take('minItems');
+  }
+
+  if (!('type' in out) && !out.anyOf && !out.allOf && !('enum' in out) && !('const' in out)) {
+    throw unsupportedSchema('a part of it has no type');
+  }
+  const leftover = Object.entries(rest);
+  if (leftover.length > 0) {
+    const note = `{${leftover.map(([key, value]) => `${key}: ${JSON.stringify(value)}`).join(', ')}}`;
+    out.description = typeof out.description === 'string' && out.description ? `${out.description}\n\n${note}` : note;
+  }
+  return out;
+}
+
+/**
+ * Throws unless every $ref in `root` points at one of its own $defs (or
+ * definitions) and none of them leads back to itself: Claude takes no
+ * recursive schema and no external reference.
+ */
+function assertNoRecursiveRef(root: Record<string, unknown>): void {
+  const defs = new Map<string, unknown>();
+  for (const kind of ['$defs', 'definitions']) {
+    const group = root[kind];
+    if (!isRecord(group)) continue;
+    for (const [name, def] of Object.entries(group)) {
+      defs.set(`#/${kind}/${name.replace(/~/g, '~0').replace(/\//g, '~1')}`, def);
+    }
+  }
+  const refsIn = (node: unknown, out: string[] = []): string[] => {
+    if (Array.isArray(node)) {
+      for (const item of node) refsIn(item, out);
+    } else if (isRecord(node)) {
+      for (const [key, value] of Object.entries(node)) {
+        if (key === '$ref' && typeof value === 'string') out.push(value);
+        else if (node !== root || (key !== '$defs' && key !== 'definitions')) refsIn(value, out);
+      }
+    }
+    return out;
+  };
+  const acyclic = new Set<string>();
+  const visit = (ref: string, path: string[]): void => {
+    if (acyclic.has(ref)) return;
+    if (ref === '#' || path.includes(ref)) throw unsupportedSchema('it is recursive');
+    if (!ref.startsWith('#')) throw unsupportedSchema(`it refers to another document (${ref})`);
+    if (!defs.has(ref)) throw unsupportedSchema(`it refers to ${ref}, which is not one of its $defs`);
+    for (const next of refsIn(defs.get(ref))) visit(next, [...path, ref]);
+    acyclic.add(ref);
+  };
+  for (const ref of refsIn(root)) visit(ref, []);
+  for (const ref of defs.keys()) visit(ref, []);
 }
 
 const MIN_THINKING_BUDGET = 1024;
@@ -484,6 +683,8 @@ interface ClaudeRequestRules {
   /** The `output_config.effort` levels the model takes (none: it rejects the
    *  parameter); null when the id doesn't say. */
   efforts: readonly ClaudeEffort[] | null;
+  /** Takes a JSON schema in `output_config.format` (structured outputs). */
+  structuredOutputs: boolean;
 }
 
 interface ClaudeId {
@@ -525,6 +726,9 @@ function parseClaudeId(model: string): ClaudeId | null {
  *  - `output_config.effort`: Opus 4.5 takes low/medium/high, Claude 4.6
  *    adds max, Opus 4.7 and later (every 5.x model, Fable, Mythos) add
  *    xhigh; Sonnet 4.5, Haiku 4.5 and earlier models reject the parameter.
+ *  - `output_config.format` (structured outputs): every model from Claude
+ *    4.5 on, and Opus 4.1 (platform.claude.com/docs/en/build-with-claude/
+ *    structured-outputs, checked 2026-11-02); not Claude 3 or Claude 4.0.
  * (platform.claude.com/docs/en/api/errors, "Thinking cannot be disabled".
  * Checked live on 2026-11-01: disabled on Opus 5.5, Sonnet 5.5 and Fable
  * 5.1, between_tools on Sonnet 5.5, disabled at xhigh on Opus 5, effort on
@@ -538,7 +742,7 @@ function claudeRequestRules(model: string): ClaudeRequestRules {
   if (!claude) {
     return {
       sampling: 'single', thinking: 'adaptive', forcedToolChoice: true,
-      thinkingOff: null, thinkingOffUpToHigh: false, efforts: null,
+      thinkingOff: null, thinkingOffUpToHigh: false, efforts: null, structuredOutputs: true,
     };
   }
   const { line, major, minor, named } = claude;
@@ -550,10 +754,12 @@ function claudeRequestRules(model: string): ClaudeRequestRules {
       : named && line === 'opus' && major === 4 && minor === 5
         ? ['low', 'medium', 'high']
         : [];
+  const structuredOutputs = named && (atLeast(4, 5) || (line === 'opus' && major === 4 && minor === 1));
   if (named && (line === 'fable' || line === 'mythos')) {
     return {
       sampling: 'none', thinking: 'adaptive', forcedToolChoice: !atLeast(5, 1),
       thinkingOff: atLeast(5, 0) ? 'never' : 'disabled', thinkingOffUpToHigh: false, efforts,
+      structuredOutputs: true,
     };
   }
   const forcedToolChoice = !(named && (line === 'opus' || line === 'sonnet') && atLeast(5, 5));
@@ -570,7 +776,7 @@ function claudeRequestRules(model: string): ClaudeRequestRules {
       thinkingOffUpToHigh = true;
     }
   }
-  const off = { forcedToolChoice, thinkingOff, thinkingOffUpToHigh, efforts };
+  const off = { forcedToolChoice, thinkingOff, thinkingOffUpToHigh, efforts, structuredOutputs };
   if (atLeast(4, 7)) return { sampling: 'none', thinking: 'adaptive', ...off };
   if (major === 4 && minor === 6) return { sampling: 'single', thinking: 'either', ...off };
   return { sampling: 'single', thinking: 'budget', ...off };
@@ -606,6 +812,19 @@ function claudeSampling(rules: ClaudeRequestRules, thinking: boolean, requested:
  */
 function shapeRequestForModel(body: Record<string, unknown>, ctx: ModelShapingContext): void {
   const rules = claudeRequestRules(ctx.dstModel);
+
+  if (typeof body.max_tokens === 'number') {
+    const capped = capMaxTokens(body.max_tokens, ctx.dstModel, ctx.dstProviderId);
+    if (capped !== body.max_tokens) {
+      body.max_tokens = capped;
+      // A thinking budget stays below max_tokens, as anthropicThinking keeps it.
+      const thinking = body.thinking;
+      if (isRecord(thinking) && typeof thinking.budget_tokens === 'number' && thinking.budget_tokens >= capped) {
+        if (capped - 1 >= MIN_THINKING_BUDGET) body.thinking = { ...thinking, budget_tokens: capped - 1 };
+        else delete body.thinking;
+      }
+    }
+  }
   const isForced = (choice: unknown): choice is Record<string, unknown> =>
     isRecord(choice) && (choice.type === 'any' || choice.type === 'tool');
 
@@ -751,25 +970,29 @@ function serializeMessagesToAnthropic(messages: IRMessage[]): AnthropicMessage[]
 }
 
 /**
- * Returns null when every block of a non-empty message was dropped (e.g. an
- * assistant turn holding only another family's unsigned reasoning): sending
- * it with empty content would be rejected. Anthropic merges the neighbouring
+ * Anthropic refuses an empty text block and an empty user message (live
+ * 2026-11-02: "text content blocks must be non-empty", "user messages must
+ * have non-empty content"), which the other families take: a Gemini
+ * {text:''} part beside a thought signature, an OpenAI user turn with
+ * content '', an assistant turn with content null (what an app gets back for
+ * a thinking-only Claude reply). So empty or whitespace-only text blocks are
+ * left out (text inside a tool_result stays as it is), and a message with
+ * nothing left, such as an assistant turn holding only another family's
+ * unsigned reasoning, is dropped (null). Anthropic merges the neighbouring
  * same-role turns that this can leave behind.
  */
 function serializeMessageToAnthropic(msg: IRMessage): AnthropicMessage | null {
   const blocks: AnthropicContentBlock[] = [];
   for (const b of msg.content) {
+    if (b.type === 'text' && b.text.trim().length === 0) continue;
     const wire = serializeContentBlockToAnthropic(b);
     if (wire) blocks.push(wire);
   }
-  if (blocks.length === 0 && msg.content.length > 0) return null;
+  if (blocks.length === 0) return null;
 
   // Collapse single text block to plain string for compactness.
   if (blocks.length === 1 && blocks[0].type === 'text') {
     return { role: msg.role, content: (blocks[0] as { text: string }).text };
-  }
-  if (blocks.length === 0) {
-    return { role: msg.role, content: '' };
   }
   return { role: msg.role, content: blocks };
 }
