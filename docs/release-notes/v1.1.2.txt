@@ -1,6 +1,6 @@
 A security update.
-• Browser extension: keys, trusted sites and limits are protected against tampering; tampered limits pause apps until you resume them. Older versions can't open the upgraded wallet. Long requests no longer break off.
+• Extension: keys, trusted sites and limits are tamper-protected; tampering pauses apps until you resume them. Older versions can't open the upgraded wallet. Long requests no longer break off.
 • A token limit of 0 now blocks an app.
-• Phone apps keep passwords and keys out of screenshots.
-• Fixes for routing, the in-wallet browser, screen readers and large text.
-Desktop bridge and plugin users: update both, then set their limits and groups again.
+• Phones hide the wallet in the app switcher; Android blocks screenshots of password and key screens.
+• Routing, in-wallet browser, screen reader and large-text fixes.
+Bridge and plugin users: update both, then set their limits and groups again.
