@@ -2,9 +2,15 @@ package com.byoky.app.data
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.provider.Settings
+import android.webkit.CookieManager
+import android.webkit.WebStorage
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import android.webkit.WebViewDatabase
 import com.byoky.app.crypto.CryptoService
 import com.byoky.app.proxy.TranslationEngine
 import kotlinx.coroutines.CoroutineScope
@@ -208,7 +214,8 @@ class WalletStore(context: Context) {
     suspend fun unlock(password: String): UnlockResult = withContext(Dispatchers.Default) { unlockBlocking(password) }
 
     /**
-     * Re-check the master password right before a sensitive action (export).
+     * Re-check the master password right before a sensitive action (export;
+     * a key's endpoint checks it itself, see [updateCredentialEndpoint]).
      * Shares the unlock brute-force counter and lockout, so an unlocked phone
      * can't be used to guess the password. PBKDF2 runs on Dispatchers.Default.
      */
@@ -393,14 +400,24 @@ class WalletStore(context: Context) {
 
     /**
      * Point a credential of a provider without a fixed host (Azure OpenAI,
-     * Ollama, LM Studio) at another server. The URL passes the same check as
-     * when the key was added, and the id stays, so group pins survive.
-     * Throws IllegalArgumentException for an unknown id or an unusable URL.
+     * Ollama, LM Studio) at another server. That decides where the key is
+     * sent, so it takes the master password again, like export: an unlocked
+     * phone alone must not be enough to send a key somewhere else. Wrong
+     * attempts count toward the unlock lockout. The URL passes the same check
+     * as when the key was added, and the id stays, so group pins survive.
+     * Throws IllegalArgumentException for an unknown id or an unusable URL,
+     * before the password is checked. PBKDF2 runs on Dispatchers.Default.
      */
-    fun updateCredentialEndpoint(credentialId: String, newBaseUrl: String) {
-        _credentials.update { withCredentialEndpoint(it, credentialId, newBaseUrl) }
-        saveCredentials()
-    }
+    suspend fun updateCredentialEndpoint(credentialId: String, newBaseUrl: String, password: String): UnlockResult =
+        withContext(Dispatchers.Default) {
+            withCredentialEndpoint(_credentials.value, credentialId, newBaseUrl)
+            val result = checkPassword(password)
+            if (result == UnlockResult.Success) {
+                _credentials.update { withCredentialEndpoint(it, credentialId, newBaseUrl) }
+                saveCredentials()
+            }
+            result
+        }
 
     fun decryptKey(credential: Credential): String {
         val password = masterPassword ?: throw IllegalStateException("Wallet locked")
@@ -618,7 +635,89 @@ class WalletStore(context: Context) {
         throttle.reset()
         _lockoutUntil.value = null
 
+        clearBrowserData()
+
         _status.value = WalletStatus.UNINITIALIZED
+    }
+
+    // MARK: - In-wallet browser data
+
+    /**
+     * Deletes what the in-wallet browser kept for every site: cookies, web
+     * storage (localStorage, IndexedDB, caches, service workers), the HTTP
+     * cache and saved HTTP auth. A reset hands the phone to a new wallet
+     * (Forgot password? needs no password), and an app added again must not
+     * open signed in to the previous owner's account or with their data.
+     */
+    private fun clearBrowserData() = onMainThread {
+        try {
+            CookieManager.getInstance().run {
+                removeAllCookies(null)
+                flush()
+            }
+            WebStorage.getInstance().deleteAllData()
+            WebViewDatabase.getInstance(appContext).clearHttpAuthUsernamePassword()
+            WebView(appContext).run {
+                clearCache(true)
+                destroy()
+            }
+        } catch (_: Exception) {
+            // No usable WebView on this device (missing or updating): nothing stored.
+        }
+    }
+
+    /**
+     * Deletes what the in-wallet browser kept for a removed app's origin,
+     * unless another app in the list shares the origin: its web storage
+     * (IndexedDB and the like, then localStorage, which deleteOrigin leaves)
+     * and the cookies set for that host at `/`. Cookies of a parent domain
+     * stay, as other apps may use them; a reset clears everything.
+     */
+    private fun clearSiteData(app: InstalledApp) {
+        if (_installedApps.value.any { it.origin == app.origin }) return
+        val host = android.net.Uri.parse(app.origin).host ?: return
+        onMainThread {
+            try {
+                WebStorage.getInstance().deleteOrigin(app.origin)
+                val cookies = CookieManager.getInstance()
+                cookies.getCookie(app.origin).orEmpty().split(';')
+                    .map { it.substringBefore('=').trim() }
+                    .filter { it.isNotEmpty() }
+                    .forEach { name ->
+                        // Host-only, then one set with Domain=<this host>.
+                        cookies.setCookie(app.origin, "$name=; Max-Age=0; Path=/; Secure")
+                        cookies.setCookie(app.origin, "$name=; Max-Age=0; Path=/; Secure; Domain=$host")
+                    }
+                cookies.flush()
+                // An empty page of the origin, loaded without the network,
+                // clears its localStorage. Held until done (or given up on),
+                // or it could be collected before the page loads.
+                val cleaner = WebView(appContext)
+                siteDataCleaners += cleaner
+                fun done() {
+                    if (siteDataCleaners.remove(cleaner)) cleaner.destroy()
+                }
+                cleaner.settings.javaScriptEnabled = true
+                cleaner.settings.domStorageEnabled = true
+                cleaner.webViewClient = object : WebViewClient() {
+                    override fun onPageFinished(view: WebView, url: String?) {
+                        view.evaluateJavascript("localStorage.clear()") { done() }
+                    }
+                }
+                cleaner.loadDataWithBaseURL("${app.origin}/", "", "text/html", "utf-8", null)
+                Handler(Looper.getMainLooper()).postDelayed(::done, SITE_DATA_CLEANER_TIMEOUT_MS)
+            } catch (_: Exception) {
+                // No usable WebView on this device: nothing stored.
+            }
+        }
+    }
+
+    /** Hidden WebViews clearing a removed app's localStorage (main thread only). */
+    private val siteDataCleaners = mutableSetOf<WebView>()
+
+    /** WebView's storage APIs want the main thread; reset is also called from others. */
+    private fun onMainThread(block: () -> Unit) {
+        if (Looper.myLooper() == Looper.getMainLooper()) block() else Handler(Looper.getMainLooper()).post(block)
     }
 
     // MARK: - Installed Apps
@@ -693,9 +792,12 @@ class WalletStore(context: Context) {
         return AddAppResult.Added(app)
     }
 
+    /** Remove an app from the list, and what it stored in the in-wallet browser. */
     fun uninstallApp(id: String) {
+        val removed = _installedApps.value.firstOrNull { it.id == id } ?: return
         _installedApps.value = _installedApps.value.filter { it.id != id }
         saveInstalledApps()
+        clearSiteData(removed)
     }
 
     fun toggleApp(id: String) {
@@ -1367,6 +1469,7 @@ class WalletStore(context: Context) {
         /** Lock after this long without interaction or wallet activity (or in the background). */
         private const val AUTO_LOCK_TIMEOUT_MS = 15 * 60 * 1000L
         private const val IDLE_CHECK_INTERVAL_MS = 10_000L
+        private const val SITE_DATA_CLEANER_TIMEOUT_MS = 30_000L
 
         private val RETIRED_ENCRYPTED_KEYS = listOf(
             // Cloud sync account

@@ -40,6 +40,7 @@ import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.ModalBottomSheetProperties
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.SheetState
@@ -92,6 +93,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.SecureFlagPolicy
 import com.byoky.app.ui.theme.*
 import kotlinx.coroutines.delay
 
@@ -638,17 +640,26 @@ fun RetroDialog(
     )
 }
 
-/** Modal bottom sheet: a crypt panel with square corners and a seam edge. */
+/**
+ * Modal bottom sheet: a crypt panel with square corners and a seam edge.
+ * [secure] keeps it out of screenshots and recents, for a sheet where a
+ * secret is entered.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RetroBottomSheet(
     onDismissRequest: () -> Unit,
     sheetState: SheetState = rememberModalBottomSheetState(),
+    secure: Boolean = false,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismissRequest,
         sheetState = sheetState,
+        properties = ModalBottomSheetProperties(
+            securePolicy = if (secure) SecureFlagPolicy.SecureOn else SecureFlagPolicy.Inherit,
+            shouldDismissOnBackPress = true,
+        ),
         shape = RectangleShape,
         containerColor = Crypt,
         contentColor = Bone,

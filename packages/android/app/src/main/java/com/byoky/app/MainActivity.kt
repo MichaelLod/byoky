@@ -1,5 +1,6 @@
 package com.byoky.app
 
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
@@ -12,13 +13,15 @@ import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
 import com.byoky.app.data.WalletStore
 import com.byoky.app.ui.screens.AppNavigation
+import com.byoky.app.ui.screens.VaultUnavailableScreen
 import com.byoky.app.ui.theme.ByokyTheme
 import com.byoky.app.ui.theme.Void
 
 class MainActivity : ComponentActivity() {
     private lateinit var lifecycleObserver: DefaultLifecycleObserver
 
-    private val wallet: WalletStore get() = (application as ByokyApp).walletStore
+    /** Null while the Keystore won't open the wallet (VaultUnavailableScreen). */
+    private var wallet: WalletStore? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
@@ -28,8 +31,19 @@ class MainActivity : ComponentActivity() {
             statusBarStyle = SystemBarStyle.dark(Void.toArgb()),
             navigationBarStyle = SystemBarStyle.dark(Void.toArgb()),
         )
+        // Recents shows a blank card, not a snapshot of whatever was on
+        // screen (an app's chats, a revealed password). Screenshots still
+        // work; the screens that show a secret block those themselves
+        // (SecureWindow). Older Android has no such switch.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) setRecentsScreenshotEnabled(false)
 
-        val wallet = wallet
+        val app = application as ByokyApp
+        val wallet = app.walletStore
+        if (wallet == null) {
+            showVaultUnavailable(app)
+            return
+        }
+        this.wallet = wallet
 
         // Auto-lock: the wallet locks itself after the idle timeout while the
         // app is open (WalletStore's idle watch); here it learns when the app
@@ -54,11 +68,28 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * The phone's Keystore refused the key that protects the wallet: explain,
+     * and once it opens (another try, or a fresh wallet the user asked for)
+     * start over with the wallet.
+     */
+    private fun showVaultUnavailable(app: ByokyApp) {
+        setContent {
+            ByokyTheme {
+                VaultUnavailableScreen(
+                    tryAgain = app::retryOpen,
+                    startFresh = app::startFreshAndOpen,
+                    onOpened = ::recreate,
+                )
+            }
+        }
+    }
+
     // Any touch or key press in the activity's window (the in-wallet browser
     // included) counts as interaction and restarts the idle timeout.
     override fun onUserInteraction() {
         super.onUserInteraction()
-        wallet.noteActivity()
+        wallet?.noteActivity()
     }
 
     override fun onDestroy() {

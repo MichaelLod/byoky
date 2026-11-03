@@ -32,6 +32,7 @@ import com.byoky.app.ui.components.DialogButton
 import com.byoky.app.ui.components.PasswordMeter
 import com.byoky.app.ui.components.RetroDialog
 import com.byoky.app.ui.components.RetroTextField
+import com.byoky.app.ui.components.SecretDialogProperties
 import com.byoky.app.ui.theme.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -222,8 +223,9 @@ private fun importSummaryText(summary: WalletBackup.ImportSummary): String {
     return lines.joinToString("\n")
 }
 
+/** A password field with a show/hide toggle, for the wallet's re-auth dialogs. */
 @Composable
-private fun PasswordField(
+internal fun PasswordField(
     value: String,
     onValueChange: (String) -> Unit,
     label: String,
@@ -269,6 +271,7 @@ private fun ExportPasswordDialog(wallet: WalletStore, onDismiss: () -> Unit, onC
     RetroDialog(
         onDismissRequest = onDismiss,
         title = "Export backup",
+        properties = SecretDialogProperties,
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
@@ -329,6 +332,7 @@ private fun ImportPasswordDialog(
     RetroDialog(
         onDismissRequest = onDismiss,
         title = "Import backup",
+        properties = SecretDialogProperties,
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(fileName, color = Bone, style = MonoStyle.copy(fontSize = 13.sp), fontWeight = FontWeight.Medium)

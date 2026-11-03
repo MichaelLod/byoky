@@ -41,6 +41,7 @@ import com.byoky.app.data.Credential
 import com.byoky.app.data.CredentialBaseUrl
 import com.byoky.app.data.CredentialUsageStats
 import com.byoky.app.data.Provider
+import com.byoky.app.data.UnlockResult
 import com.byoky.app.data.WalletStore
 import com.byoky.app.ui.components.BrandMark
 import com.byoky.app.ui.components.CapsText
@@ -56,6 +57,7 @@ import com.byoky.app.ui.components.UnreadableVaultNotice
 import com.byoky.app.ui.components.RetroBottomSheet
 import com.byoky.app.ui.components.RetroDialog
 import com.byoky.app.ui.components.RetroTextField
+import com.byoky.app.ui.components.SecretDialogProperties
 import com.byoky.app.ui.components.SectionLabel
 import com.byoky.app.ui.components.StatusPill
 import com.byoky.app.ui.components.bottomSeam
@@ -189,12 +191,9 @@ fun WalletScreen(
 
         endpointTarget?.let { target ->
             EditEndpointDialog(
+                wallet = wallet,
                 credential = target,
                 onDismiss = { endpointTarget = null },
-                onSave = { url ->
-                    wallet.updateCredentialEndpoint(target.id, url)
-                    endpointTarget = null
-                },
             )
         }
 
@@ -338,21 +337,28 @@ private fun RenameCredentialDialog(
 /**
  * Sets the endpoint (Azure OpenAI) or server URL (Ollama, LM Studio) of a
  * key that is already in the wallet, under the same rules as adding one.
+ * It decides where the key is sent, so it takes the wallet password again,
+ * as export does.
  */
 @Composable
 private fun EditEndpointDialog(
+    wallet: WalletStore,
     credential: Credential,
     onDismiss: () -> Unit,
-    onSave: (String) -> Unit,
 ) {
     val isAzure = credential.providerId == "azure_openai"
     var draft by remember { mutableStateOf(credential.baseUrl.orEmpty()) }
+    var password by remember { mutableStateOf("") }
+    var passwordError by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
+    var saving by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
     val normalized = CredentialBaseUrl.normalize(credential.providerId, draft)
 
     RetroDialog(
         onDismissRequest = onDismiss,
         title = if (isAzure) "Azure endpoint" else "Server URL",
+        properties = SecretDialogProperties,
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(credential.label, color = Bone, style = MonoStyle.copy(fontSize = 13.sp))
@@ -368,27 +374,47 @@ private fun EditEndpointDialog(
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Text(
-                    if (isAzure) "This key is only ever sent to this endpoint." else "This key is only ever sent to this server.",
+                    if (isAzure) {
+                        "This key is only ever sent to this endpoint, so changing it takes your wallet password."
+                    } else {
+                        "This key is only ever sent to this server, so changing it takes your wallet password."
+                    },
                     fontSize = 13.sp,
                 )
+                PasswordField(
+                    password,
+                    { password = it; passwordError = null },
+                    "Wallet password",
+                    isError = passwordError != null,
+                )
+                passwordError?.let { Text(it, color = Alarm, fontSize = 12.sp) }
                 error?.let { Text(it, color = Alarm, fontSize = 12.sp) }
             }
         },
         confirmButton = {
             DialogButton(
-                "Save",
+                if (saving) "Checking…" else "Save",
                 onClick = {
-                    try {
-                        onSave(draft)
-                    } catch (e: IllegalArgumentException) {
-                        error = e.message
+                    saving = true
+                    scope.launch {
+                        try {
+                            when (val r = wallet.updateCredentialEndpoint(credential.id, draft, password)) {
+                                is UnlockResult.Success -> onDismiss()
+                                is UnlockResult.WrongPassword -> passwordError = "Wrong wallet password"
+                                is UnlockResult.LockedOut -> passwordError = "Too many attempts. Try again in ${r.secondsRemaining}s"
+                            }
+                        } catch (e: IllegalArgumentException) {
+                            error = e.message
+                        } finally {
+                            saving = false
+                        }
                     }
                 },
-                enabled = normalized != null && normalized != credential.baseUrl,
+                enabled = normalized != null && normalized != credential.baseUrl && password.isNotEmpty() && !saving,
             )
         },
         dismissButton = {
-            DialogButton("Cancel", onClick = onDismiss, color = Fog)
+            DialogButton("Cancel", onClick = onDismiss, color = Fog, enabled = !saving)
         },
     )
 }
@@ -609,6 +635,8 @@ internal fun AddCredentialSheet(wallet: WalletStore, onDismiss: () -> Unit) {
     RetroBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        // The key is typed (or pasted) here: keep it out of screenshots and recents.
+        secure = true,
     ) {
         Column(
             modifier = Modifier

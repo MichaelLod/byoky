@@ -1,4 +1,5 @@
 import Combine
+import WebKit
 import XCTest
 @testable import Byoky
 
@@ -129,6 +130,147 @@ final class WalletLockTests: XCTestCase {
         XCTAssertNil(wallet.lockoutEndTime)
         try wallet.createPassword(password)
         XCTAssertTrue(wallet.credentials.isEmpty)
+    }
+
+    // MARK: - Launch
+
+    /// A keychain that can't be read at launch (the device was locked) must
+    /// not make an existing wallet look new: onboarding would replace its
+    /// password and salt and lose every key. The lock screen shows instead.
+    @MainActor
+    func testAKeychainReadErrorAtLaunchShowsTheLockScreenNotOnboarding() {
+        XCTAssertEqual(WalletStore.initialStatus { throw KeychainError.readFailed(errSecInteractionNotAllowed) }, .locked)
+        XCTAssertEqual(WalletStore.initialStatus { true }, .locked)
+        XCTAssertEqual(WalletStore.initialStatus { false }, .uninitialized)
+    }
+
+    /// The keychain tells "not there" apart from "can't read it".
+    func testKeychainExistsTellsMissingFromPresent() throws {
+        let keychain = KeychainService.shared
+        let key = "walletLockTests.exists"
+        try? keychain.delete(key: key)
+        XCTAssertFalse(try keychain.exists(key: key))
+        try keychain.saveString(key: key, value: "x")
+        defer { try? keychain.delete(key: key) }
+        XCTAssertTrue(try keychain.exists(key: key))
+    }
+
+    // MARK: - Built-in browser data
+
+    private func cookie(_ name: String, domain: String) throws -> HTTPCookie {
+        try XCTUnwrap(HTTPCookie(properties: [
+            .domain: domain, .path: "/", .name: name, .value: "owner",
+            .secure: "TRUE", .expires: Date().addingTimeInterval(3600),
+        ]))
+    }
+
+    /// A reset ("Forgot password?" asks for no password) leaves the next
+    /// wallet nothing of what apps stored in the built-in browser: no
+    /// logins, no site data.
+    @MainActor
+    func testResetDeletesWhatAppsStoredInTheBuiltInBrowser() async throws {
+        let wallet = try freshWallet()
+        let store = WKWebsiteDataStore.default()
+        await store.httpCookieStore.setCookie(try cookie("sid", domain: "reset-test.example.com"))
+        let before = await store.httpCookieStore.allCookies()
+        XCTAssertTrue(before.contains { $0.name == "sid" })
+
+        wallet.lock()
+        await wallet.resetWallet().value
+
+        let cookies = await store.httpCookieStore.allCookies()
+        XCTAssertFalse(cookies.contains { $0.domain.hasSuffix("reset-test.example.com") }, "a login survived the reset")
+        let records = await store.dataRecords(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes())
+        XCTAssertTrue(records.isEmpty, "site data survived the reset: \(records.map(\.displayName))")
+    }
+
+    /// Removing an app takes its site data along, but not a domain another
+    /// app in the list still uses.
+    @MainActor
+    func testRemovingAnAppDeletesItsSiteData() async throws {
+        let wallet = try freshWallet()
+        let store = WKWebsiteDataStore.default()
+        await store.httpCookieStore.setCookie(try cookie("sid", domain: "chat.removed-app.test"))
+        await store.httpCookieStore.setCookie(try cookie("sid", domain: "kept-app.test"))
+        let removed = try wallet.addApp(urlString: "https://chat.removed-app.test/")
+        let kept = try wallet.addApp(urlString: "https://kept-app.test/")
+        addTeardownBlock { @MainActor in
+            WalletStore.shared.uninstallApp(kept.id)
+        }
+
+        await wallet.uninstallApp(removed.id)?.value
+
+        let cookies = await store.httpCookieStore.allCookies()
+        XCTAssertFalse(cookies.contains { $0.domain.hasSuffix("removed-app.test") }, "the removed app's login stayed")
+        XCTAssertTrue(cookies.contains { $0.domain.hasSuffix("kept-app.test") }, "another app's login went too")
+    }
+
+    // MARK: - Where a key is sent
+
+    /// An unlocked phone alone can't repoint an Azure key at another host:
+    /// changing the endpoint takes the wallet password.
+    @MainActor
+    func testChangingAnEndpointTakesTheWalletPassword() async throws {
+        let wallet = try freshWallet()
+        try wallet.addCredential(providerId: "azure_openai", label: "Azure", apiKey: "azure-endpoint-test",
+                                 baseUrl: "https://contoso.openai.azure.com")
+        let id = try XCTUnwrap(wallet.credentials.first?.id)
+
+        do {
+            try await wallet.updateCredentialEndpoint(id: id, endpoint: "https://attacker.example", masterPassword: "not the password")
+            XCTFail("a wrong password changed where the key is sent")
+        } catch WalletError.wrongPassword {}
+        XCTAssertEqual(wallet.credentials.first?.baseUrl, "https://contoso.openai.azure.com")
+
+        try await wallet.updateCredentialEndpoint(id: id, endpoint: "https://fabrikam.openai.azure.com/", masterPassword: password)
+        XCTAssertEqual(wallet.credentials.first?.baseUrl, "https://fabrikam.openai.azure.com")
+    }
+
+    /// Giving a key without an endpoint its first one sends it there just as
+    /// much as changing one, so it takes the password too.
+    @MainActor
+    func testAddingAMissingEndpointTakesTheWalletPassword() async throws {
+        let wallet = try freshWallet()
+        try wallet.addCredential(providerId: "azure_openai", label: "Azure", apiKey: "azure-endpoint-test")
+        let id = try XCTUnwrap(wallet.credentials.first?.id)
+        XCTAssertNil(wallet.credentials.first?.baseUrl)
+
+        do {
+            try await wallet.updateCredentialEndpoint(id: id, endpoint: "https://attacker.example", masterPassword: "")
+            XCTFail("no password set an endpoint")
+        } catch WalletError.wrongPassword {}
+        XCTAssertNil(wallet.credentials.first?.baseUrl)
+
+        try await wallet.updateCredentialEndpoint(id: id, endpoint: "contoso.openai.azure.com", masterPassword: password)
+        XCTAssertEqual(wallet.credentials.first?.baseUrl, "https://contoso.openai.azure.com")
+    }
+
+    /// Guesses there count toward the unlock lockout; an unusable address is
+    /// refused before the password is tried and costs no attempt.
+    @MainActor
+    func testEndpointPasswordGuessesCountTowardTheLockout() async throws {
+        let wallet = try freshWallet()
+        try wallet.addCredential(providerId: "azure_openai", label: "Azure", apiKey: "azure-endpoint-test",
+                                 baseUrl: "https://contoso.openai.azure.com")
+        let id = try XCTUnwrap(wallet.credentials.first?.id)
+
+        do {
+            try await wallet.updateCredentialEndpoint(id: id, endpoint: "http://attacker.example", masterPassword: "guess")
+            XCTFail("an http endpoint was accepted")
+        } catch WalletError.invalidEndpoint {}
+
+        for attempt in 1...5 {
+            do {
+                try await wallet.updateCredentialEndpoint(id: id, endpoint: "https://attacker.example", masterPassword: "guess \(attempt)")
+                XCTFail("guess \(attempt) was accepted")
+            } catch WalletError.wrongPassword {}
+        }
+        XCTAssertNotNil(wallet.lockoutEndTime, "five guesses lock out, the first one didn't count")
+        do {
+            try await wallet.updateCredentialEndpoint(id: id, endpoint: "https://fabrikam.openai.azure.com", masterPassword: password)
+            XCTFail("the lockout let the right password through")
+        } catch WalletError.lockedOut {}
+        XCTAssertEqual(wallet.credentials.first?.baseUrl, "https://contoso.openai.azure.com")
     }
 
     // MARK: - Auto-lock

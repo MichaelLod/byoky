@@ -2,6 +2,8 @@ package com.byoky.app.data
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertSame
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.IOException
@@ -39,6 +41,29 @@ class VaultPrefsTest {
     fun otherErrorsAreLetThrough() {
         assertEquals(VaultPrefs.Recovery.FAIL, VaultPrefs.recoveryFor(IllegalStateException("bug")))
         assertEquals(VaultPrefs.Recovery.FAIL, VaultPrefs.recoveryFor(OutOfMemoryError()))
+    }
+
+    @Test
+    fun aKeystoreFaultThatOutlastsTheRetryLeavesTheWalletUnavailableNotCrashed() {
+        // As VaultPrefs.open rethrows it after its one retry ("Invalid key blob").
+        val fault = java.security.InvalidKeyException("Keystore operation failed", KeyStoreException("Invalid key blob"))
+        val opening = VaultPrefs.attempt<String> { throw fault }
+        assertTrue(opening is VaultPrefs.Opening.Unavailable)
+        assertSame(fault, (opening as VaultPrefs.Opening.Unavailable).error)
+
+        val opened = VaultPrefs.attempt { "wallet" }
+        assertEquals("wallet", (opened as VaultPrefs.Opening.Open).value)
+    }
+
+    @Test
+    fun aBugStillCrashesInsteadOfShowingTheKeystoreScreen() {
+        assertThrows(IllegalStateException::class.java) {
+            VaultPrefs.attempt<String> { throw IllegalStateException("bug") }
+        }
+        // A vault that stayed unreadable after being set aside is not a Keystore fault either.
+        assertThrows(AEADBadTagException::class.java) {
+            VaultPrefs.attempt<String> { throw AEADBadTagException("still unreadable") }
+        }
     }
 
     @Test

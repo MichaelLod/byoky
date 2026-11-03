@@ -22,6 +22,8 @@ import java.security.KeyStore
  * wallet starts fresh, with a one-time notice to restore from a `.byoky`
  * backup. A fault that may be transient (the Keystore itself failing) is
  * retried once and otherwise rethrown: the vault is never wiped for it.
+ * The app then shows why the wallet can't open ([attempt]) and leaves the
+ * choice to start fresh ([startFresh]) to the user.
  */
 object VaultPrefs {
 
@@ -99,6 +101,33 @@ object VaultPrefs {
             }
         }
     }
+
+    /** What opening the wallet came to: the store, or the Keystore fault that kept the vault shut. */
+    sealed class Opening<out T> {
+        class Open<T>(val value: T) : Opening<T>()
+        class Unavailable(val error: Throwable) : Opening<Nothing>()
+    }
+
+    /**
+     * Runs [create], which opens the vault. A Keystore fault that outlasted
+     * [open]'s retry comes back as [Opening.Unavailable], so the app can say
+     * so and offer another try instead of crashing on every launch. Anything
+     * else is thrown on.
+     */
+    fun <T> attempt(create: () -> T): Opening<T> = try {
+        Opening.Open(create())
+    } catch (e: Exception) {
+        if (recoveryFor(e) != Recovery.RETRY) throw e
+        Opening.Unavailable(e)
+    }
+
+    /**
+     * Give up on a vault the Keystore won't open, on the user's explicit
+     * request: it is set aside like an unreadable one (a copy stays as
+     * `byoky_vault.unreadable.xml`) and the next [open] starts an empty
+     * wallet with the restore-from-backup notice.
+     */
+    fun startFresh(context: Context) = setAside(context)
 
     private fun create(context: Context): SharedPreferences {
         val masterKey = MasterKey.Builder(context)

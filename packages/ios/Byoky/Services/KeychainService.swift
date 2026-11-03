@@ -4,6 +4,8 @@ import Security
 enum KeychainError: LocalizedError {
     case saveFailed(OSStatus)
     case loadFailed
+    /// The keychain couldn't say whether the item exists (device locked, …).
+    case readFailed(OSStatus)
     case deleteFailed(OSStatus)
     case encodingFailed
 
@@ -11,6 +13,7 @@ enum KeychainError: LocalizedError {
         switch self {
         case .saveFailed(let status): return "Keychain save failed: \(status)"
         case .loadFailed: return "Item not found in Keychain"
+        case .readFailed(let status): return "Keychain read failed: \(status)"
         case .deleteFailed(let status): return "Keychain delete failed: \(status)"
         case .encodingFailed: return "Data encoding failed"
         }
@@ -68,6 +71,26 @@ final class KeychainService {
         }
 
         return data
+    }
+
+    /// Whether the item exists. Throws `.readFailed` when the keychain can't
+    /// tell (for instance while the device is locked), so "can't read" is
+    /// never taken for "not there".
+    func exists(key: String) throws -> Bool {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: key,
+            kSecAttrAccessGroup as String: accessGroup,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+        ]
+        let status = SecItemCopyMatching(query as CFDictionary, nil)
+        switch status {
+        case errSecSuccess: return true
+        case errSecItemNotFound: return false
+        default: throw KeychainError.readFailed(status)
+        }
     }
 
     func delete(key: String) throws {

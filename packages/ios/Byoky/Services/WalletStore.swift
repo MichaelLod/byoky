@@ -1,6 +1,7 @@
 import Combine
 import CryptoKit
 import Foundation
+import WebKit
 
 @MainActor
 final class WalletStore: ObservableObject {
@@ -94,11 +95,19 @@ final class WalletStore: ObservableObject {
     // MARK: - Initialization
 
     private func checkInitialized() {
+        status = Self.initialStatus { try keychain.exists(key: passwordHashKey) }
+    }
+
+    /// Locked when a wallet exists, uninitialized when none does. When the
+    /// keychain can't tell (the app launched while the device was locked,
+    /// say) the wallet counts as there: onboarding would replace its
+    /// password and salt, and every stored key would be lost. Unlocking
+    /// reads the keychain again.
+    static func initialStatus(hasPasswordHash: () throws -> Bool) -> WalletStatus {
         do {
-            _ = try keychain.loadString(key: passwordHashKey)
-            status = .locked
+            return try hasPasswordHash() ? .locked : .uninitialized
         } catch {
-            status = .uninitialized
+            return .locked
         }
     }
 
@@ -216,7 +225,11 @@ final class WalletStore: ObservableObject {
         AppGroupSync.shared.syncWalletState(isUnlocked: false, providers: [])
     }
 
-    func resetWallet() {
+    /// Deletes the wallet: keys, sessions, settings, the lockout, and what
+    /// apps stored in the built-in browser. The returned task finishes when
+    /// WebKit has removed that site data.
+    @discardableResult
+    func resetWallet() -> Task<Void, Never> {
         masterKey = nil
         backgroundTime = nil
 
@@ -265,6 +278,16 @@ final class WalletStore: ObservableObject {
 
         AppGroupSync.shared.syncWalletState(isUnlocked: false, providers: [])
         status = .uninitialized
+
+        // A reset hands the phone to a new wallet ("Forgot password?" needs no
+        // password): an app added again must not open signed in to the
+        // previous owner's account or with their data.
+        return Task {
+            await WKWebsiteDataStore.default().removeData(
+                ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(),
+                modifiedSince: .distantPast
+            )
+        }
     }
 
     func dismissRetiredFeaturesNotice() {
@@ -310,9 +333,31 @@ final class WalletStore: ObservableObject {
         return app
     }
 
-    func uninstallApp(_ id: String) {
+    /// Removes an app from the list, and what it stored in the built-in
+    /// browser. The returned task finishes when WebKit has removed that.
+    @discardableResult
+    func uninstallApp(_ id: String) -> Task<Void, Never>? {
+        guard let removed = installedApps.first(where: { $0.id == id }) else { return nil }
         installedApps.removeAll { $0.id == id }
         saveInstalledApps()
+        let remainingHosts = installedApps.compactMap { URL(string: $0.url)?.host?.lowercased() }
+        return Task { await Self.removeSiteData(of: removed, keepingFor: remainingHosts) }
+    }
+
+    /// WebKit keeps site data per registrable domain (`example.com` for
+    /// `app.example.com`), so a domain's data stays while another app in the
+    /// list is on it; a reset clears everything.
+    private static func removeSiteData(of app: InstalledApp, keepingFor remainingHosts: [String]) async {
+        guard let host = URL(string: app.url)?.host?.lowercased() else { return }
+        func isOn(_ domain: String, _ host: String) -> Bool { host == domain || host.hasSuffix("." + domain) }
+        let store = WKWebsiteDataStore.default()
+        let types = WKWebsiteDataStore.allWebsiteDataTypes()
+        let records = await store.dataRecords(ofTypes: types).filter { record in
+            let domain = record.displayName.lowercased()
+            return isOn(domain, host) && !remainingHosts.contains { isOn(domain, $0) }
+        }
+        guard !records.isEmpty else { return }
+        await store.removeData(ofTypes: types, for: records)
     }
 
     func toggleApp(_ id: String) {
@@ -335,19 +380,7 @@ final class WalletStore: ObservableObject {
         progress: @escaping @Sendable (Double) -> Void = { _ in }
     ) async throws -> String {
         guard masterKey != nil else { throw WalletError.locked }
-        if let endTime = currentLockout().lockedUntil, Date() < endTime {
-            lockoutEndTime = endTime
-            throw WalletError.lockedOut(max(1, Int(endTime.timeIntervalSinceNow)))
-        }
-        let storedHash = try keychain.loadString(key: passwordHashKey)
-        let verified = await Task.detached(priority: .userInitiated) {
-            CryptoService.shared.verifyPassword(masterPassword, hash: storedHash)
-        }.value
-        guard verified else {
-            handleFailedAttempt()
-            throw WalletError.wrongPassword
-        }
-        resetFailedAttempts()
+        try await confirmMasterPassword(masterPassword)
         guard masterKey != nil else { throw WalletError.locked }
 
         let entries = try credentials.map { credential in
@@ -500,6 +533,25 @@ final class WalletStore: ObservableObject {
     }
 
     // MARK: - Brute-Force Protection
+
+    /// Re-checks the master password right before a sensitive action (export,
+    /// changing where a key is sent). Wrong attempts count toward the same
+    /// lockout as unlocking; the PBKDF2 check runs off the main actor.
+    private func confirmMasterPassword(_ password: String) async throws {
+        if let endTime = currentLockout().lockedUntil, Date() < endTime {
+            lockoutEndTime = endTime
+            throw WalletError.lockedOut(max(1, Int(endTime.timeIntervalSinceNow)))
+        }
+        let storedHash = try keychain.loadString(key: passwordHashKey)
+        let verified = await Task.detached(priority: .userInitiated) {
+            CryptoService.shared.verifyPassword(password, hash: storedHash)
+        }.value
+        guard verified else {
+            handleFailedAttempt()
+            throw WalletError.wrongPassword
+        }
+        resetFailedAttempts()
+    }
 
     /// The stored lockout state, merged with the in-memory copy (whichever
     /// counts more wins, so neither a failed read nor a stale copy can lower
@@ -662,12 +714,19 @@ final class WalletStore: ObservableObject {
 
     /// Set the endpoint / server URL of an Azure, Ollama or LM Studio
     /// credential (e.g. an Azure key added before endpoints were required).
-    func updateCredentialEndpoint(id: String, endpoint: String) throws {
+    /// That decides where the key is sent, so it takes the master password
+    /// again, like export: an unlocked phone alone must not be enough to send
+    /// a key somewhere else. The endpoint is checked before the password, so
+    /// a typo costs no attempt.
+    func updateCredentialEndpoint(id: String, endpoint: String, masterPassword: String) async throws {
         guard let idx = credentials.firstIndex(where: { $0.id == id }) else { throw WalletError.credentialNotFound }
         guard let normalized = Provider.normalizedEndpoint(endpoint, for: credentials[idx].providerId) else {
             throw WalletError.invalidEndpoint
         }
-        credentials[idx].baseUrl = normalized
+        try await confirmMasterPassword(masterPassword)
+        // The wallet may have locked (or the key gone) during the check.
+        guard let current = credentials.firstIndex(where: { $0.id == id }) else { throw WalletError.credentialNotFound }
+        credentials[current].baseUrl = normalized
         try saveCredentials()
     }
 

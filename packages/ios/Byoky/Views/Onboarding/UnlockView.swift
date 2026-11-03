@@ -3,6 +3,7 @@ import SwiftUI
 
 struct UnlockView: View {
     @EnvironmentObject var wallet: WalletStore
+    @Environment(\.scenePhase) private var scenePhase
     @State private var password = ""
     @State private var error: String?
     @State private var isShaking = false
@@ -42,13 +43,17 @@ struct UnlockView: View {
                 wallet.resetWallet()
             }
         } message: {
-            Text("This will permanently delete all API keys, sessions, and settings. This cannot be undone.")
+            Text("This will permanently delete all API keys, sessions, and settings, and the logins and data of apps in the built-in browser. This cannot be undone.")
         }
         .onReceive(lockoutTimer) { _ in
             updateLockoutState()
         }
         .onAppear {
             updateLockoutState()
+        }
+        // A revealed password is hidden again once the app leaves the screen.
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active { showPassword = false }
         }
     }
 
@@ -185,6 +190,9 @@ struct UnlockView: View {
             lockoutRemaining = seconds
             error = nil
             password = ""
+        } catch is KeychainError {
+            // Not a wrong password: the keychain wouldn't hand over the wallet.
+            self.error = "Couldn't read the wallet from this device's keychain. Try again in a moment."
         } catch {
             self.error = "Wrong password"
             password = ""

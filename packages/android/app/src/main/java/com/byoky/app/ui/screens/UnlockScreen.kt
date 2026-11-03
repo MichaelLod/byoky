@@ -20,6 +20,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.LifecycleStartEffect
 import com.byoky.app.data.UnlockResult
 import com.byoky.app.data.WalletStore
 import com.byoky.app.ui.components.BracketAction
@@ -31,6 +32,7 @@ import com.byoky.app.ui.components.PrimaryButton
 import com.byoky.app.ui.components.RavenMood
 import com.byoky.app.ui.components.RetroDialog
 import com.byoky.app.ui.components.RetroTextField
+import com.byoky.app.ui.components.SecureWindow
 import com.byoky.app.ui.components.StatusLine
 import com.byoky.app.ui.components.StatusPill
 import com.byoky.app.ui.components.rememberRavenGaze
@@ -51,6 +53,13 @@ fun UnlockScreen(wallet: WalletStore) {
     val scope = rememberCoroutineScope()
 
     val shakeAnim = remember { Animatable(0f) }
+
+    // A revealed password stays out of screenshots, recordings and recents,
+    // and is hidden again once the app leaves the screen.
+    SecureWindow(enabled = showPassword)
+    LifecycleStartEffect(Unit) {
+        onStopOrDispose { showPassword = false }
+    }
 
     LaunchedEffect(shakeOffset) {
         if (shakeOffset != 0f) {
@@ -220,7 +229,7 @@ fun UnlockScreen(wallet: WalletStore) {
             title = "Reset Wallet?",
             titleColor = Alarm,
             text = {
-                Text("This will permanently delete all API keys, sessions, and settings. This cannot be undone.")
+                Text("This will permanently delete all API keys, sessions, and settings, and the logins and data of apps in the built-in browser. This cannot be undone.")
             },
             confirmButton = {
                 DialogButton(
