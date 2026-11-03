@@ -37,6 +37,8 @@ export function runWithFetchStub(script, args, { routes, env = {}, setup, inspec
       env: {
         PATH: process.env.PATH,
         HOME: home,
+        // The scripts read nothing from the checkout's .env / .env.local.
+        BYOKY_ENV_FILES: '0',
         FETCH_STUB_ROUTES: routesFile,
         FETCH_STUB_LOG: log,
         ...(script.endsWith('.sh') ? { NODE_OPTIONS: `--import=${STUB}` } : {}),

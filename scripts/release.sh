@@ -898,8 +898,11 @@ verify pnpm build:sdk
 verify pnpm --filter @byoky/bridge build
 verify pnpm --filter @byoky/extension exec wxt prepare
 verify pnpm typecheck
-verify pnpm test
-verify node --test scripts/tests/*.test.mjs
+# The tests never see the store credentials or provider keys: they'd
+# have no use for them, and some (store-status) behave differently when
+# credentials are set.
+verify without_secrets pnpm test
+verify without_secrets node --test scripts/tests/*.test.mjs
 # The templates install the newest versions their ranges allow, with no
 # lockfile, and run those packages' builds: none of that sees the store
 # credentials or provider keys.

@@ -20,8 +20,10 @@ import { createHmac, createSign } from 'node:crypto'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
-// Load .env and .env.local
+// Load .env and .env.local (not with BYOKY_ENV_FILES=0: the script tests
+// set that, so a checkout's real credentials can't change their outcome).
 function loadEnv() {
+  if (process.env.BYOKY_ENV_FILES === '0') return
   for (const f of ['.env', '.env.local']) {
     const p = resolve(root, f)
     if (!existsSync(p)) continue
