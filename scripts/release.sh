@@ -73,6 +73,22 @@ write_store_notes() {
   fi
 }
 
+# The Chrome Web Store publisher: the first UUID in the developer dashboard's
+# URL. store-status.mjs has the same default.
+CHROME_PUBLISHER_ID="${CHROME_PUBLISHER_ID:-29fa2c41-d315-4dfb-a14c-8919348cb737}"
+
+# Uploads a Chrome store zip through the Chrome Web Store API v2
+# (chrome-webstore-upload-cli 4; Google supported v1.1 until 15 Oct 2026).
+# Without a command it uploads, then submits for review and publishes once
+# approved. CLI 4 takes the OAuth values from the environment only; they are
+# set for this one command, so they reach neither the process list nor, as
+# exports would, xcodebuild and Gradle.
+chrome_upload() {
+  CLIENT_ID="$CHROME_CLIENT_ID" CLIENT_SECRET="${CHROME_CLIENT_SECRET:-}" \
+    REFRESH_TOKEN="${CHROME_REFRESH_TOKEN:-}" PUBLISHER_ID="$CHROME_PUBLISHER_ID" \
+    npx chrome-webstore-upload --source "$1" --extension-id "$CHROME_EXTENSION_ID"
+}
+
 # The stores' state as store-status.mjs --json reports it (set STATUS_JSON
 # first): status_field <store id> <field>, e.g. status_field chrome pending.
 status_field() {
@@ -83,13 +99,26 @@ status_field() {
   ' "$STATUS_JSON" "$1" "$2"
 }
 
+# Whether GitHub Actions passed on commit $1 (scripts/ci-status.mjs): sets
+# CI_PROBLEMS to what didn't, one line each, indented for the report.
+ci_green() {
+  local out
+  if out=$(node scripts/ci-status.mjs "$1" 2>&1); then
+    CI_PROBLEMS=""
+    return 0
+  fi
+  CI_PROBLEMS=$(printf '%s\n' "$out" | sed 's/^/           /')
+  return 1
+}
+
 # How AMO's reviewers rebuild the add-on; BUILD-FIREFOX.md in the source zip.
+# The Node.js it asks for is package.json's engines.node.
 amo_build_note() {
   cat <<'EOF'
 # Building the Byoky Firefox add-on from this source
 
-Requirements: Node.js 20 or newer and pnpm 9.15.9 (`corepack enable` picks the
-version up from package.json), on macOS or Linux.
+Requirements: Node.js 22 or newer (tested with 22 and 24) and pnpm 9.15.9
+(`corepack enable` picks the version up from package.json), on macOS or Linux.
 
     pnpm install --frozen-lockfile
     pnpm build:core
@@ -99,6 +128,7 @@ version up from package.json), on macOS or Linux.
 The add-on is then in packages/extension/.output/firefox-mv2, file for file
 the same as the submitted package.
 EOF
+  echo "The submitted package was built with Node.js $(node -p 'process.versions.node')."
 }
 
 # Unzips the AMO source zip into a temporary directory, builds the add-on
@@ -179,6 +209,24 @@ release_notes() {
 STORE_RESULTS=()
 store_result() { STORE_RESULTS+=("$1: $2"); }
 
+# The GitHub release's word on each store, from what this run did there: a
+# store that was skipped isn't listed, and one held back or not reached
+# isn't claimed as submitted.
+store_footer() {
+  local r label lines=()
+  for r in ${STORE_RESULTS[@]+"${STORE_RESULTS[@]}"}; do
+    label="${r%%: *}"
+    case "${r#*: }" in
+      skipped*) ;;
+      "submitted for review"*|uploaded*) lines+=("- **${label}**: submitted for review") ;;
+      *) lines+=("- **${label}**: not submitted yet") ;;
+    esac
+  done
+  [ ${#lines[@]} -gt 0 ] || return 0
+  printf '\n\n### Stores\n\n'
+  printf '%s\n' "${lines[@]}"
+}
+
 # Uploads an .ipa (ios) or .pkg (macos) to App Store Connect, and notes the
 # upload in build/asc-uploads/: App Store Connect lists a build only some
 # minutes after the upload, and refuses a second upload of the same build
@@ -228,15 +276,37 @@ fi
 if [ "${1:-}" = "retry" ]; then
   ALLOW_PENDING=false
   HOLD_MACOS=false
+  ALLOW_RED_CI=false
   for arg in "${@:2}"; do
     case "$arg" in
       --allow-pending) ALLOW_PENDING=true ;;
       --hold-macos) HOLD_MACOS=true ;;
-      *) echo "Usage: ./scripts/release.sh retry [--allow-pending] [--hold-macos]"; exit 1 ;;
+      --allow-red-ci) ALLOW_RED_CI=true ;;
+      *) echo "Usage: ./scripts/release.sh retry [--allow-pending] [--hold-macos] [--allow-red-ci]"; exit 1 ;;
     esac
   done
 
   CURRENT=$(node -p "require('./package.json').version")
+
+  # What retry publishes is the tagged commit, which has to have passed
+  # GitHub Actions like the commit the release started from. CI on it starts
+  # with the release's push to main and takes up to 40 minutes.
+  TAG_SHA=$(git rev-parse -q --verify "refs/tags/v${CURRENT}^{commit}" || true)
+  if [ -z "$TAG_SHA" ]; then
+    echo "Error: there's no tag v${CURRENT} here; fetch the tags (git fetch origin --tags) and run retry again"
+    exit 1
+  fi
+  if ! ci_green "$TAG_SHA"; then
+    if [ "$ALLOW_RED_CI" = true ]; then
+      echo "WARN: GitHub Actions hasn't passed on v${CURRENT} (${TAG_SHA:0:8}); --allow-red-ci retries anyway:"
+      echo "$CI_PROBLEMS"
+      echo ""
+    else
+      echo "Error: GitHub Actions hasn't passed on v${CURRENT} (${TAG_SHA:0:8}). Wait for it or fix it, or pass --allow-red-ci:"
+      echo "$CI_PROBLEMS"
+      exit 1
+    fi
+  fi
 
   # Derive native version from Android gradle
   ANDROID_GRADLE="$ROOT/packages/android/app/build.gradle.kts"
@@ -252,6 +322,12 @@ if [ "${1:-}" = "retry" ]; then
   STORE_NOTES_FILE="$BUILD_DIR/store-notes.txt"
   PREV_TAG=$(git tag --list 'v*' --sort=-version:refname | sed -n '2p')
   write_store_notes "$CURRENT" "$PREV_TAG" "$STORE_NOTES_FILE"
+  if [ ! -f "docs/release-notes/v${CURRENT}.txt" ] && \
+     { [ -n "${ASC_KEY_ID:-}" ] || [ -n "${GOOGLE_PLAY_SERVICE_ACCOUNT_JSON:-}" ]; }; then
+    echo "WARN: docs/release-notes/v${CURRENT}.txt is missing: an App Store submission or Google Play"
+    echo "      upload below gets notes generated from feat:/fix: commits"
+    echo ""
+  fi
 
   # Where each store stands, from the same check the release runs. A store
   # with a submission in review is left alone: an upload would replace the
@@ -319,13 +395,7 @@ if [ "${1:-}" = "retry" ]; then
       store_result "Chrome Web Store" "FAILED: ${CHROME_STORE_ZIP} is missing"
     else
       echo "Chrome: v${CHROME_LIVE} → v${CURRENT}"
-      if npx chrome-webstore-upload upload \
-        --source "$CHROME_STORE_ZIP" \
-        --extension-id "$CHROME_EXTENSION_ID" \
-        --client-id "$CHROME_CLIENT_ID" \
-        --client-secret "$CHROME_CLIENT_SECRET" \
-        --refresh-token "$CHROME_REFRESH_TOKEN" \
-        --auto-publish 2>&1; then
+      if chrome_upload "$CHROME_STORE_ZIP" 2>&1; then
         RETRIED=$((RETRIED + 1))
         store_result "Chrome Web Store" "uploaded, publishes after review"
       else
@@ -407,23 +477,44 @@ if [ "${1:-}" = "retry" ]; then
     done
   fi
 
-  # Google Play
+  # Google Play: the store page shows a version only once Google's review is
+  # through, so whether this build went up is read from the production track,
+  # where a release sits while it's reviewed. Play refuses a second upload of
+  # the same version code.
   if [ -n "${GOOGLE_PLAY_SERVICE_ACCOUNT_JSON:-}" ] && [ -f "dist/byoky-android-v${CURRENT}.aab" ]; then
     GP_LIVE=$(node -e "
       fetch('https://play.google.com/store/apps/details?id=com.byoky.app&hl=en',{headers:{'User-Agent':'Mozilla/5.0'}})
         .then(r=>r.text()).then(h=>{const m=h.match(/\[\[\[\"(\d+\.\d+\.\d+)\"\]\]/)||h.match(/Current Version.*?>([\d.]+)</);console.log(m?.[1]||'unknown')})
-    " 2>/dev/null)
-    if [ "$GP_LIVE" != "$NATIVE_VERSION" ]; then
-      echo "Google Play: v${GP_LIVE} → v${NATIVE_VERSION}"
-      if node scripts/upload-google-play.mjs "dist/byoky-android-v${CURRENT}.aab" production "$STORE_NOTES_FILE" 2>&1; then
-        RETRIED=$((RETRIED + 1))
-        store_result "Google Play" "uploaded to the production track"
-      else
-        echo "  WARN: Google Play upload failed"
-        store_result "Google Play" "FAILED (see the log above)"
-      fi
-    else
+    " 2>/dev/null || true)
+    GP_LIVE="${GP_LIVE:-unknown}"
+    if [ "$GP_LIVE" = "$NATIVE_VERSION" ]; then
       echo "Google Play: v${GP_LIVE} — up to date"
+    else
+      echo "Google Play: the store page shows v${GP_LIVE}; looking for versionCode ${VERSION_CODE} on the production track..."
+      GP_TRACK=0
+      node scripts/upload-google-play.mjs --track-has "$VERSION_CODE" production 2>&1 || GP_TRACK=$?
+      if [ "$GP_TRACK" -eq 0 ]; then
+        echo "Google Play: v${NATIVE_VERSION} is on the production track already (in review or live)"
+        store_result "Google Play" "v${NATIVE_VERSION} (versionCode ${VERSION_CODE}) is on the production track already, in review or live; nothing to upload"
+      elif [ "$GP_TRACK" -ne 5 ] && [ "$ALLOW_PENDING" = false ]; then
+        echo "Google Play: the production track couldn't be read"
+        store_result "Google Play" "NOT UPLOADED: its review state is unknown (the production track couldn't be read), and v${NATIVE_VERSION} may be in review already; run retry again, or pass --allow-pending"
+      else
+        echo "Google Play: v${GP_LIVE} → v${NATIVE_VERSION}"
+        GP_CODE=0
+        node scripts/upload-google-play.mjs "dist/byoky-android-v${CURRENT}.aab" production "$STORE_NOTES_FILE" 2>&1 || GP_CODE=$?
+        if [ "$GP_CODE" -eq 0 ]; then
+          RETRIED=$((RETRIED + 1))
+          store_result "Google Play" "uploaded to the production track"
+        elif [ "$GP_CODE" -eq 4 ] && [ "$GP_TRACK" -eq 5 ]; then
+          store_result "Google Play" "NOT UPLOADED: Google Play has versionCode ${VERSION_CODE} from an earlier upload, but not on the production track; see the Play Console"
+        elif [ "$GP_CODE" -eq 4 ]; then
+          store_result "Google Play" "versionCode ${VERSION_CODE} went up before (Google Play refuses it again); nothing uploaded"
+        else
+          echo "  WARN: Google Play upload failed"
+          store_result "Google Play" "FAILED (see the log above)"
+        fi
+      fi
     fi
   fi
 
@@ -454,6 +545,8 @@ HOLD_MACOS=false
 ALLOW_BRANCH=false
 ALLOW_DIRTY=false
 SKIP_NATIVE_TESTS=false
+ALLOW_RED_CI=false
+ALLOW_GENERATED_NOTES=false
 NEW_VERSION=""
 
 for arg in "$@"; do
@@ -467,6 +560,8 @@ for arg in "$@"; do
     --allow-branch) ALLOW_BRANCH=true ;;
     --allow-dirty) ALLOW_DIRTY=true ;;
     --skip-native-tests) SKIP_NATIVE_TESTS=true ;;
+    --allow-red-ci) ALLOW_RED_CI=true ;;
+    --allow-generated-notes) ALLOW_GENERATED_NOTES=true ;;
     *)         NEW_VERSION="$arg" ;;
   esac
 done
@@ -475,9 +570,10 @@ if [ -z "$NEW_VERSION" ]; then
   CURRENT=$(node -p "require('./package.json').version")
   echo "Usage: ./scripts/release.sh <new-version> [--dry] [--skip-mobile] [--skip-store-uploads] [--yes]"
   echo "                                           [--allow-pending] [--hold-macos] [--allow-branch]"
-  echo "                                           [--allow-dirty] [--skip-native-tests]"
+  echo "                                           [--allow-dirty] [--skip-native-tests] [--allow-red-ci]"
+  echo "                                           [--allow-generated-notes]"
   echo "       ./scripts/release.sh status"
-  echo "       ./scripts/release.sh retry [--allow-pending] [--hold-macos]"
+  echo "       ./scripts/release.sh retry [--allow-pending] [--hold-macos] [--allow-red-ci]"
   echo ""
   echo "  --dry                  Run the checks and the tests and print the plan; nothing"
   echo "                         is bumped or published, and signing is only checked"
@@ -501,9 +597,19 @@ if [ -z "$NEW_VERSION" ]; then
   echo "                         built and shipped but NOT committed or tagged"
   echo "  --skip-native-tests    Skip the Android and iOS unit tests (the JS build,"
   echo "                         typecheck and tests always run)"
+  echo "  --allow-red-ci         Release although GitHub Actions hasn't passed on HEAD"
+  echo "                         (failed, still running, or never ran because HEAD isn't"
+  echo "                         pushed). With retry: on the tagged commit"
+  echo "  --allow-generated-notes"
+  echo "                         Upload to the App Store and Google Play without"
+  echo "                         docs/release-notes/v<version>.txt: they then show notes"
+  echo "                         generated from feat:/fix: commits, usually just"
+  echo "                         \"Bug fixes and improvements.\""
   echo ""
   echo "Releases go out from main: fast-forward main to the work, release from the main"
   echo "checkout. The release commit and tag v<version> are pushed to origin main."
+  echo "HEAD has to be pushed and green in GitHub Actions (CI, Security, and Android"
+  echo "emulator when it ran) first; retry asks the same of the tagged commit."
   echo "retry finishes a release that stopped after the push: it publishes the npm"
   echo "packages and the GitHub release that are missing and uploads to the stores that"
   echo "are behind. A run that stopped earlier says how to undo its version bump."
@@ -606,6 +712,19 @@ if [ -n "$LATEST_TAG" ] && [ "${LATEST_TAG#v}" != "$OLD_VERSION" ] && \
   ERRORS+=("${LATEST_TAG} is newer than this tree's ${OLD_VERSION}: HEAD is missing that release's version bump")
 fi
 
+# GitHub Actions has to have passed on what's released: the checks below
+# don't build the create-byoky-app templates or run the e2e and emulator
+# suites, and main has no required checks. A HEAD that was never pushed has
+# no runs.
+HEAD_SHA=$(git rev-parse HEAD)
+if ci_green "$HEAD_SHA"; then
+  :
+elif [ "$ALLOW_RED_CI" = true ]; then
+  WARNINGS+=("GitHub Actions hasn't passed on ${HEAD_SHA:0:8} (--allow-red-ci):"$'\n'"$CI_PROBLEMS")
+else
+  ERRORS+=("GitHub Actions hasn't passed on ${HEAD_SHA:0:8}. Push it and wait for CI, or fix what failed, or pass --allow-red-ci:"$'\n'"$CI_PROBLEMS")
+fi
+
 # Without the upload keystore gradle builds an unsigned AAB, which Google Play
 # refuses at the very end of the run.
 if [ "$SKIP_ANDROID" = false ] && [ "$SKIP_STORE_UPLOADS" = false ] && \
@@ -638,6 +757,27 @@ STORES_SKIPPED=()
 [ -n "${GOOGLE_PLAY_SERVICE_ACCOUNT_JSON:-}" ] \
   && STORES_CONFIGURED+=("Google Play") \
   || STORES_SKIPPED+=("Google Play (GOOGLE_PLAY_SERVICE_ACCOUNT_JSON)")
+
+# The App Store's "What's New" and Google Play's release notes are
+# docs/release-notes/v<version>.txt. Without it they're generated from
+# feat:/fix: commit prefixes, which this repo doesn't use, so the stores would
+# show "Bug fixes and improvements."; neither can be changed once submitted.
+# Google Play takes 500 characters.
+NOTES_FILE="docs/release-notes/v${NEW_VERSION}.txt"
+if [ "$SKIP_STORE_UPLOADS" = false ] && \
+   { { [ "$SKIP_IOS" = false ] && [ -n "${ASC_KEY_ID:-}" ] && [ -n "${ASC_ISSUER_ID:-}" ]; } || \
+     { [ "$SKIP_ANDROID" = false ] && [ -n "${GOOGLE_PLAY_SERVICE_ACCOUNT_JSON:-}" ]; }; }; then
+  if [ -f "$NOTES_FILE" ]; then
+    NOTES_LENGTH=$(node -p 'require("fs").readFileSync(process.argv[1], "utf8").trimEnd().length' "$NOTES_FILE")
+    if [ "$NOTES_LENGTH" -gt 500 ]; then
+      ERRORS+=("${NOTES_FILE} has ${NOTES_LENGTH} characters; Google Play takes 500 and would cut it off")
+    fi
+  elif [ "$ALLOW_GENERATED_NOTES" = true ]; then
+    WARNINGS+=("${NOTES_FILE} is missing (--allow-generated-notes): the App Store and Google Play get notes generated from feat:/fix: commits")
+  else
+    ERRORS+=("${NOTES_FILE} is missing: the App Store and Google Play would show \"Bug fixes and improvements.\" Write it (500 characters at most, plain text) and commit it, or pass --allow-generated-notes")
+  fi
+fi
 
 if [ "$HOLD_MACOS" = true ] && [ "$SKIP_IOS" = false ] && [ "$SKIP_STORE_UPLOADS" = false ]; then
   WARNINGS+=("--hold-macos: the Mac app is built but not uploaded or submitted; ./scripts/release.sh retry does that once the macOS version in review is through")
@@ -741,9 +881,10 @@ elif [ "$STATUS_CODE" -ne 0 ]; then
 fi
 
 # --- Verify ---
-# What ships has to build and pass its tests: the JS packages always, the
-# Android and iOS unit tests unless --skip-native-tests.
-echo "==> Verifying (install, build, typecheck, tests)..."
+# What ships has to build and pass its tests: the JS packages and the
+# create-byoky-app templates always, the Android and iOS unit tests unless
+# --skip-native-tests.
+echo "==> Verifying (install, build, typecheck, tests, templates)..."
 verify() {
   echo "  \$ $*"
   if ! "$@"; then
@@ -759,6 +900,10 @@ verify pnpm --filter @byoky/extension exec wxt prepare
 verify pnpm typecheck
 verify pnpm test
 verify node --test scripts/tests/*.test.mjs
+# The templates install the newest versions their ranges allow, with no
+# lockfile, and run those packages' builds: none of that sees the store
+# credentials or provider keys.
+verify without_secrets bash scripts/template-smoke.sh chat multi-provider backend-relay
 if [ "$SKIP_NATIVE_TESTS" = true ]; then
   echo "  WARN: --skip-native-tests: the Android and iOS unit tests didn't run"
 else
@@ -1034,11 +1179,14 @@ fi
 # Source for AMO, whose reviewers rebuild the add-on from it: the workspace
 # files the build reads (all three packages extend tsconfig.base.json) and
 # BUILD-FIREFOX.md. The add-on goes to AMO only if the zip rebuilds it.
+# The zip is public (AMO, and the GitHub release), so it takes the files git
+# would, as they are on disk with the bump: what .gitignore leaves out (.env
+# files, build output, node_modules) stays out, and so does a secret in it.
 SOURCE_ZIP="dist/byoky-source-v${NEW_VERSION}.zip"
-zip -r "$SOURCE_ZIP" \
+git ls-files -z --cached --others --exclude-standard -- \
   package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json README.md \
   packages/core packages/sdk packages/extension \
-  -x "*/node_modules/*" "*/dist/*" "*/.output/*" "*/.wxt/*" "*.DS_Store"
+  | xargs -0 zip -q "$SOURCE_ZIP"
 NOTE_DIR=$(mktemp -d)
 amo_build_note > "$NOTE_DIR/BUILD-FIREFOX.md"
 zip -j "$SOURCE_ZIP" "$NOTE_DIR/BUILD-FIREFOX.md"
@@ -1120,13 +1268,7 @@ if [ "$SKIP_STORE_UPLOADS" = true ]; then
   store_result "Chrome Web Store" "skipped (--skip-store-uploads)"
 elif [ -n "${CHROME_EXTENSION_ID:-}" ] && [ -n "${CHROME_CLIENT_ID:-}" ]; then
   echo "  Uploading to Chrome Web Store..."
-  if npx chrome-webstore-upload upload \
-    --source "$CHROME_STORE_ZIP" \
-    --extension-id "$CHROME_EXTENSION_ID" \
-    --client-id "$CHROME_CLIENT_ID" \
-    --client-secret "$CHROME_CLIENT_SECRET" \
-    --refresh-token "$CHROME_REFRESH_TOKEN" \
-    --auto-publish; then
+  if chrome_upload "$CHROME_STORE_ZIP"; then
     store_result "Chrome Web Store" "uploaded, publishes after review"
   else
     echo "  WARN: Chrome upload failed; the other stores still go out (retry with ./scripts/release.sh retry)"
@@ -1239,7 +1381,7 @@ for f in dist/byoky-*-v${NEW_VERSION}.*; do
   [ -f "$f" ] && RELEASE_ASSETS+=("$f")
 done
 
-github_release "$NEW_VERSION" "$RELEASE_NOTES"
+github_release "$NEW_VERSION" "${RELEASE_NOTES}$(store_footer)"
 STAGE=released
 
 # ============================================================
@@ -1248,12 +1390,19 @@ STAGE=released
 step "Discord notification"
 
 if [ -n "${DISCORD_WEBHOOK_URL:-}" ]; then
+  # The hand-written notes when there are any: the commits here don't use
+  # the feat: prefix the generated notes' Features section collects.
+  if [ -f "docs/release-notes/v${NEW_VERSION}.txt" ]; then
+    DISCORD_CHANGES=$(cat "docs/release-notes/v${NEW_VERSION}.txt")
+  else
+    DISCORD_CHANGES=$(echo "$RELEASE_NOTES" | sed -n '/^### Features/,/^### [^F]/{ /^### [^F]/!p; }' | head -15)
+  fi
   # Build a concise Discord message (markdown supported)
   DISCORD_MSG="**byoky v${NEW_VERSION}** released
 
 **npm:** \`${NEW_VERSION}\` | **Native:** \`${NEW_NATIVE_VERSION}\` (${NEW_VERSION_CODE})
 
-$(echo "$RELEASE_NOTES" | sed -n '/^### Features/,/^### [^F]/{ /^### [^F]/!p; }' | head -15)
+${DISCORD_CHANGES}
 
 **Links:**
 - [GitHub Release](https://github.com/MichaelLod/byoky/releases/tag/v${NEW_VERSION})

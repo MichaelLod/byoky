@@ -135,8 +135,8 @@ jobs:
         run: node --test scripts/tests/*.test.mjs
 
   # Every create-byoky-app template, scaffolded by the CLI against this
-  # commit's SDK, must install, build and typecheck. Needs the scaffolder's
-  # --template flag (non-interactive).
+  # commit's SDK, must install, build (with CI set) and typecheck. The same
+  # script runs in release.sh's checks before a release.
   templates:
     runs-on: ubuntu-26.04
     timeout-minutes: 20
@@ -153,45 +153,8 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
 
-      - name: Build the scaffolder; pack core and sdk as they would publish
-        run: |
-          pnpm --filter @byoky/core build
-          pnpm --filter @byoky/sdk build
-          pnpm --filter create-byoky-app build
-          mkdir -p "$RUNNER_TEMP/pkgs"
-          (cd packages/core && pnpm pack --pack-destination "$RUNNER_TEMP/pkgs")
-          (cd packages/sdk && pnpm pack --pack-destination "$RUNNER_TEMP/pkgs")
-
-      - name: Scaffold ${{ matrix.template }}
-        working-directory: ${{ runner.temp }}
-        run: node "$GITHUB_WORKSPACE/packages/create-byoky-app/dist/index.js" smoke-app --template "${{ matrix.template }}" < /dev/null
-
-      - name: Point the app at this commit's SDK
-        working-directory: ${{ runner.temp }}/smoke-app
-        run: |
-          node -e '
-            const fs = require("fs");
-            const dir = process.env.RUNNER_TEMP + "/pkgs";
-            const tgz = (prefix) => "file:" + dir + "/" + fs.readdirSync(dir).find((f) => f.startsWith(prefix) && f.endsWith(".tgz"));
-            const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
-            pkg.dependencies["@byoky/sdk"] = tgz("byoky-sdk-");
-            pkg.overrides = { ...pkg.overrides, "@byoky/core": tgz("byoky-core-") };
-            fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n");
-          '
-
-      - name: Install, build and typecheck
-        working-directory: ${{ runner.temp }}/smoke-app
-        run: |
-          npm install --no-audit --no-fund
-          # The build must not have to rewrite the app's own files: Next
-          # installs a missing @types package into package.json (or, with CI
-          # set, fails) and reshapes a tsconfig.json it disagrees with.
-          mkdir -p ../before && cp package.json tsconfig.json ../before/
-          npm run build --if-present
-          npm run build:client --if-present
-          npx tsc --noEmit
-          diff -u ../before/package.json package.json
-          diff -u ../before/tsconfig.json tsconfig.json
+      - name: Scaffold ${{ matrix.template }}, install, build and typecheck
+        run: bash scripts/template-smoke.sh "${{ matrix.template }}"
 
   # Fake-provider Playwright run: the real extension, headless, no keys.
   e2e:

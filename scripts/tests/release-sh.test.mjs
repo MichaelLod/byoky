@@ -10,12 +10,18 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, copyFileSync, chmo
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { SCRIPTS, FAKE_ASC_ENV } from './helpers.mjs'
+import { SCRIPTS, FAKE_ASC_ENV, writePlayServiceAccount, playRoutes, onTrack, PLAY_VERSION_CODE_USED, editDeleted } from './helpers.mjs'
 
 // A whole run bumps with BSD sed and PlistBuddy, like release.sh on a Mac.
 const MAC_ONLY = { skip: process.platform !== 'darwin' && 'release.sh past the bump needs macOS (BSD sed, PlistBuddy)' }
 
 const NOT_PENDING = { localVersion: '1.1.1', results: [{ id: 'chrome', version: '1.1.1', pending: false }] }
+// GitHub Actions on the commit, as `gh run list --json` lists it.
+const ghRun = (workflowName, conclusion, status = 'completed') =>
+  ({ databaseId: workflowName.length, workflowName, status, conclusion, createdAt: '2026-11-02T12:00:00Z', url: `https://github.test/runs/${workflowName.length}` })
+const CI_GREEN = [ghRun('CI', 'success'), ghRun('Security', 'success'), ghRun('Android emulator', 'success')]
+const CWS_CLI = join(SCRIPTS, '..', 'node_modules', 'chrome-webstore-upload-cli', 'source', 'cli.js')
+const CHROME_UPLOAD = /^npx chrome-webstore-upload --source dist\/byoky-chrome-v1\.1\.2-store\.zip --extension-id extid$/m
 
 function write(path, text, mode) {
   mkdirSync(join(path, '..'), { recursive: true })
@@ -34,14 +40,20 @@ const plist = (version, build) => `<?xml version="1.0" encoding="UTF-8"?>
 // A repo at `version` laid out like byoky (the files release.sh bumps,
 // stub scripts), pushed to its origin and tagged. Tools are shims that log
 // to CALLS: pnpm (STUB_PNPM_FAIL="<args>" fails that call), npx
-// (STUB_NPX_EXIT), npm (`npm view` answers for STUB_NPM_PUBLISHED: "all" or
-// package names), gh (STUB_GH_RELEASE_MISSING=1: no release yet), xcrun,
+// (STUB_NPX_EXIT; for chrome-webstore-upload also the OAuth environment it
+// got, and STUB_NPX_REAL=1 runs the workspace's real CLI with fetch stubbed),
+// npm (`npm view` answers for STUB_NPM_PUBLISHED: "all" or
+// package names), gh (STUB_GH_RELEASE_MISSING=1: no release yet; `gh run list`
+// answers STUB_GH_RUNS, green by default, and `gh run view` STUB_GH_JOBS), xcrun,
 // xcodebuild (an export leaves an .ipa, or a .pkg for the macOS archive).
+// curl (answers 204, for the Discord webhook).
 // The submit-appstore.mjs stub exits STUB_ASC_<IOS|MAC_OS>_QUICK for retry's
 // first look (ASC_BUILD_WAIT_MIN=0) and STUB_ASC_<platform>_WAIT otherwise.
+// `notes` commits docs/release-notes/v1.1.2.txt, the stores' "What's New".
 // `real` names scripts copied from scripts/ instead of stubbed; run them
 // with run(args, env, routes) to give them a stubbed fetch (fetch-stub.mjs).
-function sandbox({ version = '1.1.1', versionCode = 30, android = false, real = [] } = {}) {
+const STORE_NOTES = 'Fixes and a security update.\n'
+function sandbox({ version = '1.1.1', versionCode = 30, android = false, real = [], notes = true } = {}) {
   const base = mkdtempSync(join(tmpdir(), 'byoky-release-sh-'))
   const work = join(base, 'work')
   const bin = join(base, 'bin')
@@ -72,7 +84,8 @@ function sandbox({ version = '1.1.1', versionCode = 30, android = false, real = 
     write(join(work, 'packages/extension/.output', out, 'manifest.json'), JSON.stringify({ version }) + '\n')
   }
   for (const f of ['pnpm-lock.yaml', 'pnpm-workspace.yaml', 'tsconfig.base.json', 'README.md']) write(join(work, f), '\n')
-  write(join(work, '.gitignore'), 'dist/\nbuild/\n.output/\n')
+  if (notes) write(join(work, 'docs/release-notes/v1.1.2.txt'), STORE_NOTES)
+  write(join(work, '.gitignore'), 'node_modules/\ndist/\n.output/\nbuild/\n.env\n.env.local\n')
   mkdirSync(join(work, 'scripts/tests'), { recursive: true })
   copyFileSync(join(SCRIPTS, 'release.sh'), join(work, 'scripts/release.sh'))
   chmodSync(join(work, 'scripts/release.sh'), 0o755)
@@ -87,9 +100,10 @@ const wait = process.env.ASC_BUILD_WAIT_MIN
 appendFileSync(process.env.CALLS, \`submit-appstore.mjs \${version} \${platform} wait=\${wait}\\n\`)
 process.exitCode = Number(process.env[\`STUB_ASC_\${platform}_\${wait === '0' ? 'QUICK' : 'WAIT'}\`] ?? 0)
 `)
-  for (const name of ['ios-unit-tests.sh', ...real]) copyFileSync(join(SCRIPTS, name), join(work, 'scripts', name))
+  for (const name of ['ios-unit-tests.sh', 'ci-status.mjs', ...real]) copyFileSync(join(SCRIPTS, name), join(work, 'scripts', name))
   write(join(work, 'scripts/ios-signing.sh'), logArgs('ios-signing.sh') + 'exit "${STUB_SIGNING_EXIT:-0}"\n')
   write(join(work, 'scripts/sync-mobile-bundle.sh'), logArgs('sync-mobile-bundle.sh'))
+  write(join(work, 'scripts/template-smoke.sh'), logArgs('template-smoke.sh'))
   write(join(work, 'scripts/scan-openclaw-plugin.mjs'), '')
   write(join(work, 'scripts/release-notes.mjs'), "console.log('notes')\n")
   write(join(work, 'scripts/generate-versions.mjs'), '')
@@ -116,7 +130,13 @@ esac
   "simctl create"*) echo UDID-1 ;;
 esac
 `, 0o755)
-  write(join(bin, 'npx'), logArgs('npx') + 'exit "${STUB_NPX_EXIT:-0}"\n', 0o755)
+  write(join(bin, 'curl'), logArgs('curl') + 'printf 204\n', 0o755)
+  write(join(bin, 'npx'), logArgs('npx') + `if [ "$1" = chrome-webstore-upload ]; then
+  echo "npx-env PUBLISHER_ID=\${PUBLISHER_ID:-} CLIENT_ID=\${CLIENT_ID:-} CLIENT_SECRET=\${CLIENT_SECRET:+set} REFRESH_TOKEN=\${REFRESH_TOKEN:+set}" >> "$CALLS"
+  [ -n "\${STUB_NPX_REAL:-}" ] && shift && exec node "${CWS_CLI}" "$@"
+fi
+exit "\${STUB_NPX_EXIT:-0}"
+`, 0o755)
   write(join(bin, 'npm'), `#!/bin/sh
 if [ "$1" = view ]; then
   name="\${2%@*}"; ver="\${2##*@}"
@@ -125,7 +145,13 @@ if [ "$1" = view ]; then
 fi
 echo "npm $*" >> "$CALLS"
 `, 0o755)
-  write(join(bin, 'gh'), logArgs('gh') + '[ "$1 $2" = "release view" ] && [ -n "${STUB_GH_RELEASE_MISSING:-}" ] && exit 1\nexit 0\n', 0o755)
+  write(join(bin, 'gh'), logArgs('gh') + `case "$1 $2" in
+  "release view") [ -n "\${STUB_GH_RELEASE_MISSING:-}" ] && exit 1 ;;
+  "run list") printf '%s\\n' "$STUB_GH_RUNS" ;;
+  "run view") printf '%s\\n' "$STUB_GH_JOBS" ;;
+esac
+exit 0
+`, 0o755)
 
   const fetchLog = join(base, 'fetch.log')
   const run = (args, env = {}, routes) => {
@@ -147,6 +173,8 @@ echo "npm $*" >> "$CALLS"
         HOME: base,
         CALLS: calls,
         STUB_STATUS_JSON: JSON.stringify(NOT_PENDING),
+        STUB_GH_RUNS: JSON.stringify(CI_GREEN),
+        STUB_GH_JOBS: '{"jobs":[]}',
         CHROME_EXTENSION_ID: 'extid',
         CHROME_CLIENT_ID: 'client',
         CHROME_CLIENT_SECRET: 'secret',
@@ -169,13 +197,13 @@ echo "npm $*" >> "$CALLS"
 
 // --- retry ---
 
-function released(t) {
-  const s = sandbox({ version: '1.1.2', versionCode: 31 })
+function released(t, opts = {}) {
+  const s = sandbox({ version: '1.1.2', versionCode: 31, ...opts })
   t.after(s.cleanup)
   write(join(s.work, 'dist/byoky-chrome-v1.1.2.zip'), 'keyed')
   write(join(s.work, 'dist/byoky-chrome-v1.1.2-store.zip'), 'store')
   const run = s.run
-  s.run = (args, env = {}) => run(args, { STUB_NPM_PUBLISHED: 'all', ...env })
+  s.run = (args, env = {}, routes) => run(args, { STUB_NPM_PUBLISHED: 'all', ...env }, routes)
   return s
 }
 
@@ -183,9 +211,41 @@ test('retry uploads the Chrome store zip, not the keyed sideload zip', (t) => {
   const s = released(t)
   const r = s.run(['retry'])
   assert.equal(r.code, 0, r.out)
-  assert.match(r.calls, /npx chrome-webstore-upload upload --source dist\/byoky-chrome-v1\.1\.2-store\.zip /)
+  assert.match(r.calls, CHROME_UPLOAD)
   assert.doesNotMatch(r.calls, /byoky-chrome-v1\.1\.2\.zip/)
   assert.match(r.out, /Retried 1 store/)
+})
+
+// Google supported Web Store API v1.1 until 15 Oct 2026.
+const CWS_V2 = 'https://chromewebstore.googleapis.com/upload/v2/publishers/29fa2c41-d315-4dfb-a14c-8919348cb737/items/extid'
+const cwsRoutes = (upload) => [
+  { method: 'POST', url: '^https://www\\.googleapis\\.com/oauth2/v4/token$', body: { access_token: 'token' } },
+  { method: 'POST', url: ':upload$', ...upload },
+  { method: 'POST', url: ':publish$', body: { state: 'PENDING_REVIEW' } },
+]
+
+test('the Chrome upload goes through Web Store API v2 under the publisher, with the OAuth values off the command line', (t) => {
+  const s = released(t)
+  const r = s.run(['retry'], { STUB_NPX_REAL: '1' }, cwsRoutes({ body: { uploadState: 'SUCCEEDED', crxVersion: '1.1.2' } }))
+  assert.equal(r.code, 0, r.out)
+  assert.deepEqual(r.fetches.map((c) => `${c.method} ${c.url}`), [
+    'POST https://www.googleapis.com/oauth2/v4/token',
+    `POST ${CWS_V2}:upload`,
+    `POST ${CWS_V2.replace('/upload/v2/', '/v2/')}:publish`,
+  ])
+  assert.match(r.fetches[0].body, /"client_id":"client".*"refresh_token":"refresh".*"client_secret":"secret"/)
+  // Upload, then submit for review and publish once approved (no command).
+  assert.match(r.calls, CHROME_UPLOAD)
+  assert.match(r.calls, /^npx-env PUBLISHER_ID=29fa2c41-d315-4dfb-a14c-8919348cb737 CLIENT_ID=client CLIENT_SECRET=set REFRESH_TOKEN=set$/m)
+  assert.doesNotMatch(r.calls, /--client|--refresh|--auto-publish| secret\b| refresh\b/)
+  assert.match(r.out, /Chrome Web Store: uploaded, publishes after review/)
+
+  const refused = s.run(['retry'], { STUB_NPX_REAL: '1' },
+    cwsRoutes({ status: 400, body: { error: { code: 400, message: 'The version of the uploaded package is not larger than the published one.' } } }))
+  assert.equal(refused.code, 1, refused.out)
+  assert.match(refused.out, /not larger than the published one/)
+  assert.match(refused.out, /Chrome Web Store: FAILED/)
+  assert.ok(!refused.fetches.some((c) => c.url.endsWith(':publish')))
 })
 
 test('retry leaves a Chrome submission in review alone', (t) => {
@@ -197,7 +257,7 @@ test('retry leaves a Chrome submission in review alone', (t) => {
   assert.match(r.out, /v1\.1\.2 is PENDING_REVIEW; skipped/)
 
   const forced = s.run(['retry', '--allow-pending'], { STUB_STATUS_JSON: JSON.stringify(status), STUB_STATUS_CODE: '3' })
-  assert.match(forced.calls, /chrome-webstore-upload upload --source dist\/byoky-chrome-v1\.1\.2-store\.zip/)
+  assert.match(forced.calls, CHROME_UPLOAD)
 })
 
 test('retry leaves a store whose review state is unknown alone, and fails the run', (t) => {
@@ -210,7 +270,7 @@ test('retry leaves a store whose review state is unknown alone, and fails the ru
 
   const forced = s.run(['retry', '--allow-pending'], { STUB_STATUS_JSON: JSON.stringify(status), STUB_STATUS_CODE: '3' })
   assert.equal(forced.code, 0, forced.out)
-  assert.match(forced.calls, /chrome-webstore-upload upload --source dist\/byoky-chrome-v1\.1\.2-store\.zip/)
+  assert.match(forced.calls, CHROME_UPLOAD)
 })
 
 test('a failed retry upload is not counted and fails the run', (t) => {
@@ -254,6 +314,44 @@ test('a pending review or an unreadable review state (store-status exit 3) stops
   const allowed = s.run(['1.1.2', '--dry', '--allow-pending'], { STUB_STATUS_CODE: '3' })
   assert.equal(allowed.code, 0, allowed.out)
   assert.match(allowed.out, /WARN: a review is pending, or a store's review state is unknown \(above\); --allow-pending releases anyway/)
+})
+
+// --- store notes ---
+
+test("an App Store or Google Play release needs docs/release-notes/v<version>.txt, unless --allow-generated-notes", (t) => {
+  const s = sandbox({ notes: false })
+  t.after(s.cleanup)
+  const r = s.run(['1.1.2', '--dry'], FAKE_ASC_ENV)
+  assert.equal(r.code, 1, r.out)
+  assert.match(r.out, /ERROR: docs\/release-notes\/v1\.1\.2\.txt is missing: the App Store and Google Play would show "Bug fixes and improvements\." .*--allow-generated-notes/)
+  assert.doesNotMatch(r.calls, /pnpm install/)
+
+  const generated = s.run(['1.1.2', '--dry', '--allow-generated-notes'], FAKE_ASC_ENV)
+  assert.equal(generated.code, 0, generated.out)
+  assert.match(generated.out, /WARN: docs\/release-notes\/v1\.1\.2\.txt is missing \(--allow-generated-notes\)/)
+
+  // No App Store or Google Play upload, no notes needed.
+  assert.equal(s.run(['1.1.2', '--dry']).code, 0)
+  assert.equal(s.run(['1.1.2', '--dry', '--skip-store-uploads'], FAKE_ASC_ENV).code, 0)
+  assert.equal(s.run(['1.1.2', '--dry', '--skip-mobile'], FAKE_ASC_ENV).code, 0)
+
+  // Google Play keeps 500 characters (not bytes).
+  write(join(s.work, 'docs/release-notes/v1.1.2.txt'), '•'.repeat(500) + '\n')
+  s.git('add', '-A')
+  s.git('commit', '-q', '-m', 'notes')
+  s.git('push', '-q', 'origin', 'main')
+  assert.equal(s.run(['1.1.2', '--dry'], FAKE_ASC_ENV).code, 0)
+  write(join(s.work, 'docs/release-notes/v1.1.2.txt'), '•'.repeat(501) + '\n')
+  const long = s.run(['1.1.2', '--dry', '--allow-dirty'], FAKE_ASC_ENV)
+  assert.equal(long.code, 1, long.out)
+  assert.match(long.out, /ERROR: docs\/release-notes\/v1\.1\.2\.txt has 501 characters; Google Play takes 500/)
+})
+
+test('retry warns when the hand-written store notes are missing', (t) => {
+  const s = released(t, { notes: false })
+  const r = s.run(['retry'], { ASC_KEY_ID: 'TESTKEY', ASC_ISSUER_ID: 'test-issuer' })
+  assert.match(r.out, /WARN: docs\/release-notes\/v1\.1\.2\.txt is missing/)
+  assert.doesNotMatch(s.run(['retry']).out, /release-notes/)
 })
 
 // --- branch, origin and tags ---
@@ -361,6 +459,7 @@ test('the tests run before anything is bumped, the native ones included', (t) =>
   // The typecheck needs the bridge's dist (the OpenClaw plugin imports its types).
   const order = ['pnpm install --frozen-lockfile', 'pnpm build:core', 'pnpm build:sdk', 'pnpm --filter @byoky/bridge build',
     'pnpm --filter @byoky/extension exec wxt prepare', 'pnpm typecheck', 'pnpm test',
+    'template-smoke.sh chat multi-provider backend-relay',
     'gradlew :app:testDebugUnitTest', 'xcrun simctl create byoky-release-tests-']
   let at = -1
   for (const step of order) {
@@ -387,6 +486,84 @@ test('a failing test stops the release before the bump', (t) => {
   assert.match(readFileSync(join(s.work, 'package.json'), 'utf8'), /"version": "1\.1\.1"/)
 })
 
+// --- GitHub Actions ---
+
+test('a release needs GitHub Actions green on HEAD: failed, running or missing runs stop it before the bump', (t) => {
+  const s = sandbox()
+  t.after(s.cleanup)
+  const head = s.git('rev-parse', 'HEAD').trim()
+  const jobs = JSON.stringify({ jobs: [
+    { name: 'build (24)', status: 'completed', conclusion: 'success' },
+    { name: 'templates (chat)', status: 'completed', conclusion: 'failure' },
+    { name: 'e2e', status: 'completed', conclusion: 'failure' },
+  ] })
+  const red = s.run(['1.1.2', '--yes'], {
+    STUB_GH_RUNS: JSON.stringify([ghRun('CI', 'failure'), ghRun('Security', 'success')]),
+    STUB_GH_JOBS: jobs,
+  })
+  assert.equal(red.code, 1, red.out)
+  assert.match(red.calls, new RegExp(`^gh run list --commit ${head} `, 'm'))
+  assert.match(red.out, new RegExp(`ERROR: GitHub Actions hasn't passed on ${head.slice(0, 8)}\\. .*--allow-red-ci:\\n +CI: failure in templates \\(chat\\), e2e \\(https://github\\.test/runs/2\\)`))
+  assert.doesNotMatch(red.calls, /pnpm install|ios-signing/)
+  assert.match(readFileSync(join(s.work, 'package.json'), 'utf8'), /"version": "1\.1\.1"/)
+
+  // HEAD never pushed: no runs.
+  const none = s.run(['1.1.2', '--dry'], { STUB_GH_RUNS: '[]' })
+  assert.equal(none.code, 1, none.out)
+  assert.match(none.out, /no GitHub Actions runs for [0-9a-f]{8}: push it to main or a release\/\*\* branch and wait for CI/)
+
+  const running = s.run(['1.1.2', '--dry'], {
+    STUB_GH_RUNS: JSON.stringify([ghRun('CI', null, 'in_progress'), ghRun('Security', 'success')]),
+  })
+  assert.equal(running.code, 1, running.out)
+  assert.match(running.out, /CI is still in progress/)
+
+  const noSecurity = s.run(['1.1.2', '--dry'], { STUB_GH_RUNS: JSON.stringify([ghRun('CI', 'success')]) })
+  assert.equal(noSecurity.code, 1, noSecurity.out)
+  assert.match(noSecurity.out, /Security didn't run on/)
+
+  // An Android emulator run that failed counts as well.
+  const emulator = s.run(['1.1.2', '--dry'], { STUB_GH_RUNS: JSON.stringify([...CI_GREEN.slice(0, 2), ghRun('Android emulator', 'failure')]) })
+  assert.equal(emulator.code, 1, emulator.out)
+  assert.match(emulator.out, /Android emulator: failure/)
+
+  // A rerun that passed replaces the failed run before it.
+  const rerun = s.run(['1.1.2', '--dry'], { STUB_GH_RUNS: JSON.stringify([
+    { ...ghRun('CI', 'failure'), createdAt: '2026-11-02T11:00:00Z' }, ...CI_GREEN] ) })
+  assert.equal(rerun.code, 0, rerun.out)
+})
+
+test('--allow-red-ci releases although GitHub Actions is red, and says what failed', MAC_ONLY, (t) => {
+  const s = sandbox()
+  t.after(s.cleanup)
+  const r = s.run(['1.1.2', '--yes', '--skip-mobile', '--allow-red-ci'], {
+    STUB_GH_RUNS: JSON.stringify([ghRun('CI', 'failure'), ghRun('Security', 'success')]),
+    STUB_GH_JOBS: JSON.stringify({ jobs: [{ name: 'e2e', status: 'completed', conclusion: 'failure' }] }),
+  })
+  assert.equal(r.code, 0, r.out)
+  assert.match(r.out, /WARN: GitHub Actions hasn't passed on [0-9a-f]{8} \(--allow-red-ci\):\n +CI: failure in e2e/)
+  assert.equal(s.origin('log', '-1', '--format=%s', 'main').trim(), 'Bump to v1.1.2 (native 1.1.2/31)')
+})
+
+test('retry needs GitHub Actions green on the tagged commit, unless --allow-red-ci', (t) => {
+  const s = released(t)
+  // A commit after the tag: retry asks about the tag's.
+  s.git('commit', '-q', '--allow-empty', '-m', 'after the release')
+  const tagged = s.git('rev-parse', 'v1.1.2^{commit}').trim()
+  const env = { STUB_GH_RUNS: JSON.stringify([ghRun('CI', null, 'in_progress'), ghRun('Security', 'success')]) }
+  const r = s.run(['retry'], env)
+  assert.equal(r.code, 1, r.out)
+  assert.match(r.calls, new RegExp(`^gh run list --commit ${tagged} `, 'm'))
+  assert.match(r.out, new RegExp(`Error: GitHub Actions hasn't passed on v1\\.1\\.2 \\(${tagged.slice(0, 8)}\\)`))
+  assert.match(r.out, /CI is still in progress/)
+  assert.doesNotMatch(r.calls, /chrome-webstore-upload|gh release create|pnpm publish/)
+
+  const forced = s.run(['retry', '--allow-red-ci'], env)
+  assert.equal(forced.code, 0, forced.out)
+  assert.match(forced.out, /WARN: GitHub Actions hasn't passed on v1\.1\.2 .*--allow-red-ci retries anyway/)
+  assert.match(forced.calls, CHROME_UPLOAD)
+})
+
 // --- a whole run, and picking up after a failure ---
 
 const unzipList = (zip) => execFileSync('unzip', ['-l', zip], { encoding: 'utf8' })
@@ -400,16 +577,38 @@ test('a release from main bumps, commits, pushes main and the tag together, and 
   mkdirSync(join(s.work, 'dist'))
   execFileSync('zip', ['-qj', join(s.work, 'dist/byoky-chrome-v1.1.2.zip'), join(s.base, 'stale/old-chunk.js')])
 
-  const r = s.run(['1.1.2', '--yes', '--skip-mobile'], { STUB_GH_RELEASE_MISSING: '1' })
+  // Files .gitignore leaves out never reach the public source zip.
+  write(join(s.work, 'packages/extension/.env.local'), 'SECRET=from-env-local\n')
+  write(join(s.work, 'packages/core/node_modules/dep/index.js'), 'dep')
+  write(join(s.work, 'packages/sdk/dist/index.js'), 'built')
+
+  const r = s.run(['1.1.2', '--yes', '--skip-mobile'], { STUB_GH_RELEASE_MISSING: '1', DISCORD_WEBHOOK_URL: 'https://discord.test/hook' })
   assert.equal(r.code, 0, r.out)
   assert.equal(s.origin('log', '-1', '--format=%s', 'main').trim(), 'Bump to v1.1.2 (native 1.1.2/31)')
   assert.equal(s.origin('rev-parse', 'v1.1.2^{commit}'), s.origin('rev-parse', 'main'))
   assert.equal((r.calls.match(/^pnpm publish --access public --no-git-checks$/gm) ?? []).length, 5, r.calls)
   assert.match(r.calls, /^gh release create v1\.1\.2 .*--verify-tag/m)
+  // The GitHub release lists the stores this run submitted to, and only those.
+  assert.match(r.calls, /--notes Fixes and a security update\.\n\nnotes\n\n### Stores\n\n- \*\*Chrome Web Store\*\*: submitted for review\n/)
+  assert.doesNotMatch(r.calls, /Firefox Add-ons\*\*|App Store|Google Play\*\*/)
+  // Discord gets the hand-written notes.
+  assert.match(r.calls, /^curl .*"content":"\*\*byoky v1\.1\.2\*\* released[^"]*Fixes and a security update\./m)
   assert.match(r.out, /Chrome Web Store: uploaded, publishes after review/)
   assert.match(r.out, /Firefox Add-ons: skipped \(credentials not configured\)/)
   assert.doesNotMatch(unzipList(join(s.work, 'dist/byoky-chrome-v1.1.2.zip')), /old-chunk\.js/)
-  assert.match(unzipList(join(s.work, 'dist/byoky-source-v1.1.2.zip')), /tsconfig\.base\.json[\s\S]*BUILD-FIREFOX\.md/)
+  const source = unzipList(join(s.work, 'dist/byoky-source-v1.1.2.zip'))
+  assert.match(source, /tsconfig\.base\.json[\s\S]*BUILD-FIREFOX\.md/)
+  assert.match(source, /packages\/core\/package\.json/)
+  assert.doesNotMatch(source, /\.env\.local|node_modules|packages\/sdk\/dist|\.output/)
+  const note = execFileSync('unzip', ['-p', join(s.work, 'dist/byoky-source-v1.1.2.zip'), 'BUILD-FIREFOX.md'], { encoding: 'utf8' })
+  assert.ok(note.includes(`built with Node.js ${process.versions.node}.`), note)
+})
+
+test("BUILD-FIREFOX.md asks AMO's reviewers for the Node.js that package.json's engines require", () => {
+  const note = readFileSync(join(SCRIPTS, 'release.sh'), 'utf8').match(/Requirements: Node\.js (\d+) or newer/)
+  assert.ok(note, 'amo_build_note names no Node.js version')
+  const { engines } = JSON.parse(readFileSync(join(SCRIPTS, '..', 'package.json'), 'utf8'))
+  assert.equal(`>=${note[1]}`, engines.node)
 })
 
 test('--allow-branch pushes the release commit to main', MAC_ONLY, (t) => {
@@ -531,8 +730,10 @@ test('--hold-macos ships everything but the Mac app while macOS 1.1.0 is in revi
   assert.match(chrome.out, /App Store \(macOS\) v1\.1\.0 WAITING_FOR_REVIEW {2}\[ignored: not counted\]/)
   assert.doesNotMatch(chrome.calls, /pnpm install/)
 
-  const r = s.run([...args, '--hold-macos'], ASC_ENV, storesWithMacInReview())
+  const r = s.run([...args, '--hold-macos'], { ...ASC_ENV, STUB_GH_RELEASE_MISSING: '1' }, storesWithMacInReview())
   assert.equal(r.code, 0, r.out)
+  // The GitHub release doesn't claim the held Mac app was submitted.
+  assert.match(r.calls, /- \*\*App Store \(iOS\)\*\*: submitted for review\n- \*\*App Store \(macOS\)\*\*: not submitted yet\n/)
   assert.match(r.calls, /^xcodebuild archive .*-scheme Byoky \(macOS\) /m)
   assert.ok(existsSync(join(s.work, 'dist/byoky-macos-v1.1.2.pkg')), 'the Mac build is kept for retry')
   assert.doesNotMatch(r.calls, /altool --upload-app --file dist\/byoky-macos/)
@@ -543,16 +744,19 @@ test('--hold-macos ships everything but the Mac app while macOS 1.1.0 is in revi
   assert.match(r.out, /App Store \(macOS\): HELD \(--hold-macos\): dist\/byoky-macos-v1\.1\.2\.pkg not uploaded/)
 })
 
-test('xcodebuild and Gradle never see the variables .env and .env.local set', MAC_ONLY, (t) => {
+test('xcodebuild, Gradle and the template smoke never see the variables .env and .env.local set', MAC_ONLY, (t) => {
   const s = sandbox({ android: true, real: ['store-status.mjs', 'submit-appstore.mjs'] })
   t.after(s.cleanup)
-  // xcodebuild keeps its whole environment in DerivedData's build records.
+  // xcodebuild keeps its whole environment in DerivedData's build records;
+  // the template smoke runs npm install and builds without a lockfile.
   write(join(s.work, '.env'), 'BYOKY_PROBE_ENV=from-env\n')
   write(join(s.work, '.env.local'), 'export BYOKY_PROBE_LOCAL=from-local\n')
   const probe = (tool) => `echo "env-seen ${tool} [\${BYOKY_PROBE_ENV:-}\${BYOKY_PROBE_LOCAL:-}]" >> "$CALLS"\n`
-  for (const shim of [join(s.base, 'bin/xcodebuild'), join(s.work, 'packages/android/gradlew')]) {
+  const shims = { xcodebuild: join(s.base, 'bin/xcodebuild'), gradlew: join(s.work, 'packages/android/gradlew'),
+    'template-smoke.sh': join(s.work, 'scripts/template-smoke.sh') }
+  for (const [tool, shim] of Object.entries(shims)) {
     const [shebang, ...rest] = readFileSync(shim, 'utf8').split('\n')
-    write(shim, [shebang, probe(shim.endsWith('gradlew') ? 'gradlew' : 'xcodebuild'), ...rest].join('\n'), 0o755)
+    write(shim, [shebang, probe(tool), ...rest].join('\n'), 0o755)
   }
   // The AAB a real bundleRelease leaves behind.
   write(join(s.work, 'packages/android/gradlew'), readFileSync(join(s.work, 'packages/android/gradlew'), 'utf8') +
@@ -562,7 +766,8 @@ test('xcodebuild and Gradle never see the variables .env and .env.local set', MA
   for (const step of [/^gradlew :app:testDebugUnitTest/m, /^xcodebuild test /m, /^gradlew bundleRelease/m,
     /^xcodebuild archive .*-scheme Byoky /m, /^xcodebuild -exportArchive /m]) assert.match(r.calls, step)
   const seen = r.calls.split('\n').filter((l) => l.startsWith('env-seen '))
-  assert.ok(seen.length >= 6, r.calls)
+  assert.ok(seen.length >= 7, r.calls)
+  for (const tool of Object.keys(shims)) assert.ok(seen.some((l) => l.startsWith(`env-seen ${tool} `)), `${tool} never ran:\n${r.calls}`)
   assert.deepEqual(seen.filter((l) => !l.endsWith(' []')), [])
 })
 
@@ -628,4 +833,58 @@ test('retry: a macOS version in review blocks the Mac upload, and --hold-macos l
   assert.doesNotMatch(held.calls, /MAC_OS|byoky-macos/)
   assert.match(held.out, /App Store \(macOS\): held \(--hold-macos\)/)
   assert.match(held.calls, /submit-appstore\.mjs 1\.1\.2 IOS wait=0\n/)
+})
+
+// --- retry and Google Play ---
+
+// v1.1.2 (versionCode 31) released; Chrome has it, Google Play's store page
+// still shows 1.1.1. play(args, { track, bundles }) runs retry with the real
+// upload-google-play.mjs against the Android Publisher API (playRoutes).
+function playReleased(t) {
+  const s = released(t, { real: ['upload-google-play.mjs'] })
+  write(join(s.work, 'dist/byoky-android-v1.1.2.aab'), 'aab')
+  const env = {
+    GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: writePlayServiceAccount(join(s.base, 'play.json')),
+    STUB_STATUS_JSON: JSON.stringify({ results: [{ id: 'chrome', version: '1.1.2', pending: false }] }),
+  }
+  const page = { url: 'play\\.google\\.com/store/apps', body: '<html>[[["1.1.1"]]</html>' }
+  s.play = (args, opts) => s.run(args, env, [page, ...playRoutes(opts)])
+  return s
+}
+const bundleUploads = (r) => r.fetches.filter((c) => c.url.includes('/bundles'))
+
+test('retry leaves a Play update on the production track alone while Google reviews it', (t) => {
+  const s = playReleased(t)
+  // The release uploaded versionCode 31; Play would refuse it again.
+  const r = s.play(['retry'], { track: onTrack('31'), bundles: PLAY_VERSION_CODE_USED })
+  assert.equal(r.code, 0, r.out)
+  assert.deepEqual(bundleUploads(r), [])
+  assert.ok(editDeleted(r.fetches))
+  assert.match(r.out, /Google Play: v1\.1\.2 \(versionCode 31\) is on the production track already, in review or live; nothing to upload/)
+  assert.match(r.out, /Nothing retried/)
+})
+
+test('retry uploads to Google Play when the production track lacks the version code', (t) => {
+  const s = playReleased(t)
+  const r = s.play(['retry'], { track: onTrack('30') })
+  assert.equal(r.code, 0, r.out)
+  assert.equal(bundleUploads(r).length, 1)
+  assert.match(r.out, /Google Play: uploaded to the production track/)
+  assert.match(r.out, /Retried 1 store/)
+})
+
+test("retry leaves Google Play alone when the production track can't be read, unless --allow-pending", (t) => {
+  const s = playReleased(t)
+  const unreadable = { track: { status: 500, body: { error: { message: 'backend error' } } }, bundles: PLAY_VERSION_CODE_USED }
+  const r = s.play(['retry'], unreadable)
+  assert.equal(r.code, 1, r.out)
+  assert.deepEqual(bundleUploads(r), [])
+  assert.match(r.out, /Google Play: NOT UPLOADED: its review state is unknown \(the production track couldn't be read\)/)
+
+  // Forced, the upload finds the version code taken: it went up before.
+  const forced = s.play(['retry', '--allow-pending'], unreadable)
+  assert.equal(forced.code, 0, forced.out)
+  assert.equal(bundleUploads(forced).length, 1)
+  assert.match(forced.out, /Google Play: versionCode 31 went up before \(Google Play refuses it again\); nothing uploaded/)
+  assert.doesNotMatch(forced.out, /FAILED/)
 })

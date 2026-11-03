@@ -8,9 +8,20 @@
 //
 // Usage:
 //   node scripts/upload-google-play.mjs <path-to-aab> [track] [release-notes-file]
+//   node scripts/upload-google-play.mjs --track-has <versionCode> [track]
 //
-//   track: "internal" (default), "alpha", "beta", or "production"
+//   track: "production" (default), "internal", "alpha" or "beta"
 //   release-notes-file: optional path to a text file with release notes
+//
+// Exit codes: 0 done; 1 failed; 4 Google Play has this version code already
+// and refuses the bundle (it went up before). An edit that isn't committed
+// is deleted.
+//
+// --track-has only reads: 0 when a release on the track lists the version
+// code, whatever its state (a completed release stays on the track while
+// Google reviews it, before the store page shows it), 5 when none does,
+// 1 when the track couldn't be read. release.sh retry asks it before
+// uploading again.
 //
 // With STORE_IMAGES_DIR set (e.g. marketing/composites/1.1.1), a second edit
 // replaces the en-US listing images from its play/ folder: phone-*.png
@@ -22,9 +33,14 @@ import { createSign } from 'node:crypto'
 
 const PACKAGE_NAME = 'com.byoky.app'
 
-const [aabPath, track = 'production', notesFile] = process.argv.slice(2)
-if (!aabPath) {
-  console.error('Usage: upload-google-play.mjs <aab-path> [track]')
+const args = process.argv.slice(2)
+const lookup = args[0] === '--track-has'
+if (lookup) args.shift()
+const [aabPath, track = 'production', notesFile] = lookup ? [undefined, args[1]] : args
+const versionCode = lookup ? args[0] : undefined
+if (lookup ? !versionCode : !aabPath) {
+  console.error('Usage: upload-google-play.mjs <aab-path> [track] [release-notes-file]')
+  console.error('       upload-google-play.mjs --track-has <versionCode> [track]')
   process.exit(1)
 }
 
@@ -65,19 +81,73 @@ async function getAccessToken() {
 
 const API = `https://androidpublisher.googleapis.com/androidpublisher/v3/applications/${PACKAGE_NAME}`
 
+// Play refuses a bundle whose version code it has seen before.
+class VersionCodeUsed extends Error {}
+
+async function createEdit(headers) {
+  const editRes = await fetch(`${API}/edits`, { method: 'POST', headers })
+  if (!editRes.ok) throw new Error(`Create edit failed: ${editRes.status} ${await editRes.text()}`)
+  return (await editRes.json()).id
+}
+
+// An edit left open blocks nothing, but piles up in the account.
+async function deleteEdit(headers, editId) {
+  await fetch(`${API}/edits/${editId}`, { method: 'DELETE', headers }).catch(() => {})
+}
+
+async function trackHas(versionCode) {
+  const headers = { Authorization: `Bearer ${await getAccessToken()}` }
+  const editId = await createEdit(headers)
+  try {
+    const res = await fetch(`${API}/edits/${editId}/tracks/${track}`, { headers })
+    if (!res.ok) throw new Error(`Reading the ${track} track failed: ${res.status} ${await res.text()}`)
+    const release = ((await res.json()).releases ?? [])
+      .find((r) => (r.versionCodes ?? []).map(String).includes(String(versionCode)))
+    if (release) {
+      console.log(`  versionCode ${versionCode} is on the ${track} track (release ${release.name ?? '?'}, ${release.status})`)
+      return 0
+    }
+    console.log(`  versionCode ${versionCode} isn't on the ${track} track`)
+    return 5
+  } finally {
+    await deleteEdit(headers, editId)
+  }
+}
+
 async function main() {
+  if (lookup) {
+    process.exitCode = await trackHas(versionCode)
+    return
+  }
   console.log(`Uploading ${aabPath} to Google Play (${track} track)...`)
 
   const token = await getAccessToken()
   const headers = { Authorization: `Bearer ${token}` }
 
   // 1. Create edit
-  const editRes = await fetch(`${API}/edits`, { method: 'POST', headers })
-  if (!editRes.ok) throw new Error(`Create edit failed: ${editRes.status} ${await editRes.text()}`)
-  const edit = await editRes.json()
-  const editId = edit.id
+  const editId = await createEdit(headers)
   console.log(`  Edit created: ${editId}`)
+  try {
+    await uploadBundle(headers, editId)
+  } catch (err) {
+    await deleteEdit(headers, editId)
+    throw err
+  }
 
+  // 5. Listing images, in an edit of their own: a rejected image must not
+  // hold back the release, and a half-replaced set is never committed.
+  const imagesDir = process.env.STORE_IMAGES_DIR && join(process.env.STORE_IMAGES_DIR, 'play')
+  if (imagesDir && existsSync(imagesDir)) {
+    try {
+      await uploadListingImages(headers, imagesDir)
+    } catch (err) {
+      console.error(`  WARN: listing images not updated: ${err.message}`)
+    }
+  }
+}
+
+// Steps 2-4 in edit editId; a failure leaves it uncommitted.
+async function uploadBundle(headers, editId) {
   // 2. Upload AAB
   const aab = readFileSync(aabPath)
   const uploadRes = await fetch(
@@ -88,7 +158,11 @@ async function main() {
       body: aab,
     }
   )
-  if (!uploadRes.ok) throw new Error(`Upload failed: ${uploadRes.status} ${await uploadRes.text()}`)
+  if (!uploadRes.ok) {
+    const text = await uploadRes.text()
+    const Err = /version code[^"]*already been used/i.test(text) ? VersionCodeUsed : Error
+    throw new Err(`Upload failed: ${uploadRes.status} ${text}`)
+  }
   const bundle = await uploadRes.json()
   console.log(`  Bundle uploaded: versionCode ${bundle.versionCode}`)
 
@@ -116,17 +190,6 @@ async function main() {
   const commitRes = await fetch(`${API}/edits/${editId}:commit`, { method: 'POST', headers })
   if (!commitRes.ok) throw new Error(`Commit failed: ${commitRes.status} ${await commitRes.text()}`)
   console.log(`  Edit committed — upload complete`)
-
-  // 5. Listing images, in an edit of their own: a rejected image must not
-  // hold back the release, and a half-replaced set is never committed.
-  const imagesDir = process.env.STORE_IMAGES_DIR && join(process.env.STORE_IMAGES_DIR, 'play')
-  if (imagesDir && existsSync(imagesDir)) {
-    try {
-      await uploadListingImages(headers, imagesDir)
-    } catch (err) {
-      console.error(`  WARN: listing images not updated: ${err.message}`)
-    }
-  }
 }
 
 async function uploadListingImages(headers, imagesDir) {
@@ -164,6 +227,6 @@ async function uploadListingImages(headers, imagesDir) {
 }
 
 main().catch(err => {
-  console.error(`Google Play upload failed: ${err.message}`)
-  process.exit(1)
+  console.error(`Google Play ${lookup ? 'track lookup' : 'upload'} failed: ${err.message}`)
+  process.exit(err instanceof VersionCodeUsed ? 4 : 1)
 })
