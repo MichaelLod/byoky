@@ -652,7 +652,11 @@ const res = await fetch('https://api.anthropic.com/v1/messages', {
       <p>
         It takes an <code>AbortSignal</code> like the real <code>fetch</code>: aborting before the
         response headers rejects with the signal&apos;s reason, aborting later errors the body, and
-        either way the wallet stops the upstream call. Request bodies can be strings, bytes,{' '}
+        either way the wallet stops the upstream call. Cancelling the response body (
+        <code>res.body.cancel()</code>, <code>reader.cancel()</code>, or leaving a{' '}
+        <code>for await</code> loop early) also stops the wallet&apos;s upstream call, as with{' '}
+        <code>fetch</code>. An abort also ends the wait while an expired session is renewed.
+        Request bodies can be strings, bytes,{' '}
         <code>Blob</code>s, <code>FormData</code>, <code>URLSearchParams</code> or streams, and
         binary responses such as audio arrive byte for byte.
       </p>
@@ -671,7 +675,12 @@ const res = await fetch('https://api.anthropic.com/v1/messages', {
       </p>
 
       <h3>session.disconnect()</h3>
-      <p>Disconnect the session. The wallet revokes all access.</p>
+      <p>
+        Disconnect the session. The wallet revokes all access, and the session&apos;s relays close.
+        The session is done afterwards: its fetches reject with <code>NO_SESSION</code> and{' '}
+        <code>createRelay()</code> throws, so call <code>connect()</code> for a new one. A second{' '}
+        <code>disconnect()</code> does nothing.
+      </p>
 
       <h3>session.isConnected()</h3>
       <p>Returns <code>true</code> if the session is still valid.</p>
@@ -783,7 +792,7 @@ function ProvidersSection() {
       <h3>Capability matrix</h3>
       <p>
         What each family supports natively at the wire-format level. Capabilities below this baseline
-        depend on the specific model — e.g. Cohere&apos;s Command A drops vision and JSON mode.
+        depend on the specific model — e.g. Cohere&apos;s Command A drops vision.
         Always check the provider&apos;s docs for the exact model you target.
       </p>
       <table className="docs-table">
@@ -803,7 +812,7 @@ function ProvidersSection() {
             <td>✓</td>
             <td>✓</td>
             <td>✓</td>
-            <td>via tool use</td>
+            <td>✓ <span className="docs-table-note">(output_config.format)</span></td>
             <td>✓</td>
           </tr>
           <tr>
@@ -827,7 +836,7 @@ function ProvidersSection() {
             <td>✓</td>
             <td>✓</td>
             <td>—</td>
-            <td>—</td>
+            <td>✓ <span className="docs-table-note">(json_object, json_schema)</span></td>
             <td>✓</td>
           </tr>
         </tbody>
@@ -840,6 +849,13 @@ function ProvidersSection() {
         Studio). The wallet stores the per-credential base URL alongside the API key — your app code
         doesn&apos;t need to know which port. Both expose an OpenAI-compatible chat surface, so they
         belong to the <code>openai</code> wire-format family.
+      </p>
+      <p>
+        Your app can call these providers, and <code>azure_openai</code>, on the registry&apos;s
+        placeholder host: <code>https://YOUR_RESOURCE.openai.azure.com/...</code> for Azure, or the
+        default localhost port for Ollama and LM Studio. Every wallet sends such a request to the
+        credential&apos;s own endpoint, so <code>listModels()</code> works for Azure and for local
+        servers on another port or on <code>127.0.0.1</code>.
       </p>
     </Section>
   );
@@ -1077,8 +1093,10 @@ const contact = JSON.parse(data.choices[0].message.content);`}</Code>
 
       <h3>Anthropic</h3>
       <p>
-        Claude doesn&apos;t have a <code>response_format</code> field. Prompt it to return JSON and
-        parse the text block &mdash; or use tool use with a single tool as the forced schema:
+        Claude takes a JSON schema in <code>output_config.format</code> (structured outputs, Claude
+        4.5 and later, and Opus 4.1). A routed request carries it over: an OpenAI{' '}
+        <code>json_schema</code>, a Gemini <code>responseSchema</code> or a Cohere{' '}
+        <code>json_schema</code> reaches Claude as structured outputs.
       </p>
       <Code lang="typescript">{`const res = await fetch('https://api.anthropic.com/v1/messages', {
   method: 'POST',
@@ -1089,14 +1107,22 @@ const contact = JSON.parse(data.choices[0].message.content);`}</Code>
   body: JSON.stringify({
     model: 'claude-sonnet-4-6',
     max_tokens: 1024,
-    messages: [{
-      role: 'user',
-      content: 'Return ONLY JSON: { "name": "...", "email": "..." } for: "Jane, jane@acme.co"',
-    }],
+    messages: [{ role: 'user', content: 'Extract: "Jane, jane@acme.co"' }],
+    output_config: {
+      format: {
+        type: 'json_schema',
+        schema: {
+          type: 'object',
+          properties: { name: { type: 'string' }, email: { type: 'string' } },
+          required: ['name', 'email'],
+          additionalProperties: false,
+        },
+      },
+    },
   }),
 });
 const data = await res.json();
-const json = JSON.parse(data.content[0].text.match(/\\{[\\s\\S]*\\}/)![0]);`}</Code>
+const contact = JSON.parse(data.content[0].text);`}</Code>
     </Section>
   );
 }
@@ -1267,8 +1293,8 @@ function Errors() {
             ['WALLET_NOT_INSTALLED', <>No Byoky wallet (extension, iOS Safari extension, or in-wallet browser) was detected when <code>connect()</code> ran. With <code>modal: true</code>, it is also what <code>connect()</code> rejects with when the user closes the &ldquo;wallet not found&rdquo; dialog.</>, <>Show an install prompt — <code>getStoreUrl()</code> returns the right link per browser. Or pass <code>modal: true</code> and let the SDK do it.</>],
             ['USER_REJECTED', 'The user denied the connect request in the wallet, or the approval timed out.', <>Do not auto-retry. Wait for an explicit user action before calling <code>connect()</code> again. With <code>modal: true</code> the modal shows the failure with a Try Again button; if the user closes it, <code>connect()</code> rejects with a plain <code>Error(&apos;User cancelled&apos;)</code> that has no code.</>],
             ['PROVIDER_UNAVAILABLE', <>The wallet has no credential (and no routing group) that can serve this provider (HTTP 403). From <code>listModels()</code>: the provider has no model-list endpoint, or it answered 404/405.</>, 'Tell the user which provider you need; deep-link them into the wallet to add a credential.'],
-            ['SESSION_EXPIRED', 'The session key is unknown or past its expiry (HTTP 401): the user revoked the app, the wallet locked, or 24 hours passed.', <>Call <code>byoky.connect()</code> again. <code>tryReconnect()</code> handles silent restore.</>],
-            ['NO_SESSION', 'A silent reconnect found no live session for this origin.', <>Expected on first visit. Fall back to <code>connect()</code> when the user is ready.</>],
+            ['SESSION_EXPIRED', 'The session key is unknown or past its expiry (HTTP 401): the user revoked the app, the wallet locked, or 24 hours passed.', <><code>createFetch</code> first renews the session (a silent check, then a full connect: the wallet asks to unlock or approve, and a trusted site is approved silently) and retries, also for sessions restored with <code>tryReconnect()</code> or <code>reconnect()</code>. The 401 reaches your app only when that fails, and <code>onDisconnect</code> fires; call <code>byoky.connect()</code> again.</>],
+            ['NO_SESSION', <>A silent reconnect found no live session for this origin, or a call went through a session after <code>session.disconnect()</code>.</>, <>Expected on first visit. Fall back to <code>connect()</code> when the user is ready.</>],
             ['RATE_LIMITED', <>Byoky&apos;s own connect throttle: this origin asked for a new session more than 10 times in 60 seconds. <code>err.details.retryAfter</code> gives the seconds to wait. <code>listModels()</code> also throws it when the provider answers 429.</>, <>Wait <code>retryAfter</code> seconds before calling <code>connect()</code> again. A provider&apos;s 429 on a <code>createFetch</code> request is not this code (see above).</>],
             ['QUOTA_EXCEEDED', 'A spending cap the user set for your app in the wallet ran out (HTTP 429).', 'Do not retry. Surface a "budget exhausted" UI — the user can raise the cap in their wallet.'],
             ['ENDPOINT_NOT_ALLOWED', <>The request went to an endpoint outside the inference allowlist, such as the Files, Batches or Assistants APIs (HTTP 403). See <a href="#allowed-endpoints" style={{ color: 'var(--phosphor)' }}>Allowed endpoints</a>.</>, 'Not retryable. Send the content inline in the inference request instead.'],
