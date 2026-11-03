@@ -164,6 +164,20 @@ var BYOKY_TRANSLATE_BUNDLE = (() => {
     "complete",
     "generate"
   ].map((s) => s.split("/"));
+  var TOKEN_COUNT_PATH_SUFFIXES = ["messages/count_tokens", "responses/input_tokens"].map((s) => s.split("/"));
+  function isModelPinnableRequest(url) {
+    let path;
+    try {
+      path = new URL(url).pathname;
+    } catch {
+      return false;
+    }
+    const last = path.slice(path.lastIndexOf("/") + 1);
+    if (/:(?:stream)?[Gg]enerateContent$|:countTokens$/.test(last)) return true;
+    const segments = path.toLowerCase().split("/").filter((s) => s.length > 0);
+    if (endsWithSegments(segments, ["fim", "completions"])) return false;
+    return [...GENERATION_PATH_SUFFIXES, ...TOKEN_COUNT_PATH_SUFFIXES].some((suffix) => endsWithSegments(segments, suffix));
+  }
   var POST_PATH_SUFFIXES = [
     "chat/completions",
     "completions",
@@ -186,6 +200,11 @@ var BYOKY_TRANSLATE_BUNDLE = (() => {
     "generate",
     "api/show"
   ].map((s) => s.split("/"));
+  function endsWithSegments(segments, suffix) {
+    if (suffix.length > segments.length) return false;
+    const offset = segments.length - suffix.length;
+    return suffix.every((s, i) => segments[offset + i] === s);
+  }
   var MAX_BODY_PARSE_SIZE = 10485760;
   function detectRequestCapabilities(body) {
     const empty = {
@@ -207,6 +226,11 @@ var BYOKY_TRANSLATE_BUNDLE = (() => {
     }
     const rf = parsed.response_format;
     if (rf && typeof rf === "object" && rf.type === "json_schema") {
+      out.structuredOutput = true;
+    }
+    const gc = parsed.generationConfig ?? parsed.generation_config;
+    const format = parsed.output_config?.format;
+    if (rf && typeof rf === "object" && rf.type === "json_object" && rf.json_schema != null || gc && typeof gc === "object" && (gc.responseSchema ?? gc.response_schema ?? gc.responseJsonSchema ?? gc.response_json_schema) != null || format && typeof format === "object" && format.type === "json_schema") {
       out.structuredOutput = true;
     }
     if (parsed.thinking != null) {
@@ -640,6 +664,17 @@ ${systemText}
       deprecated: { shutdown: "2027-04-01", replacement: "gpt-6-luna" }
     },
     // ─── Google Gemini ───────────────────────────────────────────────────────
+    // 3.6 Flash is the default (see DEFAULT_MODELS): 3.8 Flash, the newer
+    // one, failed every call on 2 Nov 2026.
+    {
+      id: "gemini-3.6-flash",
+      providerId: "gemini",
+      family: "gemini",
+      displayName: "Gemini 3.6 Flash",
+      contextWindow: 1048576,
+      maxOutput: 65536,
+      capabilities: FRONTIER
+    },
     {
       id: "gemini-3.8-flash",
       providerId: "gemini",
@@ -651,7 +686,7 @@ ${systemText}
     },
     // Google serves the 2.5 models only to projects that used them before;
     // they are not deprecated, but new projects get an error and should use
-    // 3.8 Flash.
+    // a 3.x Flash.
     {
       id: "gemini-2.5-pro",
       providerId: "gemini",
@@ -681,20 +716,26 @@ ${systemText}
       capabilities: {
         ...FRONTIER,
         // Command A does not accept image inputs at the chat API surface.
-        vision: false,
-        // No structured output constraint equivalent to OpenAI json_schema.
-        structuredOutput: false
+        vision: false
       }
     }
   ];
   var DEFAULT_MODELS = {
     anthropic: "claude-sonnet-4-6",
     openai: "gpt-5.5",
-    gemini: "gemini-3.8-flash",
+    gemini: "gemini-3.6-flash",
     cohere: "command-a-03-2025"
   };
   function getModel(id) {
     return MODELS.find((m) => m.id === id);
+  }
+  function maxOutputFor(model, providerId) {
+    const entry = getModel(model) ?? (providerId === "openrouter" && model.startsWith("openai/") ? getModel(model.slice("openai/".length)) : void 0);
+    return entry?.maxOutput;
+  }
+  function capMaxTokens(maxTokens, model, providerId) {
+    const cap = maxOutputFor(model, providerId);
+    return cap !== void 0 && maxTokens > cap ? cap : maxTokens;
   }
   function modelsForProvider(providerId) {
     return MODELS.filter((m) => m.providerId === providerId);
@@ -897,6 +938,10 @@ ${systemText}
         ...typeof parsed.thinking.budget_tokens === "number" ? { budgetTokens: parsed.thinking.budget_tokens } : {}
       };
     }
+    const format = parsed.output_config?.format ?? parsed.output_format;
+    if (isRecord(format) && format.type === "json_schema" && isRecord(format.schema)) {
+      ir.responseFormat = { type: "json_schema", schema: format.schema };
+    }
     return ir;
   }
   function parseSystem(system) {
@@ -932,13 +977,11 @@ ${systemText}
         return null;
       case "image": {
         const src = block.source;
-        const irSrc = parseAnthropicImageSource(src);
-        return irSrc ? { type: "image", source: irSrc } : null;
+        return { type: "image", source: parseAnthropicImageSource(src) };
       }
       case "document": {
         const doc = block;
         const irSrc = parseAnthropicDocumentSource(doc.source);
-        if (!irSrc) return null;
         return {
           type: "document",
           source: irSrc,
@@ -971,28 +1014,45 @@ ${systemText}
         return null;
     }
   }
+  function untranslatableSource(kind, src) {
+    const type = isRecord(src) && typeof src.type === "string" ? src.type : void 0;
+    const what = type === void 0 ? "no valid source" : ["base64", "url", "text", "content"].includes(type) ? `a malformed ${type} source` : `source type ${type}`;
+    return new TranslationError(
+      "UNSUPPORTED_FEATURE",
+      type === "file" ? `An ${kind} from Anthropic's Files API (source type file) can't be routed to another provider; send it inline.` : `An ${kind} with ${what} can't be routed to another provider.`
+    );
+  }
   function parseAnthropicImageSource(src) {
-    if (!src || typeof src !== "object") return null;
-    if (src.type === "base64" && typeof src.media_type === "string" && typeof src.data === "string") {
-      return { kind: "base64", mediaType: src.media_type, data: src.data };
+    if (isRecord(src)) {
+      if (src.type === "base64" && typeof src.media_type === "string" && typeof src.data === "string") {
+        return { kind: "base64", mediaType: src.media_type, data: src.data };
+      }
+      if (src.type === "url" && typeof src.url === "string") {
+        return { kind: "url", url: src.url };
+      }
     }
-    if (src.type === "url" && typeof src.url === "string") {
-      return { kind: "url", url: src.url };
-    }
-    return null;
+    throw untranslatableSource("image", src);
   }
   function parseAnthropicDocumentSource(src) {
-    if (!src || typeof src !== "object") return null;
-    if (src.type === "base64" && typeof src.media_type === "string" && typeof src.data === "string") {
-      return { kind: "base64", mediaType: src.media_type, data: src.data };
+    if (isRecord(src)) {
+      if (src.type === "base64" && typeof src.media_type === "string" && typeof src.data === "string") {
+        return { kind: "base64", mediaType: src.media_type, data: src.data };
+      }
+      if (src.type === "url" && typeof src.url === "string") {
+        return { kind: "url", url: src.url, mediaType: "application/pdf" };
+      }
+      if (src.type === "text" && typeof src.data === "string") {
+        return { kind: "text", text: src.data };
+      }
+      if (src.type === "content") {
+        const content = src.content;
+        if (typeof content === "string") return { kind: "text", text: content };
+        if (Array.isArray(content) && content.every((b) => isRecord(b) && b.type === "text" && typeof b.text === "string")) {
+          return { kind: "text", text: content.map((b) => b.text).join("\n") };
+        }
+      }
     }
-    if (src.type === "url" && typeof src.url === "string") {
-      return { kind: "url", url: src.url, mediaType: "application/pdf" };
-    }
-    if (src.type === "text" && typeof src.data === "string") {
-      return { kind: "text", text: src.data };
-    }
-    return null;
+    throw untranslatableSource("document", src);
   }
   function parseAnthropicToolResultContent(content) {
     if (content == null) return { kind: "text", text: "" };
@@ -1012,19 +1072,22 @@ ${systemText}
         "Anthropic does not support generating multiple completions per request (n > 1)."
       );
     }
+    const rules = claudeRequestRules(ctx.dstModel);
     let systemParts = ir.system.slice();
-    if (ir.responseFormat?.type === "json_schema") {
-      throw new TranslationError(
-        "UNSUPPORTED_FEATURE",
-        "OpenAI json_schema response format cannot be translated to Anthropic. Pin this app to an OpenAI- or Gemini-family model."
-      );
-    }
-    if (ir.responseFormat?.type === "json") {
+    let outputFormat;
+    if (ir.responseFormat?.type === "json_schema" && constrainsOutput(ir.responseFormat.schema)) {
+      if (!rules.structuredOutputs) {
+        throw new TranslationError(
+          "UNSUPPORTED_FEATURE",
+          `This app asks for JSON that follows a schema, which ${ctx.dstModel} can't produce (no structured outputs). Pin the app to a model that supports them.`
+        );
+      }
+      outputFormat = { type: "json_schema", schema: toClaudeOutputSchema(ir.responseFormat.schema) };
+    } else if (ir.responseFormat) {
       systemParts.push({
         text: "Respond with valid JSON only. Do not include any prose outside the JSON object."
       });
     }
-    const rules = claudeRequestRules(ctx.dstModel);
     let toolChoice = ir.toolChoice;
     if (!rules.forcedToolChoice && (toolChoice?.type === "any" || toolChoice?.type === "tool")) {
       if (ir.tools && ir.tools.length > 0) systemParts.push({ text: forcedToolInstruction(toolChoice) });
@@ -1034,7 +1097,7 @@ ${systemText}
     const wantsThinking = ir.thinking?.enabled === true && !forcedTool;
     const requestedBudget = ir.thinking?.budgetTokens;
     const dst = getModel(ctx.dstModel);
-    let maxTokens = ir.maxTokens;
+    let maxTokens = typeof ir.maxTokens === "number" ? capMaxTokens(ir.maxTokens, ctx.dstModel, ctx.dstProviderId) : void 0;
     if (typeof maxTokens !== "number") {
       maxTokens = wantsThinking ? Math.min(
         dst?.maxOutput ?? 32e3,
@@ -1083,7 +1146,133 @@ ${systemText}
       }
     }
     if (thinking) out.thinking = thinking;
+    if (outputFormat) out.output_config = { format: outputFormat };
     return JSON.stringify(out);
+  }
+  function constrainsOutput(schema) {
+    if (!isRecord(schema)) return false;
+    return Object.entries(schema).some(([key, value]) => {
+      if (SCHEMA_METADATA.has(key) || key === "title" || key === "description") return false;
+      if (key === "type") return value !== "object";
+      if (key === "additionalProperties") return value !== true && !(isRecord(value) && Object.keys(value).length === 0);
+      return true;
+    });
+  }
+  var SCHEMA_METADATA = /* @__PURE__ */ new Set(["$schema", "$id", "$comment"]);
+  var CLAUDE_STRING_FORMATS = /* @__PURE__ */ new Set([
+    "date-time",
+    "time",
+    "date",
+    "duration",
+    "email",
+    "hostname",
+    "uri",
+    "ipv4",
+    "ipv6",
+    "uuid"
+  ]);
+  function unsupportedSchema(why) {
+    return new TranslationError(
+      "UNSUPPORTED_FEATURE",
+      `This app's JSON schema can't be sent to Claude as a structured output: ${why}.`
+    );
+  }
+  function toClaudeOutputSchema(schema) {
+    assertNoRecursiveRef(schema);
+    return fitClaudeSchema(schema);
+  }
+  function fitClaudeSchema(node) {
+    if (!isRecord(node)) throw unsupportedSchema("a part of it is not a schema object");
+    const rest = { ...node };
+    const take = (key) => {
+      const value = rest[key];
+      delete rest[key];
+      return value;
+    };
+    for (const key of SCHEMA_METADATA) delete rest[key];
+    const out = {};
+    for (const kind of ["$defs", "definitions"]) {
+      const defs = take(kind);
+      if (isRecord(defs)) {
+        out[kind] = Object.fromEntries(Object.entries(defs).map(([name, def]) => [name, fitClaudeSchema(def)]));
+      }
+    }
+    const ref = take("$ref");
+    if (typeof ref === "string") return { ...out, $ref: ref };
+    const type = take("type");
+    const anyOf = take("anyOf");
+    const allOf = take("allOf");
+    if (Array.isArray(anyOf)) out.anyOf = anyOf.map(fitClaudeSchema);
+    else if (Array.isArray(rest.oneOf)) out.anyOf = take("oneOf").map(fitClaudeSchema);
+    if (Array.isArray(allOf)) out.allOf = allOf.map(fitClaudeSchema);
+    const isType = (t) => type === t || Array.isArray(type) && type.includes(t);
+    const isObject = isType("object") || type === void 0 && isRecord(rest.properties);
+    if (type !== void 0) out.type = type;
+    else if (isObject) out.type = "object";
+    for (const key of ["title", "description", "enum", "const", "default"]) {
+      if (key in rest) out[key] = take(key);
+    }
+    if (isObject) {
+      const properties = take("properties");
+      const additional = take("additionalProperties");
+      if (!isRecord(properties) && isRecord(additional) && Object.keys(additional).length > 0) {
+        throw unsupportedSchema("an object takes any property names, with values given by a schema");
+      }
+      out.properties = isRecord(properties) ? Object.fromEntries(Object.entries(properties).map(([name, prop]) => [name, fitClaudeSchema(prop)])) : {};
+      out.additionalProperties = false;
+      const required = take("required");
+      if (Array.isArray(required)) out.required = required;
+    }
+    if (isType("string") && typeof rest.format === "string" && CLAUDE_STRING_FORMATS.has(rest.format)) {
+      out.format = take("format");
+    }
+    if (isType("array")) {
+      if (isRecord(rest.items)) out.items = fitClaudeSchema(take("items"));
+      if (rest.minItems === 0 || rest.minItems === 1) out.minItems = take("minItems");
+    }
+    if (!("type" in out) && !out.anyOf && !out.allOf && !("enum" in out) && !("const" in out)) {
+      throw unsupportedSchema("a part of it has no type");
+    }
+    const leftover = Object.entries(rest);
+    if (leftover.length > 0) {
+      const note = `{${leftover.map(([key, value]) => `${key}: ${JSON.stringify(value)}`).join(", ")}}`;
+      out.description = typeof out.description === "string" && out.description ? `${out.description}
+
+${note}` : note;
+    }
+    return out;
+  }
+  function assertNoRecursiveRef(root) {
+    const defs = /* @__PURE__ */ new Map();
+    for (const kind of ["$defs", "definitions"]) {
+      const group = root[kind];
+      if (!isRecord(group)) continue;
+      for (const [name, def] of Object.entries(group)) {
+        defs.set(`#/${kind}/${name.replace(/~/g, "~0").replace(/\//g, "~1")}`, def);
+      }
+    }
+    const refsIn = (node, out = []) => {
+      if (Array.isArray(node)) {
+        for (const item of node) refsIn(item, out);
+      } else if (isRecord(node)) {
+        for (const [key, value] of Object.entries(node)) {
+          if (key === "$ref" && typeof value === "string") out.push(value);
+          else if (node !== root || key !== "$defs" && key !== "definitions") refsIn(value, out);
+        }
+      }
+      return out;
+    };
+    const acyclic = /* @__PURE__ */ new Set();
+    const visit = (ref, path) => {
+      if (acyclic.has(ref)) return;
+      if (ref === "#" || path.includes(ref)) throw unsupportedSchema("it is recursive");
+      if (!ref.startsWith("#")) throw unsupportedSchema(`it refers to another document (${ref})`);
+      if (!defs.has(ref)) throw unsupportedSchema(`it refers to ${ref}, which is not one of its $defs`);
+      for (const next of refsIn(defs.get(ref))) visit(next, [...path, ref]);
+      acyclic.add(ref);
+    };
+    for (const ref of refsIn(root)) visit(ref, []);
+    for (const ref of defs.keys()) visit(ref, []);
   }
   var MIN_THINKING_BUDGET = 1024;
   var DEFAULT_THINKING_BUDGET = 8192;
@@ -1105,12 +1294,14 @@ ${systemText}
         forcedToolChoice: true,
         thinkingOff: null,
         thinkingOffUpToHigh: false,
-        efforts: null
+        efforts: null,
+        structuredOutputs: true
       };
     }
     const { line, major, minor, named } = claude;
     const atLeast = (maj, min) => major > maj || major === maj && minor >= min;
     const efforts = atLeast(4, 7) ? CLAUDE_EFFORTS : major === 4 && minor === 6 ? ["low", "medium", "high", "max"] : named && line === "opus" && major === 4 && minor === 5 ? ["low", "medium", "high"] : [];
+    const structuredOutputs = named && (atLeast(4, 5) || line === "opus" && major === 4 && minor === 1);
     if (named && (line === "fable" || line === "mythos")) {
       return {
         sampling: "none",
@@ -1118,7 +1309,8 @@ ${systemText}
         forcedToolChoice: !atLeast(5, 1),
         thinkingOff: atLeast(5, 0) ? "never" : "disabled",
         thinkingOffUpToHigh: false,
-        efforts
+        efforts,
+        structuredOutputs: true
       };
     }
     const forcedToolChoice = !(named && (line === "opus" || line === "sonnet") && atLeast(5, 5));
@@ -1135,7 +1327,7 @@ ${systemText}
         thinkingOffUpToHigh = true;
       }
     }
-    const off = { forcedToolChoice, thinkingOff, thinkingOffUpToHigh, efforts };
+    const off = { forcedToolChoice, thinkingOff, thinkingOffUpToHigh, efforts, structuredOutputs };
     if (atLeast(4, 7)) return { sampling: "none", thinking: "adaptive", ...off };
     if (major === 4 && minor === 6) return { sampling: "single", thinking: "either", ...off };
     return { sampling: "single", thinking: "budget", ...off };
@@ -1152,6 +1344,17 @@ ${systemText}
   }
   function shapeRequestForModel(body, ctx) {
     const rules = claudeRequestRules(ctx.dstModel);
+    if (typeof body.max_tokens === "number") {
+      const capped = capMaxTokens(body.max_tokens, ctx.dstModel, ctx.dstProviderId);
+      if (capped !== body.max_tokens) {
+        body.max_tokens = capped;
+        const thinking2 = body.thinking;
+        if (isRecord(thinking2) && typeof thinking2.budget_tokens === "number" && thinking2.budget_tokens >= capped) {
+          if (capped - 1 >= MIN_THINKING_BUDGET) body.thinking = { ...thinking2, budget_tokens: capped - 1 };
+          else delete body.thinking;
+        }
+      }
+    }
     const isForced = (choice) => isRecord(choice) && (choice.type === "any" || choice.type === "tool");
     if (!rules.forcedToolChoice && isForced(body.tool_choice)) {
       const choice = body.tool_choice;
@@ -1253,15 +1456,13 @@ ${text}`;
   function serializeMessageToAnthropic(msg) {
     const blocks = [];
     for (const b of msg.content) {
+      if (b.type === "text" && b.text.trim().length === 0) continue;
       const wire = serializeContentBlockToAnthropic(b);
       if (wire) blocks.push(wire);
     }
-    if (blocks.length === 0 && msg.content.length > 0) return null;
+    if (blocks.length === 0) return null;
     if (blocks.length === 1 && blocks[0].type === "text") {
       return { role: msg.role, content: blocks[0].text };
-    }
-    if (blocks.length === 0) {
-      return { role: msg.role, content: "" };
     }
     return { role: msg.role, content: blocks };
   }
@@ -1870,15 +2071,37 @@ data: ${JSON.stringify(data)}
       } else if (part.type === "image_url") {
         const url = extractOpenAIImageUrl(part.image_url);
         const source = parseImageUrl(url);
-        if (source) out.push({ type: "image", source });
+        if (!source) {
+          throw new TranslationError(
+            "UNSUPPORTED_FEATURE",
+            "An image_url that is neither an http(s) URL nor base64 data can't be routed to another provider."
+          );
+        }
+        out.push({ type: "image", source });
       } else if (part.type === "file") {
         const doc = parseOpenAIFilePart(part.file);
         if (doc) out.push(doc);
+      } else if (part.type === "input_audio") {
+        out.push(parseOpenAIAudioPart(part.input_audio));
       }
     }
     return out;
   }
+  var OPENAI_AUDIO_TYPES = { wav: "audio/wav", mp3: "audio/mpeg" };
+  function parseOpenAIAudioPart(audio) {
+    if (!audio || typeof audio.data !== "string" || !audio.data || typeof audio.format !== "string" || !audio.format) {
+      throw new TranslationError("UNSUPPORTED_FEATURE", "An input_audio part needs base64 data and a format.");
+    }
+    const format = audio.format.toLowerCase();
+    return { type: "document", source: { kind: "base64", mediaType: OPENAI_AUDIO_TYPES[format] ?? `audio/${format}`, data: audio.data } };
+  }
   function parseOpenAIFilePart(file) {
+    if (file && (typeof file.file_data !== "string" || !file.file_data) && typeof file.file_id === "string" && file.file_id) {
+      throw new TranslationError(
+        "UNSUPPORTED_FEATURE",
+        "A file_id names a file in OpenAI's storage, which another provider can't read; send the file inline (file_data)."
+      );
+    }
     if (!file || typeof file.file_data !== "string" || !file.file_data) return null;
     const title = typeof file.filename === "string" && file.filename ? { title: file.filename } : {};
     const match = /^data:([^;,]+);base64,(.+)$/.exec(file.file_data);
@@ -1952,8 +2175,9 @@ data: ${JSON.stringify(data)}
     const reasoningOff = isReasoningDst && !!ir.tools && ir.tools.length > 0 && reasoningOffForTools(ctx.dstModel, ctx.dstProviderId);
     if (reasoningOff) out.reasoning_effort = "none";
     if (typeof ir.maxTokens === "number") {
-      if (usesMaxCompletionTokens(isReasoningDst, ctx.dstProviderId)) out.max_completion_tokens = ir.maxTokens;
-      else out.max_tokens = ir.maxTokens;
+      const maxTokens = capMaxTokens(ir.maxTokens, ctx.dstModel, ctx.dstProviderId);
+      if (usesMaxCompletionTokens(isReasoningDst, ctx.dstProviderId)) out.max_completion_tokens = maxTokens;
+      else out.max_tokens = maxTokens;
     }
     if (typeof ir.temperature === "number" && (!isReasoningDst || reasoningOff)) {
       out.temperature = ir.temperature;
@@ -2005,6 +2229,10 @@ data: ${JSON.stringify(data)}
     return JSON.stringify(out);
   }
   function shapeRequestForModel2(body, ctx) {
+    for (const key of ["max_tokens", "max_completion_tokens"]) {
+      const limit = body[key];
+      if (typeof limit === "number") body[key] = capMaxTokens(limit, ctx.dstModel, ctx.dstProviderId);
+    }
     if (!isOpenAIReasoningModel(ctx.dstModel)) return;
     if (Array.isArray(body.tools) && body.tools.length > 0 && reasoningOffForTools(ctx.dstModel, ctx.dstProviderId)) {
       body.reasoning_effort = "none";
@@ -2157,6 +2385,16 @@ data: ${JSON.stringify(data)}
         "UNSUPPORTED_FEATURE",
         "OpenAI chat completions cannot read a document by URL; send it inline."
       );
+    }
+    if (source.mediaType.startsWith("audio/")) {
+      const format = Object.keys(OPENAI_AUDIO_TYPES).find((f) => OPENAI_AUDIO_TYPES[f] === source.mediaType) ?? { "audio/x-wav": "wav", "audio/wave": "wav", "audio/mp3": "mp3" }[source.mediaType];
+      if (!format) {
+        throw new TranslationError(
+          "UNSUPPORTED_FEATURE",
+          `OpenAI chat completions takes WAV and MP3 audio only, not ${source.mediaType}.`
+        );
+      }
+      return { type: "input_audio", input_audio: { data: source.data, format } };
     }
     const filename = doc.title ?? (source.mediaType === "application/pdf" ? "document.pdf" : "document");
     return { type: "file", file: { filename, file_data: `data:${source.mediaType};base64,${source.data}` } };
@@ -2725,7 +2963,7 @@ data: [DONE]
         ir.stopSequences = gc.stopSequences.slice();
       }
       if (gc.responseMimeType === "application/json") {
-        const schema = gc.responseJsonSchema ?? gc.responseSchema;
+        const schema = gc.responseJsonSchema ?? fromGeminiOpenApiSchema(gc.responseSchema);
         if (schema) {
           ir.responseFormat = { type: "json_schema", schema };
         } else {
@@ -2746,7 +2984,7 @@ data: [DONE]
           flat.push({
             name: fn.name,
             ...fn.description ? { description: fn.description } : {},
-            parameters: fn.parametersJsonSchema ?? fn.parameters ?? { type: "object", properties: {} }
+            parameters: fn.parametersJsonSchema ?? fromGeminiOpenApiSchema(fn.parameters) ?? { type: "object", properties: {} }
           });
         }
       }
@@ -2777,6 +3015,57 @@ data: [DONE]
   }
   function isJsonObject(v) {
     return v !== null && typeof v === "object" && !Array.isArray(v);
+  }
+  var OPENAPI_INT64_KEYS = /* @__PURE__ */ new Set(["minItems", "maxItems", "minLength", "maxLength", "minProperties", "maxProperties"]);
+  function fromGeminiOpenApiSchema(schema) {
+    return openApiToJsonSchema(schema, true);
+  }
+  function openApiToJsonSchema(schema, root) {
+    if (!isJsonObject(schema)) return schema;
+    const convert = (v) => openApiToJsonSchema(v, false);
+    const out = {};
+    for (const [key, value] of Object.entries(schema)) {
+      switch (key) {
+        case "type":
+          if (typeof value !== "string") out.type = value;
+          else if (value.toUpperCase() !== "TYPE_UNSPECIFIED") out.type = value.toLowerCase();
+          break;
+        case "properties":
+          out.properties = isJsonObject(value) ? Object.fromEntries(Object.entries(value).map(([name, prop]) => [name, convert(prop)])) : value;
+          break;
+        case "items":
+          out.items = Array.isArray(value) ? value.map(convert) : convert(value);
+          break;
+        case "anyOf":
+        case "allOf":
+        case "oneOf":
+        case "prefixItems":
+          out[key] = Array.isArray(value) ? value.map(convert) : value;
+          break;
+        case "nullable":
+        case "propertyOrdering":
+        case "example":
+          break;
+        case "format":
+          if (value !== "enum") out.format = value;
+          break;
+        default:
+          out[key] = OPENAPI_INT64_KEYS.has(key) && typeof value === "string" && /^\d+$/.test(value) ? Number(value) : value;
+      }
+    }
+    if (schema.nullable !== true || root || out.type === "null") return out;
+    const isNull = (s) => isJsonObject(s) && s.type === "null";
+    if (Array.isArray(out.anyOf)) {
+      if (!out.anyOf.some(isNull)) out.anyOf = [...out.anyOf, { type: "null" }];
+      return out;
+    }
+    const { description, title, default: dflt, ...rest } = out;
+    return {
+      ...description !== void 0 ? { description } : {},
+      ...title !== void 0 ? { title } : {},
+      ...dflt !== void 0 ? { default: dflt } : {},
+      anyOf: [rest, { type: "null" }]
+    };
   }
   function camelizeKeys(obj, keys) {
     if (!isJsonObject(obj)) return;
@@ -2933,7 +3222,7 @@ data: [DONE]
     if (typeof ir.temperature === "number") gc.temperature = ir.temperature;
     if (typeof ir.topP === "number") gc.topP = ir.topP;
     if (typeof ir.topK === "number") gc.topK = ir.topK;
-    if (typeof ir.maxTokens === "number") gc.maxOutputTokens = ir.maxTokens;
+    if (typeof ir.maxTokens === "number") gc.maxOutputTokens = capMaxTokens(ir.maxTokens, ctx.dstModel, ctx.dstProviderId);
     if (ir.stopSequences && ir.stopSequences.length > 0) gc.stopSequences = ir.stopSequences.slice();
     if (ir.responseFormat?.type === "json") {
       gc.responseMimeType = "application/json";
@@ -2942,8 +3231,9 @@ data: [DONE]
       gc.responseJsonSchema = toGeminiJsonSchema(ir.responseFormat.schema);
     }
     if (ir.thinking?.enabled) {
+      const budget = ir.thinking.budgetTokens;
       gc.thinkingConfig = {
-        ...typeof ir.thinking.budgetTokens === "number" ? { thinkingBudget: ir.thinking.budgetTokens } : {}
+        ...typeof budget === "number" ? { thinkingBudget: typeof gc.maxOutputTokens === "number" ? Math.min(budget, gc.maxOutputTokens) : budget } : {}
       };
     }
     if (Object.keys(gc).length > 0) out.generationConfig = gc;
@@ -3274,6 +3564,12 @@ data: [DONE]
       flush() {
         if (state.done) return [];
         const events = [];
+        const rest = state.buffer;
+        state.buffer = "";
+        if (rest.trim().length > 0) {
+          processGeminiFrame(rest, state, events);
+          if (state.done) return events;
+        }
         if (state.textBlockOpen && state.textBlockIndex != null) {
           events.push({ type: "content_block_stop", index: state.textBlockIndex });
           state.textBlockOpen = false;
@@ -3293,7 +3589,11 @@ data: [DONE]
   }
   function processGeminiFrame(frame, state, events) {
     const dataLine = extractGeminiDataLine(frame);
-    if (dataLine == null) return;
+    if (dataLine == null) {
+      const error = bareStreamError(frame);
+      if (error) pushGeminiStreamError(error, state, events);
+      return;
+    }
     let data;
     try {
       data = JSON.parse(dataLine);
@@ -3301,15 +3601,7 @@ data: [DONE]
       return;
     }
     if (data.error) {
-      state.done = true;
-      events.push({
-        type: "error",
-        error: {
-          type: data.error.status ?? "api_error",
-          message: data.error.message ?? "Gemini stream error",
-          ...typeof data.error.code === "number" ? { status: data.error.code } : {}
-        }
-      });
+      pushGeminiStreamError(data.error, state, events);
       return;
     }
     if (!state.started) {
@@ -3389,6 +3681,28 @@ data: [DONE]
     if (candidate.finishReason) {
       state.pendingFinish = mapGeminiFinishToIR(candidate.finishReason, state.hasToolUse);
     }
+  }
+  function pushGeminiStreamError(error, state, events) {
+    state.done = true;
+    events.push({
+      type: "error",
+      error: {
+        type: error.status ?? "api_error",
+        message: error.message ?? "Gemini stream error",
+        ...typeof error.code === "number" ? { status: error.code } : {}
+      }
+    });
+  }
+  function bareStreamError(frame) {
+    let parsed;
+    try {
+      parsed = JSON.parse(frame.trim());
+    } catch {
+      return null;
+    }
+    if (Array.isArray(parsed) && parsed.length === 1) parsed = parsed[0];
+    if (!isJsonObject(parsed) || !isJsonObject(parsed.error)) return null;
+    return parsed.error;
   }
   function extractGeminiDataLine(frame) {
     const lines = frame.split("\n");
@@ -3503,10 +3817,12 @@ data: [DONE]
               });
               state.done = true;
               break;
-            case "error":
-              out += emitFrame2({ error: { ...geminiError(event.error), message: event.error.message } });
+            case "error": {
+              const { code, status } = geminiError(event.error);
+              out += JSON.stringify({ error: { code, message: event.error.message, status } });
               state.done = true;
               break;
+            }
           }
         }
         return out;
@@ -3749,7 +4065,7 @@ data: [DONE]
       model: ctx.dstModel,
       messages
     };
-    if (typeof ir.maxTokens === "number") out.max_tokens = ir.maxTokens;
+    if (typeof ir.maxTokens === "number") out.max_tokens = capMaxTokens(ir.maxTokens, ctx.dstModel, ctx.dstProviderId);
     if (typeof ir.temperature === "number") out.temperature = ir.temperature;
     if (typeof ir.topP === "number") out.p = Math.min(0.99, Math.max(0.01, ir.topP));
     if (typeof ir.topK === "number") out.k = Math.min(500, Math.max(0, Math.round(ir.topK)));
@@ -3776,6 +4092,10 @@ data: [DONE]
           out.tool_choice = "REQUIRED";
           break;
         case "tool":
+          if (ir.tools?.length === 1 && ir.tools[0].name === ir.toolChoice.name) {
+            out.tool_choice = "REQUIRED";
+            break;
+          }
           throw new TranslationError(
             "UNSUPPORTED_FEATURE",
             "Cohere does not support forcing a specific tool by name."
@@ -3785,7 +4105,10 @@ data: [DONE]
           break;
       }
     }
-    const budget = ir.thinking?.enabled ? ir.thinking.budgetTokens : void 0;
+    let budget = ir.thinking?.enabled ? ir.thinking.budgetTokens : void 0;
+    if (typeof budget === "number" && typeof out.max_tokens === "number" && budget >= out.max_tokens) {
+      budget = out.max_tokens - 1;
+    }
     if (typeof budget === "number" && budget > 0) {
       out.thinking = { type: "enabled", token_budget: budget };
     }
@@ -4386,6 +4709,7 @@ data: [DONE]
     return dst.serializeRequest(ctx, ir);
   }
   function rewriteRequestModel(ctx, body) {
+    if (!isModelPinnableRequest(ctx.url)) return body;
     let parsed;
     try {
       parsed = JSON.parse(body);
@@ -4721,7 +5045,7 @@ data: [DONE]
       const ctx = {
         srcFamily,
         dstFamily,
-        srcModel,
+        srcModel: srcModel || void 0,
         dstModel,
         dstProviderId,
         isStreaming,
